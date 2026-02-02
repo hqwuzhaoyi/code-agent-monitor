@@ -1,0 +1,25 @@
+[package]
+name = "code-agent-monitor"
+version = "0.1.0"
+edition = "2021"
+description = "Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex)"
+authors = ["Shawn Ng"]
+license = "MIT"
+
+[dependencies]
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tokio = { version = "1.0", features = ["full"] }
+clap = { version = "4.0", features = ["derive"] }
+sysinfo = "0.31"
+chrono = "0.4"
+anyhow = "1.0"
+dirs = "5.0"
+
+[lib]
+name = "code_agent_monitor"
+path = "src/lib.rs"
+
+[[bin]]
+name = "cam"
+path = "src/main.rs"
