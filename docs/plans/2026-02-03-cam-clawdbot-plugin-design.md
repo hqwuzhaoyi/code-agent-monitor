@@ -1,6 +1,6 @@
 # CAM Clawdbot Plugin 设计文档
 
-> **状态**: 待实现
+> **状态**: 已完成
 > **日期**: 2026-02-03
 
 ## 背景
@@ -376,21 +376,37 @@ description: 监控和管理 AI 编码代理进程。使用 cam_* 工具操作�
 - 无 agent 场景：用户说"继续"时，询问是否恢复历史会话
 ```
 
-## 安装步骤
+## 开发与安装步骤
+
+### 开发阶段（在项目目录）
 
 ```bash
-# 1. 创建 plugin 目录
-mkdir -p ~/clawd/plugins/cam/src
+# 1. 在项目目录创建 plugin 结构
+mkdir -p /Users/admin/workspace/code-agent-monitor/plugins/cam/src
 
-# 2. 写入 package.json 和 index.ts
+# 2. 开发 package.json 和 src/index.ts
 
-# 3. 安装 plugin
+# 3. 本地测试（可选）
+cd /Users/admin/workspace/code-agent-monitor/plugins/cam
+npm install  # 如果有依赖
+```
+
+### 部署阶段（软链接到 clawd）
+
+```bash
+# 4. 创建软链接（推荐，修改后立即生效）
+ln -s /Users/admin/workspace/code-agent-monitor/plugins/cam ~/clawd/plugins/cam
+
+# 或者复制（需要每次修改后重新复制）
+# cp -r /Users/admin/workspace/code-agent-monitor/plugins/cam ~/clawd/plugins/
+
+# 5. 安装 plugin
 clawdbot plugins install ~/clawd/plugins/cam
 
-# 4. 验证 plugin 已加载
+# 6. 验证 plugin 已加载
 clawdbot plugins list | grep cam
 
-# 5. 诊断检查
+# 7. 诊断检查
 clawdbot plugins doctor
 ```
 
@@ -460,9 +476,9 @@ clawdbot plugins doctor
 
 ## 实现任务
 
-- [ ] Task 1: 创建 plugin 目录结构
-- [ ] Task 2: 实现 package.json
-- [ ] Task 3: 实现 src/index.ts（11 个工具）
-- [ ] Task 4: 更新 SKILL.md
-- [ ] Task 5: 安装并验证 plugin
-- [ ] Task 6: 执行完整测试用例
+- [x] Task 1: 创建 plugin 目录结构
+- [x] Task 2: 实现 package.json
+- [x] Task 3: 实现 src/index.ts（11 个工具）
+- [x] Task 4: 更新 SKILL.md
+- [x] Task 5: 安装并验证 plugin
+- [x] Task 6: 执行完整测试用例

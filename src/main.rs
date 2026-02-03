@@ -3,7 +3,7 @@
 //! 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)
 
 use clap::{Parser, Subcommand};
-use code_agent_monitor::{ProcessScanner, SessionManager, McpServer, Watcher};
+use code_agent_monitor::{ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest};
 use anyhow::Result;
 
 #[derive(Parser)]
@@ -126,11 +126,42 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Resume { session_id, name } => {
-            let manager = SessionManager::new();
-            let tmux_session = manager.resume_in_tmux(&session_id, name.as_deref())?;
+            let session_manager = SessionManager::new();
+
+            // 获取会话信息以获取 project_path
+            let session = session_manager.get_session(&session_id)?
+                .ok_or_else(|| anyhow::anyhow!("会话 {} 不存在", session_id))?;
+
+            let project_path = if session.project_path.is_empty() {
+                ".".to_string()
+            } else {
+                session.project_path
+            };
+
+            // 使用 AgentManager 启动，这样会被监控系统追踪
+            let agent_manager = AgentManager::new();
+            let response = agent_manager.start_agent(StartAgentRequest {
+                project_path,
+                agent_type: Some("claude".to_string()),
+                resume_session: Some(session_id.clone()),
+                initial_prompt: None,
+            })?;
+
+            // 如果用户指定了自定义名称，重命名 tmux session
+            let final_tmux_session = if let Some(custom_name) = name {
+                // 重命名 tmux session
+                let _ = std::process::Command::new("tmux")
+                    .args(["rename-session", "-t", &response.tmux_session, &custom_name])
+                    .output();
+                custom_name
+            } else {
+                response.tmux_session
+            };
+
             println!("已在 tmux 中恢复会话");
-            println!("tmux_session: {}", tmux_session);
-            println!("查看输出: /opt/homebrew/bin/tmux attach -t {}", tmux_session);
+            println!("agent_id: {}", response.agent_id);
+            println!("tmux_session: {}", final_tmux_session);
+            println!("查看输出: /opt/homebrew/bin/tmux attach -t {}", final_tmux_session);
         }
         Commands::Kill { pid } => {
             let scanner = ProcessScanner::new();
@@ -138,7 +169,7 @@ async fn main() -> Result<()> {
             println!("已终止进程: {}", pid);
         }
         Commands::Serve { port } => {
-            println!("启动 MCP Server 在端口 {}...", port);
+            eprintln!("启动 MCP Server 在端口 {}...", port);
             let server = McpServer::new(port);
             server.run().await?;
         }

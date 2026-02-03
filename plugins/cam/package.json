@@ -1,0 +1,12 @@
+{
+  "name": "cam",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "Code Agent Monitor plugin for Clawdbot",
+  "clawdbot": {
+    "extensions": ["./src/index.ts"]
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.47"
+  }
+}
