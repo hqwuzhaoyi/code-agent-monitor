@@ -200,6 +200,9 @@ impl SessionManager {
     }
 
     /// 在 tmux 中恢复会话，返回 tmux session 名称
+    ///
+    /// 注意：此方法仅创建 tmux 会话，不会注册到 AgentManager。
+    /// 如需被监控系统追踪，请使用 AgentManager::start_agent 并设置 resume_session。
     pub fn resume_in_tmux(&self, session_id: &str, tmux_session_name: Option<&str>) -> Result<String> {
         if let Some(session) = self.get_session(session_id)? {
             let project_path = if session.project_path.is_empty() {

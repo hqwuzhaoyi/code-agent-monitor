@@ -581,13 +581,30 @@ impl McpServer {
             }
             "resume_session" => {
                 let session_id = arguments["session_id"].as_str().ok_or_else(|| anyhow::anyhow!("缺少 session_id"))?;
-                let tmux_name = arguments["tmux_name"].as_str();
-                let manager = SessionManager::new();
-                let tmux_session = manager.resume_in_tmux(session_id, tmux_name)?;
+
+                // 获取会话信息以获取 project_path
+                let session_manager = SessionManager::new();
+                let session = session_manager.get_session(session_id)?
+                    .ok_or_else(|| anyhow::anyhow!("会话 {} 不存在", session_id))?;
+
+                let project_path = if session.project_path.is_empty() {
+                    ".".to_string()
+                } else {
+                    session.project_path
+                };
+
+                // 使用 AgentManager 启动，这样会被监控系统追踪
+                let response = self.agent_manager.start_agent(StartAgentRequest {
+                    project_path,
+                    agent_type: Some("claude".to_string()),
+                    resume_session: Some(session_id.to_string()),
+                    initial_prompt: None,
+                })?;
+
                 Ok(serde_json::json!({
                     "content": [{
                         "type": "text",
-                        "text": format!("已在 tmux 中恢复会话\nsession_id: {}\ntmux_session: {}\n\n使用 send_input 工具向此会话发送输入，tmux_session 参数填 {}", session_id, tmux_session, tmux_session)
+                        "text": format!("已在 tmux 中恢复会话\nsession_id: {}\nagent_id: {}\ntmux_session: {}\n\n使用 agent_send 工具向此会话发送输入，agent_id 参数填 {}", session_id, response.agent_id, response.tmux_session, response.agent_id)
                     }]
                 }))
             }
