@@ -394,6 +394,26 @@ fn detect_error_in_output(output: &str) -> Option<String> {
 
 ## 实现计划 (TDD)
 
+### 实现状态
+
+| 阶段 | 任务 | 状态 | 备注 |
+|------|------|------|------|
+| P0.1 | tmux 管理模块 | ✅ 完成 | `src/tmux.rs` |
+| P0.2 | Agent 管理模块 | ✅ 完成 | `src/agent.rs` |
+| P0.3 | MCP Server 接口 | ✅ 完成 | `src/mcp.rs` |
+| P0.4 | 端到端集成测试 | ⏳ 待做 | 需要 `tests/e2e.rs` |
+| P1.1 | tmux Session 状态监控 | ✅ 完成 | `src/agent_watcher.rs` |
+| P1.2 | JSONL 事件解析 | ✅ 完成 | `src/jsonl_parser.rs` |
+| P1.3 | 通知限流 | ✅ 完成 | `src/throttle.rs` |
+| P1.4 | 输入等待检测 | ✅ 完成 | `src/input_detector.rs` |
+| P1.5 | MCP agent/status 端点 | ✅ 完成 | 结构化状态返回 |
+| P2.1 | 修复 project_path 匹配 | ⏳ 待做 | `SessionManager::normalize_path()` |
+
+**最后更新:** 2026-02-03
+**提交:** a0f4d4e feat: implement P1 real-time monitoring features
+
+---
+
 ### P0 - 交互闭环
 
 #### 任务 0.1: tmux 管理模块
