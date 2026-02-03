@@ -17,3 +17,6 @@ watch_log.txt
 # Environment
 .env
 .env.local
+
+# Worktrees
+.worktrees/
