@@ -6,6 +6,10 @@ pub mod mcp;
 pub mod notify;
 pub mod tmux;
 pub mod agent;
+pub mod jsonl_parser;
+pub mod input_detector;
+pub mod agent_watcher;
+pub mod throttle;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -13,3 +17,7 @@ pub use mcp::McpServer;
 pub use notify::{Watcher, Notifier, NotifyEvent};
 pub use tmux::TmuxManager;
 pub use agent::{AgentManager, AgentRecord, AgentType, AgentStatus, StartAgentRequest, StartAgentResponse};
+pub use jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_target_from_input};
+pub use input_detector::{InputWaitDetector, InputWaitResult, InputWaitPattern};
+pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
+pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};

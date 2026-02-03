@@ -15,6 +15,7 @@ sysinfo = "0.31"
 chrono = "0.4"
 anyhow = "1.0"
 dirs = "5.0"
+regex = "1.10"
 
 [lib]
 name = "code_agent_monitor"

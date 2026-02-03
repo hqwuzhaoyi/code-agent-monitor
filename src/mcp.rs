@@ -4,6 +4,8 @@ use serde::{Deserialize, Serialize};
 use anyhow::Result;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::{ProcessScanner, SessionManager, AgentManager, StartAgentRequest};
+use crate::jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use};
+use crate::input_detector::InputWaitDetector;
 
 /// MCP 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -111,6 +113,7 @@ impl McpServer {
             "agent/list" => self.handle_agent_list(),
             "agent/logs" => self.handle_agent_logs(request.params),
             "agent/stop" => self.handle_agent_stop(request.params),
+            "agent/status" => self.handle_agent_status(request.params),
             _ => Err(anyhow::anyhow!("Method not found: {}", request.method)),
         };
 
@@ -220,6 +223,73 @@ impl McpServer {
 
         Ok(serde_json::json!({
             "success": true
+        }))
+    }
+
+    /// 处理 agent/status - 返回结构化的 agent 状态
+    fn handle_agent_status(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let agent_id = params["agent_id"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing agent_id"))?;
+
+        // 获取 agent 记录
+        let agent = self.agent_manager.get_agent(agent_id)?
+            .ok_or_else(|| anyhow::anyhow!("Agent not found: {}", agent_id))?;
+
+        // 获取终端输出
+        let terminal_output = self.agent_manager.get_logs(agent_id, 20).unwrap_or_default();
+
+        // 检测是否在等待输入
+        let input_detector = InputWaitDetector::new();
+        let wait_result = input_detector.detect_immediate(&terminal_output);
+
+        // 解析 JSONL 获取最近的工具调用和错误
+        let (recent_tools, recent_errors) = if let Some(ref jsonl_path) = agent.jsonl_path {
+            let mut parser = JsonlParser::new(jsonl_path);
+            let tools = parser.get_recent_tool_calls(5).unwrap_or_default();
+            let errors = parser.get_recent_errors(3).unwrap_or_default();
+            (tools, errors)
+        } else {
+            (Vec::new(), Vec::new())
+        };
+
+        // 格式化工具调用
+        let tools_formatted: Vec<String> = recent_tools.iter()
+            .filter_map(|e| format_tool_use(e))
+            .collect();
+
+        // 格式化错误
+        let errors_formatted: Vec<String> = recent_errors.iter()
+            .filter_map(|e| {
+                if let JsonlEvent::Error { message, .. } = e {
+                    Some(message.clone())
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // 确定状态
+        let status = if wait_result.is_waiting {
+            "waiting"
+        } else {
+            "running"
+        };
+
+        Ok(serde_json::json!({
+            "agent_id": agent.agent_id,
+            "agent_type": agent.agent_type.to_string(),
+            "project_path": agent.project_path,
+            "tmux_session": agent.tmux_session,
+            "status": status,
+            "waiting_for_input": wait_result.is_waiting,
+            "wait_pattern": wait_result.pattern_type.map(|p| format!("{:?}", p)),
+            "wait_context": if wait_result.is_waiting { Some(wait_result.context) } else { None },
+            "recent_tools": tools_formatted,
+            "recent_errors": errors_formatted,
+            "started_at": agent.started_at
         }))
     }
 
@@ -436,6 +506,20 @@ impl McpServer {
                     "required": ["agent_id"]
                 }),
             },
+            McpTool {
+                name: "agent_status".to_string(),
+                description: "获取 Agent 的结构化状态信息，包括是否等待输入、最近工具调用、错误等".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "agent_id": {
+                            "type": "string",
+                            "description": "CAM 分配的 Agent ID"
+                        }
+                    },
+                    "required": ["agent_id"]
+                }),
+            },
         ];
 
         Ok(serde_json::json!({ "tools": tools }))
@@ -569,6 +653,15 @@ impl McpServer {
             }
             "agent_stop" => {
                 let result = self.handle_agent_stop(Some(arguments))?;
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "agent_status" => {
+                let result = self.handle_agent_status(Some(arguments))?;
                 Ok(serde_json::json!({
                     "content": [{
                         "type": "text",
