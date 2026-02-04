@@ -71,3 +71,29 @@ command tmux send-keys -t cam-xxxxxxx C-c
 ```
 
 **注意**：`tmux send-keys` 发送文本和回车键时，必须分成两条命令。如果写成 `send-keys "message" Enter` 在一条命令中，Enter 可能被解释为换行符而不是回车键。
+
+### 自动状态通知
+
+CAM 支持自动推送 Agent 状态变化到 clawdbot：
+
+**自动启动**：当第一个 agent 启动时，watcher daemon 自动启动。
+
+**关键事件通知**：
+- Agent 退出/完成
+- 错误发生
+- 等待用户输入（支持中英文模式检测）
+
+**通知流程**：
+1. Watcher 检测到事件
+2. 通过 `openclaw agent --session-id main` 发送到 clawdbot
+3. clawdbot 询问用户如何处理
+4. 用户确认后，clawdbot 调用 `cam_agent_send` 执行
+
+**手动控制 watcher**：
+```bash
+# 查看 watcher 状态
+cat ~/.claude-monitor/watcher.pid
+
+# 手动停止 watcher
+kill $(cat ~/.claude-monitor/watcher.pid)
+```
