@@ -1,6 +1,7 @@
 //! Agent 管理模块 - Agent 生命周期管理
 
 use crate::tmux::TmuxManager;
+use crate::watcher_daemon::WatcherDaemon;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -214,6 +215,14 @@ impl AgentManager {
         let mut file = self.read_agents_file()?;
         file.agents.push(record);
         self.write_agents_file(&file)?;
+
+        // 确保 watcher daemon 在运行
+        let daemon = WatcherDaemon::new();
+        if let Ok(started) = daemon.ensure_started() {
+            if started {
+                eprintln!("已启动 watcher daemon");
+            }
+        }
 
         Ok(StartAgentResponse {
             agent_id,
