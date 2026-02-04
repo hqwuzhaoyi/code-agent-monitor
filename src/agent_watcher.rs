@@ -263,6 +263,21 @@ impl AgentWatcher {
     pub fn agent_manager_mut(&mut self) -> &mut AgentManager {
         &mut self.agent_manager
     }
+
+    /// 轮询一次并只返回关键事件（退出、错误、等待输入）
+    pub fn poll_critical_events(&mut self) -> Result<Vec<WatchEvent>> {
+        let all_events = self.poll_once()?;
+
+        Ok(all_events
+            .into_iter()
+            .filter(|e| matches!(
+                e,
+                WatchEvent::AgentExited { .. } |
+                WatchEvent::Error { .. } |
+                WatchEvent::WaitingForInput { .. }
+            ))
+            .collect())
+    }
 }
 
 impl Default for AgentWatcher {
@@ -350,5 +365,42 @@ mod tests {
         let formatted = format_watch_event(&event);
         assert!(formatted.contains("等待输入"));
         assert!(formatted.contains("Confirmation"));
+    }
+
+    #[test]
+    fn test_poll_critical_events_filters() {
+        // 这个测试验证过滤逻辑的正确性
+        let events = vec![
+            WatchEvent::ToolUse {
+                agent_id: "cam-123".to_string(),
+                tool_name: "Read".to_string(),
+                tool_target: None,
+                timestamp: None,
+            },
+            WatchEvent::AgentExited {
+                agent_id: "cam-123".to_string(),
+                project_path: "/tmp".to_string(),
+            },
+            WatchEvent::AgentResumed {
+                agent_id: "cam-123".to_string(),
+            },
+            WatchEvent::Error {
+                agent_id: "cam-123".to_string(),
+                message: "error".to_string(),
+                timestamp: None,
+            },
+        ];
+
+        let critical: Vec<_> = events
+            .into_iter()
+            .filter(|e| matches!(
+                e,
+                WatchEvent::AgentExited { .. } |
+                WatchEvent::Error { .. } |
+                WatchEvent::WaitingForInput { .. }
+            ))
+            .collect();
+
+        assert_eq!(critical.len(), 2);
     }
 }
