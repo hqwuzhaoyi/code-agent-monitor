@@ -194,3 +194,101 @@ openclaw agent --agent main --message "使用 cam_agent_stop 停止 cam-xxx"
 sleep 5
 cat ~/.claude-monitor/watcher.pid 2>/dev/null || echo "Watcher 已自动停止"
 ```
+
+### 真实 Claude Code 确认场景
+
+以下是 Claude Code 实际会产生的确认提示场景，可用于端到端测试：
+
+#### 场景 A: 文件写入确认
+
+```bash
+# Claude Code 在写入新文件时会询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：创建文件 /tmp/new-component.tsx，内容为一个简单的 React 组件"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Write to /tmp/new-component.tsx?         │
+# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 场景 B: Bash 命令执行确认
+
+```bash
+# Claude Code 执行 bash 命令时会询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：运行 npm install 安装依赖"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Run bash command?                        │
+# │ npm install                              │
+# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 场景 C: 文件编辑确认
+
+```bash
+# Claude Code 编辑现有文件时会显示 diff 并询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：在 package.json 中添加一个新的 script"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Apply changes to package.json?           │
+# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 场景 D: 文件删除确认
+
+```bash
+# Claude Code 删除文件时会询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：删除 /tmp/old-file.txt"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Delete /tmp/old-file.txt?                │
+# │ [Y]es / [N]o                             │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 场景 E: Git 操作确认
+
+```bash
+# Claude Code 执行 git 操作时会询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：提交当前的修改，commit message 为 fix: update config"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Run bash command?                        │
+# │ git commit -m "fix: update config"       │
+# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 场景 F: MCP 工具调用确认
+
+```bash
+# Claude Code 调用 MCP 工具时可能询问确认
+openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：使用浏览器打开 https://example.com"
+
+# 预期 Claude Code 输出类似：
+# ╭──────────────────────────────────────────╮
+# │ Allow mcp__browser__navigate?            │
+# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
+# ╰──────────────────────────────────────────╯
+```
+
+#### 检测到的模式汇总
+
+| 模式 | 示例 | 类型 |
+|------|------|------|
+| `[Y]es / [N]o` | Write to file? | Confirmation |
+| `[Y/n]` | Continue? [Y/n] | Confirmation |
+| `[y/N]` | Delete file? [y/N] | Confirmation |
+| `[是/否]` | 是否继续？[是/否] | Confirmation |
+| `确认？` | 确认删除？ | Confirmation |
+| `>\s*$` | Claude Code 主提示符 | ClaudePrompt |
+| `:\s*$` | 请输入文件名: | ColonPrompt |
+| `allow this action` | Do you want to allow this action? | PermissionRequest |
+| `是否授权` | 是否授权此操作？ | PermissionRequest |
