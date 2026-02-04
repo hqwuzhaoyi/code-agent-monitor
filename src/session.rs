@@ -234,10 +234,15 @@ impl SessionManager {
 
     /// 向 tmux 会话发送输入
     pub fn send_to_tmux(&self, tmux_session: &str, input: &str) -> Result<()> {
+        // 文本和 Enter 必须分开发送，否则 Enter 可能不生效
         Command::new("tmux")
-            .args(["send-keys", "-t", tmux_session, input, "Enter"])
-            .spawn()?;
-        
+            .args(["send-keys", "-t", tmux_session, input])
+            .status()?;
+
+        Command::new("tmux")
+            .args(["send-keys", "-t", tmux_session, "Enter"])
+            .status()?;
+
         Ok(())
     }
 

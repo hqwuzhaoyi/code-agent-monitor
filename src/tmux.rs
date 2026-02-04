@@ -41,14 +41,24 @@ impl TmuxManager {
 
     /// 向 session 发送按键
     pub fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
+        // 文本和 Enter 必须分开发送，否则 Enter 可能不生效
         let status = Command::new("tmux")
-            .args(["send-keys", "-t", session_name, keys, "Enter"])
+            .args(["send-keys", "-t", session_name, keys])
+            .status()?;
+
+        if !status.success() {
+            return Err(anyhow!("Failed to send keys to session: {}", session_name));
+        }
+
+        // 单独发送 Enter
+        let status = Command::new("tmux")
+            .args(["send-keys", "-t", session_name, "Enter"])
             .status()?;
 
         if status.success() {
             Ok(())
         } else {
-            Err(anyhow!("Failed to send keys to session: {}", session_name))
+            Err(anyhow!("Failed to send Enter to session: {}", session_name))
         }
     }
 
