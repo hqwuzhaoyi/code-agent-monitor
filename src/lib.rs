@@ -10,6 +10,7 @@ pub mod jsonl_parser;
 pub mod input_detector;
 pub mod agent_watcher;
 pub mod throttle;
+pub mod openclaw_notifier;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -21,3 +22,4 @@ pub use jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_ta
 pub use input_detector::{InputWaitDetector, InputWaitResult, InputWaitPattern};
 pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
+pub use openclaw_notifier::OpenclawNotifier;
