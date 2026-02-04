@@ -11,6 +11,7 @@ pub mod input_detector;
 pub mod agent_watcher;
 pub mod throttle;
 pub mod openclaw_notifier;
+pub mod watcher_daemon;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -23,3 +24,4 @@ pub use input_detector::{InputWaitDetector, InputWaitResult, InputWaitPattern};
 pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use openclaw_notifier::OpenclawNotifier;
+pub use watcher_daemon::WatcherDaemon;
