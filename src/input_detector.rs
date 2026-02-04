@@ -57,21 +57,33 @@ impl InputWaitDetector {
         let patterns = vec![
             // Claude Code 的 > 提示符（行首或空白后）
             (Regex::new(r"(?m)^>\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
-            // 确认提示
+            // 确认提示 - 英文
             (Regex::new(r"\[Y/n\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"\[y/N\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"\[yes/no\]").unwrap(), InputWaitPattern::Confirmation),
-            // 按回车继续
+            // 确认提示 - 中文
+            (Regex::new(r"\[是/否\]").unwrap(), InputWaitPattern::Confirmation),
+            (Regex::new(r"确认[？?]").unwrap(), InputWaitPattern::Confirmation),
+            // 按回车继续 - 英文
             (Regex::new(r"(?i)press enter").unwrap(), InputWaitPattern::PressEnter),
             (Regex::new(r"(?i)press any key").unwrap(), InputWaitPattern::PressEnter),
-            // 继续执行提示
+            // 按回车继续 - 中文
+            (Regex::new(r"按.*继续").unwrap(), InputWaitPattern::PressEnter),
+            (Regex::new(r"回车继续").unwrap(), InputWaitPattern::PressEnter),
+            // 继续执行提示 - 英文
             (Regex::new(r"(?i)continue\?").unwrap(), InputWaitPattern::Continue),
             (Regex::new(r"(?i)proceed\?").unwrap(), InputWaitPattern::Continue),
-            // 权限请求（Claude Code 特有）
+            // 继续执行提示 - 中文
+            (Regex::new(r"是否继续").unwrap(), InputWaitPattern::Continue),
+            (Regex::new(r"继续执行[？?]").unwrap(), InputWaitPattern::Continue),
+            // 权限请求 - 英文
             (Regex::new(r"(?i)allow this action").unwrap(), InputWaitPattern::PermissionRequest),
             (Regex::new(r"(?i)do you want to").unwrap(), InputWaitPattern::PermissionRequest),
-            // 冒号结尾的提示（最后一行以冒号结尾）
-            (Regex::new(r":\s*$").unwrap(), InputWaitPattern::ColonPrompt),
+            // 权限请求 - 中文
+            (Regex::new(r"允许.*操作").unwrap(), InputWaitPattern::PermissionRequest),
+            (Regex::new(r"是否授权").unwrap(), InputWaitPattern::PermissionRequest),
+            // 冒号结尾的提示（最后一行以冒号结尾）- 英文和中文
+            (Regex::new(r"[：:]\s*$").unwrap(), InputWaitPattern::ColonPrompt),
         ];
 
         Self {
