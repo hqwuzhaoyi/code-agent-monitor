@@ -9,7 +9,7 @@
 - **Agent 生命周期** - 启动、停止、发送输入到代理
 - **状态检测** - 检测代理是否等待用户输入
 - **MCP 服务器** - 提供 MCP 协议接口供其他工具调用
-- **Clawdbot 集成** - 通过自然语言管理代理
+- **OpenClaw 集成** - 通过自然语言管理代理
 
 ## 安装
 
@@ -43,19 +43,19 @@ cam kill <pid>
 cam serve
 ```
 
-## Clawdbot 集成
+## OpenClaw 集成
 
-通过 Clawdbot 使用自然语言管理代理：
+通过 OpenClaw 使用自然语言管理代理：
 
 ```bash
 # 安装 plugin
-clawdbot plugins install -l ~/clawd/plugins/cam
+openclaw plugins install --link /Users/admin/workspace/code-agent-monitor/plugins/cam
 
 # 使用自然语言
-clawdbot agent --agent main --message "现在跑着什么"
-clawdbot agent --agent main --message "在 /tmp 启动一个 Claude"
-clawdbot agent --agent main --message "什么情况"
-clawdbot agent --agent main --message "停掉"
+openclaw agent --agent main --message "现在跑着什么"
+openclaw agent --agent main --message "在 /tmp 启动一个 Claude"
+openclaw agent --agent main --message "什么情况"
+openclaw agent --agent main --message "停掉"
 ```
 
 详见 [plugins/cam/README.md](plugins/cam/README.md)
@@ -98,7 +98,7 @@ code-agent-monitor/
 │   ├── input_detector.rs # 输入等待检测
 │   └── jsonl_parser.rs  # JSONL 解析
 ├── plugins/
-│   └── cam/             # Clawdbot plugin
+│   └── cam/             # OpenClaw plugin
 ├── skills/
 │   └── SKILL.md         # Claude Code skill
 └── docs/

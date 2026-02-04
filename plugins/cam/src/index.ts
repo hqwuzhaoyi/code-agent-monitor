@@ -1,7 +1,11 @@
 import { Type } from "@sinclair/typebox";
 import { spawn } from "child_process";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 
-const CAM_BIN = "/Users/admin/workspace/code-agent-monitor/target/release/cam";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const CAM_BIN = join(__dirname, "..", "bin", "cam");
 
 // 通用 MCP 调用函数
 async function callCamMcp(toolName: string, args: object): Promise<object> {
@@ -137,7 +141,7 @@ export default function (api) {
 
   api.registerTool({
     name: "cam_agent_logs",
-    description: "获取 agent 的终端输出日志。只用于查看，不发送任何输入。",
+    description: "获取 agent 的终端输出日志。只用于查看，不发送任何输入。注意：终端中显示的百分比（如 23%）是 context window 占用率，不是任务进度。占用率高表示会话 context 快满了，与任务是否完成无关。",
     parameters: Type.Object({
       agent_id: Type.String({ description: "Agent ID" }),
       lines: Type.Optional(Type.Number({ description: "返回行数，默认 50" })),

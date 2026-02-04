@@ -61,9 +61,9 @@ enum Commands {
         /// 轮询间隔（秒）
         #[arg(long, short, default_value = "5")]
         interval: u64,
-        /// 使用 Clawdbot 发送通知
+        /// 使用 OpenClaw 发送通知
         #[arg(long)]
-        clawdbot: bool,
+        openclaw: bool,
     },
     /// 查看会话的最近消息
     Logs {
@@ -173,8 +173,8 @@ async fn main() -> Result<()> {
             let server = McpServer::new(port);
             server.run().await?;
         }
-        Commands::Watch { interval, clawdbot } => {
-            let mut watcher = Watcher::new(interval, clawdbot);
+        Commands::Watch { interval, openclaw } => {
+            let mut watcher = Watcher::new(interval, openclaw);
             watcher.watch().await?;
         }
         Commands::Logs { session_id, limit } => {

@@ -2,9 +2,12 @@
   "name": "cam",
   "version": "1.0.0",
   "type": "module",
-  "description": "Code Agent Monitor plugin for Clawdbot",
-  "clawdbot": {
+  "description": "Code Agent Monitor plugin for OpenClaw",
+  "openclaw": {
     "extensions": ["./src/index.ts"]
+  },
+  "scripts": {
+    "build:cam": "cd ../.. && cargo build --release && cp target/release/cam plugins/cam/bin/"
   },
   "dependencies": {
     "@sinclair/typebox": "0.34.47"

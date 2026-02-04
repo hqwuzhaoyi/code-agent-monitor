@@ -21,38 +21,38 @@ pub enum NotifyEvent {
 
 /// 通知器
 pub struct Notifier {
-    /// 是否使用 Clawdbot 发送通知
-    use_clawdbot: bool,
-    /// Clawdbot 命令路径
-    clawdbot_cmd: String,
+    /// 是否使用 OpenClaw 发送通知
+    use_openclaw: bool,
+    /// OpenClaw 命令路径
+    openclaw_cmd: String,
 }
 
 impl Notifier {
-    pub fn new(use_clawdbot: bool) -> Self {
-        // 尝试查找 clawdbot 路径
-        let clawdbot_cmd = Self::find_clawdbot_path();
+    pub fn new(use_openclaw: bool) -> Self {
+        // 尝试查找 openclaw 路径
+        let openclaw_cmd = Self::find_openclaw_path();
         Self {
-            use_clawdbot,
-            clawdbot_cmd,
+            use_openclaw,
+            openclaw_cmd,
         }
     }
 
-    /// 查找 clawdbot 可执行文件路径
-    fn find_clawdbot_path() -> String {
+    /// 查找 openclaw 可执行文件路径
+    fn find_openclaw_path() -> String {
         let possible_paths = [
-            "/Users/admin/.volta/bin/clawdbot",
-            "/usr/local/bin/clawdbot",
-            "/opt/homebrew/bin/clawdbot",
-            "clawdbot",
+            "/Users/admin/.volta/bin/openclaw",
+            "/opt/homebrew/bin/openclaw",
+            "/usr/local/bin/openclaw",
+            "openclaw",
         ];
-        
+
         for path in possible_paths {
-            if std::path::Path::new(path).exists() || path == "clawdbot" {
+            if std::path::Path::new(path).exists() || path == "openclaw" {
                 return path.to_string();
             }
         }
-        
-        "clawdbot".to_string()
+
+        "openclaw".to_string()
     }
 
     /// 发送通知
@@ -77,8 +77,8 @@ impl Notifier {
 
     /// 发送自定义文本通知
     pub fn notify_text(&self, message: &str) -> Result<()> {
-        if self.use_clawdbot {
-            self.send_via_clawdbot(message)?;
+        if self.use_openclaw {
+            self.send_via_openclaw(message)?;
         } else {
             println!("[通知] {}", message);
         }
@@ -86,10 +86,10 @@ impl Notifier {
         Ok(())
     }
 
-    /// 通过 Clawdbot 发送通知
-    fn send_via_clawdbot(&self, message: &str) -> Result<()> {
-        // 使用 clawdbot message send 发送 Telegram 消息
-        let result = Command::new(&self.clawdbot_cmd)
+    /// 通过 OpenClaw 发送通知
+    fn send_via_openclaw(&self, message: &str) -> Result<()> {
+        // 使用 openclaw message send 发送 Telegram 消息
+        let result = Command::new(&self.openclaw_cmd)
             .args(["message", "send", "--channel", "telegram", "--target", "1440537501", "--message", message])
             .output();
 
@@ -97,13 +97,13 @@ impl Notifier {
             Ok(output) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("Clawdbot 通知失败: {}", stderr);
+                    eprintln!("OpenClaw 通知失败: {}", stderr);
                     // 回退到控制台输出
                     println!("[通知] {}", message);
                 }
             }
             Err(e) => {
-                eprintln!("无法执行 Clawdbot: {}", e);
+                eprintln!("无法执行 OpenClaw: {}", e);
                 // 回退到控制台输出
                 println!("[通知] {}", message);
             }
@@ -124,10 +124,10 @@ pub struct Watcher {
 }
 
 impl Watcher {
-    pub fn new(interval_secs: u64, use_clawdbot: bool) -> Self {
+    pub fn new(interval_secs: u64, use_openclaw: bool) -> Self {
         Self {
             interval_secs,
-            notifier: Notifier::new(use_clawdbot),
+            notifier: Notifier::new(use_openclaw),
             last_agents: HashMap::new(),
         }
     }
