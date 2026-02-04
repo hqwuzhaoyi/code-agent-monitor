@@ -1,9 +1,12 @@
 //! Code Agent Monitor CLI
-//! 
+//!
 //! 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)
 
 use clap::{Parser, Subcommand};
-use code_agent_monitor::{ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest};
+use code_agent_monitor::{
+    ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
+    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon
+};
 use anyhow::Result;
 
 #[derive(Parser)]
@@ -72,6 +75,21 @@ enum Commands {
         /// 显示最近 N 条消息
         #[arg(long, short, default_value = "5")]
         limit: usize,
+    },
+    /// 后台监控 daemon（内部使用，由 agent_start 自动启动）
+    WatchDaemon {
+        /// 轮询间隔（秒）
+        #[arg(long, short, default_value = "3")]
+        interval: u64,
+    },
+    /// 接收 Claude Code Hook 通知（内部使用）
+    Notify {
+        /// 事件类型
+        #[arg(long)]
+        event: String,
+        /// Agent ID
+        #[arg(long)]
+        agent_id: Option<String>,
     },
 }
 
@@ -180,7 +198,7 @@ async fn main() -> Result<()> {
         Commands::Logs { session_id, limit } => {
             let manager = SessionManager::new();
             let messages = manager.get_session_logs(&session_id, limit)?;
-            
+
             if messages.is_empty() {
                 println!("未找到会话 {} 的消息", session_id);
             } else {
@@ -190,6 +208,63 @@ async fn main() -> Result<()> {
                     println!("{}\n", msg.content);
                 }
             }
+        }
+        Commands::WatchDaemon { interval } => {
+            use std::time::Duration;
+            use tokio::time::sleep;
+
+            let daemon = WatcherDaemon::new();
+            let notifier = OpenclawNotifier::new();
+            let mut watcher = AgentWatcher::new();
+
+            // 写入当前进程 PID
+            daemon.write_pid(std::process::id())?;
+
+            eprintln!("CAM Watcher Daemon 启动，轮询间隔: {}秒", interval);
+
+            loop {
+                // 检查是否还有 agent 在运行
+                let agents = watcher.agent_manager().list_agents()?;
+                if agents.is_empty() {
+                    eprintln!("所有 agent 已退出，watcher 停止");
+                    daemon.remove_pid()?;
+                    break;
+                }
+
+                // 轮询一次
+                let events = watcher.poll_once()?;
+
+                // 只处理关键事件
+                for event in events {
+                    match &event {
+                        WatchEvent::AgentExited { agent_id, project_path } => {
+                            eprintln!("检测到 agent 退出: {}", agent_id);
+                            let _ = notifier.send_event(agent_id, "AgentExited", project_path, "");
+                        }
+                        WatchEvent::Error { agent_id, message, .. } => {
+                            eprintln!("检测到错误: {} - {}", agent_id, message);
+                            let _ = notifier.send_event(agent_id, "Error", "", message);
+                        }
+                        WatchEvent::WaitingForInput { agent_id, pattern_type, context } => {
+                            eprintln!("检测到等待输入: {} ({})", agent_id, pattern_type);
+                            let _ = notifier.send_event(agent_id, "WaitingForInput", pattern_type, context);
+                        }
+                        _ => {} // 忽略其他事件
+                    }
+                }
+
+                sleep(Duration::from_secs(interval)).await;
+            }
+        }
+        Commands::Notify { event, agent_id } => {
+            let notifier = OpenclawNotifier::new();
+            let agent_id = agent_id.unwrap_or_else(|| "unknown".to_string());
+
+            // 从 stdin 读取 hook 输入（如果有）
+            let context = std::io::read_to_string(std::io::stdin()).unwrap_or_default();
+
+            notifier.send_event(&agent_id, &event, "", &context)?;
+            eprintln!("已发送通知: {} - {}", agent_id, event);
         }
     }
 
