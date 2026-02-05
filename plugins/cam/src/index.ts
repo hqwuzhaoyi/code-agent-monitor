@@ -8,7 +8,7 @@ const __dirname = dirname(__filename);
 const CAM_BIN = join(__dirname, "..", "bin", "cam");
 
 // 通用 MCP 调用函数
-async function callCamMcp(toolName: string, args: object): Promise<object> {
+async function callCamMcp(toolName: string, args: object, timeoutMs: number = 10000): Promise<object> {
   return new Promise((resolve, reject) => {
     const request = JSON.stringify({
       jsonrpc: "2.0",
@@ -17,7 +17,7 @@ async function callCamMcp(toolName: string, args: object): Promise<object> {
       params: { name: toolName, arguments: args }
     });
 
-    const proc = spawn(CAM_BIN, ["serve"], { timeout: 5000 });
+    const proc = spawn(CAM_BIN, ["serve"], { timeout: timeoutMs });
     let stdout = "";
     let stderr = "";
 
@@ -58,11 +58,12 @@ export default function (api) {
     }),
     async execute(_id, params) {
       try {
+        // agent_start 需要更长的超时时间，因为要等待 Claude Code 就绪（最多 30 秒）
         const result = await callCamMcp("agent_start", {
           agent_type: params.agent_type || "claude",
           project_path: params.project_path,
           initial_prompt: params.prompt,  // MCP 工具期望 initial_prompt
-        });
+        }, 45000);  // 45 秒超时
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (error) {
         api.logger.error("cam_agent_start failed", { error, params });
@@ -185,7 +186,8 @@ export default function (api) {
     }),
     async execute(_id, params) {
       try {
-        const result = await callCamMcp("resume_session", params);
+        // resume_session 也需要等待 Claude Code 就绪
+        const result = await callCamMcp("resume_session", params, 45000);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (error) {
         api.logger.error("cam_resume_session failed", { error, params });
