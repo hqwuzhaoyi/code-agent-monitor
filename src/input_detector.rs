@@ -61,6 +61,9 @@ impl InputWaitDetector {
             (Regex::new(r"\[Y/n\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"\[y/N\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"\[yes/no\]").unwrap(), InputWaitPattern::Confirmation),
+            // Claude Code 实际格式: [Y]es / [N]o / [A]lways / [D]on't ask
+            (Regex::new(r"\[Y\]es\s*/\s*\[N\]o").unwrap(), InputWaitPattern::Confirmation),
+            (Regex::new(r"\[A\]lways").unwrap(), InputWaitPattern::Confirmation),
             // 确认提示 - 中文
             (Regex::new(r"\[是/否\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"确认[？?]").unwrap(), InputWaitPattern::Confirmation),

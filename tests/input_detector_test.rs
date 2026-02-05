@@ -65,3 +65,26 @@ fn test_detect_chinese_confirm_question() {
     assert!(result.is_waiting);
     assert_eq!(result.pattern_type, Some(InputWaitPattern::Confirmation));
 }
+
+#[test]
+fn test_detect_claude_code_yes_no_format() {
+    let detector = InputWaitDetector::new();
+    // Claude Code 实际使用的格式
+    let output = "Write to /tmp/test.txt? [Y]es / [N]o / [A]lways / [D]on't ask";
+
+    let result = detector.detect_immediate(output);
+
+    assert!(result.is_waiting, "Should detect Claude Code [Y]es / [N]o format");
+    assert_eq!(result.pattern_type, Some(InputWaitPattern::Confirmation));
+}
+
+#[test]
+fn test_detect_claude_code_always_format() {
+    let detector = InputWaitDetector::new();
+    let output = "Run bash command? [Y]es / [N]o / [A]lways";
+
+    let result = detector.detect_immediate(output);
+
+    assert!(result.is_waiting, "Should detect [A]lways format");
+    assert_eq!(result.pattern_type, Some(InputWaitPattern::Confirmation));
+}
