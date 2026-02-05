@@ -61,7 +61,7 @@ export default function (api) {
         const result = await callCamMcp("agent_start", {
           agent_type: params.agent_type || "claude",
           project_path: params.project_path,
-          prompt: params.prompt,
+          initial_prompt: params.prompt,  // MCP 工具期望 initial_prompt
         });
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (error) {

@@ -108,7 +108,7 @@ impl InputWaitDetector {
             if output == last_output {
                 // 输出没变化，检查是否超过空闲阈值
                 if let Some(last_change) = self.last_change_times.get(session_name) {
-                    now.duration_since(*last_change) > self.idle_threshold
+                    now.duration_since(*last_change) >= self.idle_threshold
                 } else {
                     false
                 }

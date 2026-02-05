@@ -192,10 +192,26 @@ impl AgentManager {
         // 创建 tmux session
         self.tmux.create_session(&tmux_session, &request.project_path, &command)?;
 
-        // 如果有初始 prompt，发送它
+        // 如果有初始 prompt，等待 Claude Code 就绪后发送
         if let Some(prompt) = &request.initial_prompt {
-            std::thread::sleep(std::time::Duration::from_millis(500));
-            self.tmux.send_keys(&tmux_session, prompt)?;
+            // 循环检测 Claude Code 是否显示 > 提示符
+            let max_attempts = 30; // 最多等待 30 秒
+            let mut ready = false;
+            for _ in 0..max_attempts {
+                std::thread::sleep(std::time::Duration::from_secs(1));
+                if let Ok(output) = self.tmux.capture_pane(&tmux_session, 20) {
+                    // 检测 Claude Code 就绪的标志：包含 > 提示符或欢迎信息
+                    if output.contains(">") || output.contains("Welcome to") || output.contains("Claude Code") {
+                        ready = true;
+                        // 额外等待 1 秒确保完全就绪
+                        std::thread::sleep(std::time::Duration::from_secs(1));
+                        break;
+                    }
+                }
+            }
+            if ready {
+                self.tmux.send_keys(&tmux_session, prompt)?;
+            }
         }
 
         // 保存到 agents.json
@@ -337,6 +353,52 @@ impl AgentManager {
         let agents = self.list_agents()?;
         Ok(agents.into_iter().find(|a| a.agent_id == agent_id))
     }
+
+    /// 通过 session_id 查找 Agent
+    pub fn find_agent_by_session_id(&self, session_id: &str) -> Result<Option<AgentRecord>> {
+        let agents = self.list_agents()?;
+        Ok(agents.into_iter().find(|a| a.session_id.as_deref() == Some(session_id)))
+    }
+
+    /// 通过 cwd 更新 Agent 的 session_id
+    /// 用于在 SessionStart hook 触发时建立 session_id 与 agent_id 的映射
+    pub fn update_session_id_by_cwd(&self, cwd: &str, session_id: &str) -> Result<bool> {
+        let mut file = self.read_agents_file()?;
+        let mut updated = false;
+
+        // 使用规范化路径进行比较（解析符号链接）
+        let cwd_canonical = canonicalize_path(cwd);
+
+        for agent in &mut file.agents {
+            let agent_path_canonical = canonicalize_path(&agent.project_path);
+            if agent_path_canonical == cwd_canonical && agent.session_id.is_none() {
+                agent.session_id = Some(session_id.to_string());
+                updated = true;
+                break;
+            }
+        }
+
+        if updated {
+            self.write_agents_file(&file)?;
+        }
+
+        Ok(updated)
+    }
+
+    /// 通过 cwd 查找 Agent
+    pub fn find_agent_by_cwd(&self, cwd: &str) -> Result<Option<AgentRecord>> {
+        let agents = self.list_agents()?;
+        let cwd_canonical = canonicalize_path(cwd);
+        Ok(agents.into_iter().find(|a| canonicalize_path(&a.project_path) == cwd_canonical))
+    }
+}
+
+/// 规范化路径，解析符号链接
+/// 如果解析失败（路径不存在等），返回去除尾部斜杠的原始路径
+fn canonicalize_path(path: &str) -> String {
+    fs::canonicalize(path)
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.trim_end_matches('/').to_string())
 }
 
 impl Default for AgentManager {

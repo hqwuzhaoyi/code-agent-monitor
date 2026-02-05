@@ -79,6 +79,54 @@ CAM 支持自动推送 Agent 状态变化到 clawdbot：
 | 权限请求 | `allow this action`, `是否授权` |
 | 冒号提示 | `请输入文件名:`, `Enter your name:` |
 
+### 配置 Claude Code Hooks
+
+为了让 Claude Code 在空闲时自动通知 CAM，需要配置 hooks。
+
+**自动配置（推荐）**：
+
+```bash
+# 获取 CAM plugin 安装路径
+CAM_BIN=$(openclaw plugins list --json | jq -r '.[] | select(.name == "cam") | .path')/bin/cam
+
+# 添加 hooks 到 Claude Code 配置
+cat ~/.claude/settings.json | jq --arg cam "$CAM_BIN" '.hooks = {
+  "Notification": [{
+    "matcher": "idle_prompt",
+    "hooks": [{
+      "type": "command",
+      "command": ($cam + " notify --event idle_prompt --agent-id $SESSION_ID")
+    }]
+  }]
+}' > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+```
+
+**手动配置**：
+
+在 `~/.claude/settings.json` 中添加：
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<CAM_PLUGIN_PATH>/bin/cam notify --event idle_prompt --agent-id $SESSION_ID"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+将 `<CAM_PLUGIN_PATH>` 替换为你的 CAM plugin 安装路径，例如：
+- 通过 `openclaw plugins install --link` 安装：使用链接的源目录路径
+- 查看安装路径：`openclaw plugins list`
+
 ### 手动控制 Watcher
 
 ```bash

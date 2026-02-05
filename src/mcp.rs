@@ -520,6 +520,20 @@ impl McpServer {
                     "required": ["agent_id"]
                 }),
             },
+            McpTool {
+                name: "agent_by_session_id".to_string(),
+                description: "通过 Claude Code session_id 查找对应的 CAM Agent".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "session_id": {
+                            "type": "string",
+                            "description": "Claude Code 的 session_id"
+                        }
+                    },
+                    "required": ["session_id"]
+                }),
+            },
         ];
 
         Ok(serde_json::json!({ "tools": tools }))
@@ -679,6 +693,33 @@ impl McpServer {
             }
             "agent_status" => {
                 let result = self.handle_agent_status(Some(arguments))?;
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "agent_by_session_id" => {
+                let session_id = arguments.get("session_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 session_id 参数"))?;
+
+                let result = if let Some(agent) = self.agent_manager.find_agent_by_session_id(session_id)? {
+                    serde_json::json!({
+                        "found": true,
+                        "agent_id": agent.agent_id,
+                        "tmux_session": agent.tmux_session,
+                        "project_path": agent.project_path,
+                        "status": agent.status
+                    })
+                } else {
+                    serde_json::json!({
+                        "found": false,
+                        "session_id": session_id
+                    })
+                };
+
                 Ok(serde_json::json!({
                     "content": [{
                         "type": "text",

@@ -20,3 +20,5 @@ watch_log.txt
 
 # Worktrees
 .worktrees/
+
+docs/plans

@@ -54,7 +54,62 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> String {
+        // 尝试解析 JSON context 获取更多信息
+        let json: Option<serde_json::Value> = serde_json::from_str(context).ok();
+
         match event_type {
+            "permission_request" => {
+                // 提取工具名和输入
+                let tool_name = json.as_ref()
+                    .and_then(|j| j.get("tool_name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let tool_input = json.as_ref()
+                    .and_then(|j| j.get("tool_input"))
+                    .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
+                    .unwrap_or_default();
+                let cwd = json.as_ref()
+                    .and_then(|j| j.get("cwd"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                format!(
+                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝",
+                    agent_id, tool_name, cwd, tool_input
+                )
+            }
+            "notification" => {
+                let message = json.as_ref()
+                    .and_then(|j| j.get("message"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let notification_type = json.as_ref()
+                    .and_then(|j| j.get("notification_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                if notification_type == "idle_prompt" {
+                    format!("⏸️ [CAM] {} 等待输入\n\n{}", agent_id, message)
+                } else if notification_type == "permission_prompt" {
+                    format!("🔐 [CAM] {} 需要权限确认\n\n{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝", agent_id, message)
+                } else {
+                    format!("📢 [CAM] {} 通知\n\n{}", agent_id, message)
+                }
+            }
+            "session_start" => {
+                let cwd = json.as_ref()
+                    .and_then(|j| j.get("cwd"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                format!("🚀 [CAM] {} 已启动\n\n目录: {}", agent_id, cwd)
+            }
+            "session_end" | "stop" => {
+                let cwd = json.as_ref()
+                    .and_then(|j| j.get("cwd"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                format!("✅ [CAM] {} 已停止\n\n目录: {}", agent_id, cwd)
+            }
             "WaitingForInput" => {
                 format!(
                     "⏸️ [CAM] {} 等待输入\n\n类型: {}\n上下文:\n---\n{}\n---\n\n请问如何响应？",

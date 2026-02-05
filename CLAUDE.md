@@ -72,6 +72,37 @@ command tmux send-keys -t cam-xxxxxxx C-c
 
 **注意**：`tmux send-keys` 发送文本和回车键时，必须分成两条命令。如果写成 `send-keys "message" Enter` 在一条命令中，Enter 可能被解释为换行符而不是回车键。
 
+### 配置 Claude Code Hooks
+
+为了让 Claude Code 在空闲时自动通知 CAM，需要配置 hooks。
+
+**自动配置**：
+
+```bash
+# 获取 CAM plugin 安装路径
+CAM_BIN=$(openclaw plugins list --json | jq -r '.[] | select(.name == "cam") | .path')/bin/cam
+
+# 添加 hooks 到 Claude Code 配置（保留现有配置）
+jq --arg cam "$CAM_BIN" '.hooks.Notification = [{
+  "matcher": "idle_prompt",
+  "hooks": [{"type": "command", "command": ($cam + " notify --event idle_prompt --agent-id $SESSION_ID")}]
+}]' ~/.claude/settings.json > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+```
+
+**手动配置**：在 `~/.claude/settings.json` 的 `hooks` 字段添加：
+
+```json
+"hooks": {
+  "Notification": [{
+    "matcher": "idle_prompt",
+    "hooks": [{
+      "type": "command",
+      "command": "<CAM_PLUGIN_PATH>/bin/cam notify --event idle_prompt --agent-id $SESSION_ID"
+    }]
+  }]
+}
+```
+
 ### 自动状态通知
 
 CAM 支持自动推送 Agent 状态变化到 clawdbot：

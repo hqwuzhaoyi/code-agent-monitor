@@ -257,14 +257,100 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Notify { event, agent_id } => {
-            let notifier = OpenclawNotifier::new();
-            let agent_id = agent_id.unwrap_or_else(|| "unknown".to_string());
+            use std::fs::OpenOptions;
+            use std::io::Write;
 
-            // 从 stdin 读取 hook 输入（如果有）
+            let log_path = dirs::home_dir()
+                .unwrap_or_else(|| std::path::PathBuf::from("."))
+                .join(".claude-monitor")
+                .join("hook.log");
+
+            let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+
+            // 从 stdin 读取 hook 输入（Claude Code 通过 stdin 传递 JSON）
             let context = std::io::read_to_string(std::io::stdin()).unwrap_or_default();
 
-            notifier.send_event(&agent_id, &event, "", &context)?;
-            eprintln!("已发送通知: {} - {}", agent_id, event);
+            // 解析 JSON 获取 session_id 和 cwd
+            let json: Option<serde_json::Value> = serde_json::from_str(&context).ok();
+            let session_id = json.as_ref()
+                .and_then(|j| j.get("session_id"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+            let cwd = json.as_ref()
+                .and_then(|j| j.get("cwd"))
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string());
+
+            let agent_manager = AgentManager::new();
+
+            // 如果是 session_start 事件，建立 session_id 与 agent_id 的映射
+            if event == "session_start" {
+                if let (Some(ref sid), Some(ref cwd_path)) = (&session_id, &cwd) {
+                    match agent_manager.update_session_id_by_cwd(cwd_path, sid) {
+                        Ok(true) => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ✅ Mapped session_id {} to agent by cwd {}", timestamp, sid, cwd_path);
+                            }
+                        }
+                        Ok(false) => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ⚠️ No matching agent found for cwd {}", timestamp, cwd_path);
+                            }
+                        }
+                        Err(e) => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ❌ Failed to map session_id: {}", timestamp, e);
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 查找对应的 agent_id（优先通过 session_id，其次通过 cwd）
+            let resolved_agent_id = if let Some(ref sid) = session_id {
+                // 先尝试通过 session_id 查找
+                if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(sid) {
+                    agent.agent_id
+                } else if let Some(ref cwd_path) = cwd {
+                    // 再尝试通过 cwd 查找
+                    if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
+                        agent.agent_id
+                    } else {
+                        // 回退到 session_id
+                        sid.clone()
+                    }
+                } else {
+                    sid.clone()
+                }
+            } else {
+                agent_id.unwrap_or_else(|| "unknown".to_string())
+            };
+
+            // 记录 hook 触发日志
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                let _ = writeln!(file, "[{}] Hook triggered: event={}, agent_id={}, session_id={:?}",
+                    timestamp, event, resolved_agent_id, session_id);
+            }
+
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                let _ = writeln!(file, "[{}] Context: {}", timestamp, context.trim());
+            }
+
+            let notifier = OpenclawNotifier::new();
+            match notifier.send_event(&resolved_agent_id, &event, "", &context) {
+                Ok(_) => {
+                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                        let _ = writeln!(file, "[{}] ✅ Notification sent successfully", timestamp);
+                    }
+                    eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                }
+                Err(e) => {
+                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                        let _ = writeln!(file, "[{}] ❌ Notification failed: {}", timestamp, e);
+                    }
+                    eprintln!("通知发送失败: {}", e);
+                }
+            }
         }
     }
 
