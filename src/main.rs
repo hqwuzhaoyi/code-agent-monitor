@@ -257,13 +257,18 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Notify { event, agent_id } => {
-            use std::fs::OpenOptions;
+            use std::fs::{OpenOptions, create_dir_all};
             use std::io::Write;
 
-            let log_path = dirs::home_dir()
+            let log_dir = dirs::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".claude-monitor")
-                .join("hook.log");
+                .join(".claude-monitor");
+            let log_path = log_dir.join("hook.log");
+
+            // 确保日志目录存在
+            if let Err(e) = create_dir_all(&log_dir) {
+                eprintln!("无法创建日志目录: {}", e);
+            }
 
             let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
 
@@ -349,6 +354,7 @@ async fn main() -> Result<()> {
                         let _ = writeln!(file, "[{}] ❌ Notification failed: {}", timestamp, e);
                     }
                     eprintln!("通知发送失败: {}", e);
+                    return Err(e);
                 }
             }
         }

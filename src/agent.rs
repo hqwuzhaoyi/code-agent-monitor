@@ -200,8 +200,9 @@ impl AgentManager {
             for _ in 0..max_attempts {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 if let Ok(output) = self.tmux.capture_pane(&tmux_session, 20) {
-                    // 检测 Claude Code 就绪的标志：包含 > 提示符或欢迎信息
-                    if output.contains(">") || output.contains("Welcome to") || output.contains("Claude Code") {
+                    // 检测 Claude Code 就绪的标志：使用正则匹配行首 > 提示符
+                    let claude_prompt_re = regex::Regex::new(r"(?m)^>\s*$").unwrap();
+                    if claude_prompt_re.is_match(&output) || output.contains("Welcome to") || output.contains("Claude Code") {
                         ready = true;
                         // 额外等待 1 秒确保完全就绪
                         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -211,6 +212,8 @@ impl AgentManager {
             }
             if ready {
                 self.tmux.send_keys(&tmux_session, prompt)?;
+            } else {
+                eprintln!("警告: Claude Code 未能在 30 秒内就绪，初始 prompt 未发送");
             }
         }
 
@@ -369,6 +372,15 @@ impl AgentManager {
         // 使用规范化路径进行比较（解析符号链接）
         let cwd_canonical = canonicalize_path(cwd);
 
+        // 检查是否有多个匹配的 agent（潜在的歧义）
+        let matching_agents: Vec<_> = file.agents.iter()
+            .filter(|a| canonicalize_path(&a.project_path) == cwd_canonical && a.session_id.is_none())
+            .collect();
+
+        if matching_agents.len() > 1 {
+            eprintln!("警告: 发现 {} 个 agent 匹配路径 {}，将使用第一个匹配", matching_agents.len(), cwd);
+        }
+
         for agent in &mut file.agents {
             let agent_path_canonical = canonicalize_path(&agent.project_path);
             if agent_path_canonical == cwd_canonical && agent.session_id.is_none() {
@@ -394,11 +406,27 @@ impl AgentManager {
 }
 
 /// 规范化路径，解析符号链接
-/// 如果解析失败（路径不存在等），返回去除尾部斜杠的原始路径
+/// 如果解析失败（路径不存在等），进行基本的路径规范化
 fn canonicalize_path(path: &str) -> String {
     fs::canonicalize(path)
         .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_else(|_| path.trim_end_matches('/').to_string())
+        .unwrap_or_else(|_| {
+            // 基本路径规范化：处理 . 和 .. 以及多余的斜杠
+            let path = path.trim_end_matches('/');
+            let mut components: Vec<&str> = Vec::new();
+            for component in path.split('/') {
+                match component {
+                    "" | "." => continue,
+                    ".." => { components.pop(); }
+                    c => components.push(c),
+                }
+            }
+            if path.starts_with('/') {
+                format!("/{}", components.join("/"))
+            } else {
+                components.join("/")
+            }
+        })
 }
 
 impl Default for AgentManager {
