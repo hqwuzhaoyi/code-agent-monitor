@@ -96,19 +96,32 @@ impl WatcherDaemon {
 
         // 查找 cam 可执行文件
         let cam_path = std::env::current_exe()?;
+        let cam_path_str = cam_path.to_string_lossy();
 
-        // Fork 后台进程运行 cam watch-daemon
-        let child = Command::new(&cam_path)
-            .args(["watch-daemon"])
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
+        // 使用 nohup 实现 daemon 模式（macOS 兼容）
+        // 通过 & 后台运行，nohup 确保父进程退出后子进程继续运行
+        let log_path = self.data_dir.join("watcher.log");
+        let child = Command::new("sh")
+            .args([
+                "-c",
+                &format!(
+                    "nohup {} watch-daemon > {} 2>&1 & echo $!",
+                    cam_path_str,
+                    log_path.to_string_lossy()
+                ),
+            ])
+            .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::null())
-            .spawn()?;
+            .output()?;
 
-        // 写入 PID
-        self.write_pid(child.id())?;
-
-        Ok(true) // 新启动
+        // 从输出中读取 PID
+        let pid_str = String::from_utf8_lossy(&child.stdout);
+        if let Ok(pid) = pid_str.trim().parse::<u32>() {
+            self.write_pid(pid)?;
+            Ok(true) // 新启动
+        } else {
+            Err(anyhow::anyhow!("Failed to get watcher PID"))
+        }
     }
 
     /// 停止 watcher
