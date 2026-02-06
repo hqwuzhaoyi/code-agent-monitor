@@ -90,6 +90,9 @@ enum Commands {
         /// Agent ID
         #[arg(long)]
         agent_id: Option<String>,
+        /// Dry-run 模式（只打印不发送）
+        #[arg(long)]
+        dry_run: bool,
     },
 }
 
@@ -256,7 +259,7 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
-        Commands::Notify { event, agent_id } => {
+        Commands::Notify { event, agent_id, dry_run } => {
             use std::fs::{OpenOptions, create_dir_all};
             use std::io::Write;
 
@@ -384,13 +387,17 @@ async fn main() -> Result<()> {
                 context.clone()
             };
 
-            let notifier = OpenclawNotifier::new();
+            let notifier = OpenclawNotifier::new().with_dry_run(dry_run);
             match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
                 Ok(_) => {
                     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                         let _ = writeln!(file, "[{}] ✅ Notification sent successfully", timestamp);
                     }
-                    eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                    if dry_run {
+                        eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
+                    } else {
+                        eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                    }
                 }
                 Err(e) => {
                     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {

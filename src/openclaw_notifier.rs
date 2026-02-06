@@ -25,6 +25,8 @@ pub struct OpenclawNotifier {
     session_id: String,
     /// Channel 配置（用于直接发送）
     channel_config: Option<ChannelConfig>,
+    /// 是否为 dry-run 模式（只打印不发送）
+    dry_run: bool,
 }
 
 impl OpenclawNotifier {
@@ -35,6 +37,7 @@ impl OpenclawNotifier {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: "main".to_string(),
             channel_config,
+            dry_run: false,
         }
     }
 
@@ -45,7 +48,14 @@ impl OpenclawNotifier {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: session_id.to_string(),
             channel_config,
+            dry_run: false,
         }
+    }
+
+    /// 设置 dry-run 模式
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
     }
 
     /// 从 OpenClaw 配置自动检测 channel
@@ -326,6 +336,12 @@ impl OpenclawNotifier {
         let config = self.channel_config.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
 
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
+            eprintln!("[DRY-RUN] Message: {}", message);
+            return Ok(());
+        }
+
         let result = Command::new(&self.openclaw_cmd)
             .args([
                 "message", "send",
@@ -352,6 +368,12 @@ impl OpenclawNotifier {
 
     /// 发送消息给 Agent
     fn send_to_agent(&self, message: &str) -> Result<()> {
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send to agent session={}", self.session_id);
+            eprintln!("[DRY-RUN] Message: {}", message);
+            return Ok(());
+        }
+
         let result = Command::new(&self.openclaw_cmd)
             .args([
                 "agent",
