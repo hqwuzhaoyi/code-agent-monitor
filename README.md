@@ -8,7 +8,8 @@
 - **会话管理** - 列出、恢复 Claude Code 历史会话
 - **Agent 生命周期** - 启动、停止、发送输入到代理
 - **状态检测** - 检测代理是否等待用户输入（支持中英文）
-- **自动状态通知** - 检测到关键事件时自动推送到 clawdbot
+- **智能通知路由** - 根据 urgency 自动选择直接发送或通过 Agent 转发
+- **终端快照** - 通知中包含最近终端输出，方便远程了解上下文
 - **MCP 服务器** - 提供 MCP 协议接口供其他工具调用
 - **OpenClaw 集成** - 通过自然语言管理代理
 
@@ -47,27 +48,60 @@ cam serve
 cam watch-daemon -i 3
 
 # 发送通知事件
-cam notify --event WaitingForInput --agent-id cam-xxx
+cam notify --event stop --agent-id cam-xxx
+
+# 预览通知（不实际发送）
+echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id cam-xxx --dry-run
 ```
 
-## 自动状态通知
+## 通知系统
 
-CAM 支持自动推送 Agent 状态变化到 clawdbot：
+CAM 支持智能通知路由，根据事件紧急程度选择发送方式：
 
-### 工作原理
+### 通知路由策略
 
-1. **自动启动**: 当第一个 agent 启动时，watcher daemon 自动启动
-2. **事件检测**: Watcher 每 3 秒轮询检测关键事件
-3. **通知推送**: 通过 `openclaw agent --session-id main` 发送到 clawdbot
-4. **用户响应**: clawdbot 询问用户后调用 `cam_agent_send` 执行
+| Urgency | 事件类型 | 发送方式 | 说明 |
+|---------|---------|---------|------|
+| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | 直接发送到 channel | 需要立即响应，阻塞任务进度 |
+| **MEDIUM** | stop, session_end, AgentExited, notification(idle_prompt) | 直接发送到 channel | 需要知道，可以分配新任务 |
+| **LOW** | session_start, 其他 notification | 发给 OpenClaw Agent | 可选，Agent 可汇总或选择性转发 |
 
-### 检测的事件类型
+### Channel 自动检测
 
-| 事件 | 触发条件 | 通知格式 |
-|------|---------|---------|
-| `AgentExited` | tmux session 退出 | `✅ Agent 已退出: cam-xxx` |
-| `Error` | JSONL 解析到错误 | `❌ cam-xxx 错误: ...` |
-| `WaitingForInput` | 检测到等待输入模式 | `⏸️ cam-xxx 等待输入 (Confirmation)` |
+从 `~/.openclaw/openclaw.json` 按优先级检测：
+1. telegram > whatsapp > discord > slack > signal
+
+### 终端快照
+
+HIGH/MEDIUM urgency 通知会自动包含最近 15 行终端输出：
+
+```
+✅ [CAM] cam-123 已停止
+
+目录: /workspace/myapp
+
+📸 终端快照:
+```
+$ cargo test
+   Compiling myapp v0.1.0
+    Finished release target
+```
+
+📡 via direct
+```
+
+### 调试通知
+
+```bash
+# 使用 --dry-run 预览通知路由
+echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id test --dry-run
+
+# 查看 hook 日志
+tail -f ~/.claude-monitor/hook.log
+
+# 验证 channel 检测
+cat ~/.openclaw/openclaw.json | jq '.channels'
+```
 
 ### 支持的输入等待模式
 
