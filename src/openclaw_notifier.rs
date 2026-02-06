@@ -258,8 +258,8 @@ impl OpenclawNotifier {
             }
             "WaitingForInput" => {
                 format!(
-                    "⏸️ [CAM] {} 等待输入\n\n类型: {}{}",
-                    agent_id, pattern_or_path, snapshot_section
+                    "⏸️ [CAM] {} 等待输入\n\n类型: {}\n上下文: {}{}",
+                    agent_id, pattern_or_path, raw_context, snapshot_section
                 )
             }
             "Error" => {
@@ -305,8 +305,8 @@ impl OpenclawNotifier {
             "Error" => "HIGH",
             // 等待输入必须转发
             "WaitingForInput" => "HIGH",
-            // Agent 停止/完成 - 需要知道，可以分配新任务
-            "stop" | "session_end" => "MEDIUM",
+            // Agent 停止/完成/退出 - 需要知道，可以分配新任务
+            "stop" | "session_end" | "AgentExited" => "MEDIUM",
             // 启动通知 - 可选
             "session_start" => "LOW",
             // 其他
@@ -456,6 +456,7 @@ mod tests {
     fn test_get_urgency_medium() {
         assert_eq!(OpenclawNotifier::get_urgency("stop", ""), "MEDIUM");
         assert_eq!(OpenclawNotifier::get_urgency("session_end", ""), "MEDIUM");
+        assert_eq!(OpenclawNotifier::get_urgency("AgentExited", ""), "MEDIUM");
 
         // notification with idle_prompt
         let context = r#"{"notification_type": "idle_prompt"}"#;
