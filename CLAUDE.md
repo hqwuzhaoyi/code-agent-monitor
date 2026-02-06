@@ -4,6 +4,69 @@
 
 Skills location: `~/clawd/skills/code-agent-monitor/SKILL.md`
 
+## 调试通知系统
+
+### 使用 --dry-run 预览通知
+
+```bash
+# 预览 HIGH urgency 通知（直接发送到 channel）
+echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event permission_request --agent-id cam-test --dry-run
+
+# 预览 MEDIUM urgency 通知（直接发送到 channel）
+echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event stop --agent-id cam-test --dry-run
+
+# 预览 LOW urgency 通知（发给 Agent）
+echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event session_start --agent-id cam-test --dry-run
+```
+
+输出示例：
+```
+[DRY-RUN] Would send to channel=telegram target=1440537501
+[DRY-RUN] Message: ✅ [CAM] cam-test 已停止
+```
+
+### 查看 Hook 日志
+
+```bash
+# 查看最近的 hook 触发记录
+tail -50 ~/.claude-monitor/hook.log
+
+# 实时监控 hook 日志
+tail -f ~/.claude-monitor/hook.log
+
+# 查看特定 agent 的日志
+grep "cam-xxxxxxx" ~/.claude-monitor/hook.log
+```
+
+### 验证 Channel 检测
+
+```bash
+# 检查 OpenClaw channel 配置
+cat ~/.openclaw/openclaw.json | jq '.channels'
+
+# 测试 channel 检测是否正常（应显示 telegram/whatsapp 等）
+echo '{}' | ./target/release/cam notify --event stop --agent-id test --dry-run 2>&1 | grep "channel="
+```
+
+### 常见问题排查
+
+| 问题 | 排查方法 |
+|------|---------|
+| 通知没有发送 | 检查 `~/.claude-monitor/hook.log` 是否有记录 |
+| 发送失败 | 查看 stderr 输出，可能是网络问题或 API 限流 |
+| 路由错误 | 使用 `--dry-run` 确认 urgency 分类是否正确 |
+| Channel 检测失败 | 检查 `~/.openclaw/openclaw.json` 配置 |
+
+### 手动测试通知发送
+
+```bash
+# 测试直接发送到 Telegram（绕过 CAM）
+openclaw message send --channel telegram --target <chat_id> --message "test"
+
+# 测试发送给 Agent
+openclaw agent --session-id main --message "test"
+```
+
 ## Testing
 
 ### 使用 openclaw agent 直接测试
@@ -333,3 +396,74 @@ openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送�
 | `:\s*$` | 请输入文件名: | ColonPrompt |
 | `allow this action` | Do you want to allow this action? | PermissionRequest |
 | `是否授权` | 是否授权此操作？ | PermissionRequest |
+
+## 开发指南
+
+### 项目结构
+
+```
+src/
+├── main.rs              # CLI 入口，处理 notify/watch 等命令
+├── openclaw_notifier.rs # 通知系统核心（urgency 分类、channel 检测、消息格式化）
+├── agent.rs             # Agent 管理（启动、停止、列表）
+├── tmux.rs              # Tmux 会话操作
+├── input_detector.rs    # 终端输入模式检测
+├── session.rs           # Claude Code 会话管理
+└── mcp.rs               # MCP Server 实现
+```
+
+### 运行测试
+
+```bash
+# 运行所有通知系统测试
+cargo test --lib openclaw_notifier
+
+# 运行特定测试
+cargo test --lib test_get_urgency
+
+# 运行所有测试（包括需要 tmux 的集成测试）
+cargo test --lib
+```
+
+### 构建
+
+```bash
+# Debug 构建
+cargo build
+
+# Release 构建
+cargo build --release
+
+# 构建后二进制位置
+./target/release/cam
+```
+
+### 添加新事件类型
+
+1. 在 `get_urgency()` 中添加 urgency 分类
+2. 在 `format_event()` 中添加消息格式化
+3. 在 `main.rs` 的 `needs_snapshot` 中决定是否需要终端快照
+4. 添加对应的单元测试
+
+### 通知系统架构
+
+```
+Claude Code Hook
+       │
+       ▼
+  cam notify
+       │
+       ▼
+┌──────────────────┐
+│ OpenclawNotifier │
+├──────────────────┤
+│ 1. 解析 context  │
+│ 2. 判断 urgency  │
+│ 3. 格式化消息    │
+│ 4. 路由发送      │
+└──────────────────┘
+       │
+       ├─── HIGH/MEDIUM ──▶ openclaw message send (直接到 channel)
+       │
+       └─── LOW ──────────▶ openclaw agent (发给 Agent)
+```
