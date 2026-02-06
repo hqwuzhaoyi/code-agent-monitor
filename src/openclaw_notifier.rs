@@ -2,6 +2,7 @@
 
 use anyhow::Result;
 use std::process::Command;
+use std::fs;
 
 /// OpenClaw 通知器
 pub struct OpenclawNotifier {
@@ -9,23 +10,55 @@ pub struct OpenclawNotifier {
     openclaw_cmd: String,
     /// 目标 session id
     session_id: String,
+    /// Telegram chat_id (从 openclaw 配置读取)
+    telegram_chat_id: Option<String>,
 }
 
 impl OpenclawNotifier {
     /// 创建新的通知器
     pub fn new() -> Self {
+        let telegram_chat_id = Self::read_telegram_chat_id();
         Self {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: "main".to_string(),
+            telegram_chat_id,
         }
     }
 
     /// 创建指定 session 的通知器
     pub fn with_session(session_id: &str) -> Self {
+        let telegram_chat_id = Self::read_telegram_chat_id();
         Self {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: session_id.to_string(),
+            telegram_chat_id,
         }
+    }
+
+    /// 从 OpenClaw 配置读取 Telegram chat_id
+    fn read_telegram_chat_id() -> Option<String> {
+        let config_path = dirs::home_dir()?.join(".openclaw/openclaw.json");
+
+        let content = fs::read_to_string(&config_path).ok()?;
+        let config: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+        // 读取 channels.telegram.allowFrom 数组的第一个元素
+        let allow_from = config
+            .get("channels")?
+            .get("telegram")?
+            .get("allowFrom")?
+            .as_array()?
+            .first()?;
+
+        // 处理字符串或数字类型
+        if let Some(s) = allow_from.as_str() {
+            return Some(s.to_string());
+        }
+        if let Some(n) = allow_from.as_i64() {
+            return Some(n.to_string());
+        }
+
+        None
     }
 
     /// 查找 openclaw 可执行文件路径
@@ -137,6 +170,35 @@ impl OpenclawNotifier {
         }
     }
 
+    /// 判断事件是否需要用户关注（用于提示 OpenClaw agent）
+    fn get_urgency(event_type: &str, context: &str) -> &'static str {
+        match event_type {
+            // 权限请求必须转发
+            "permission_request" => "HIGH",
+            // notification 类型需要检查具体类型
+            "notification" => {
+                let json: Option<serde_json::Value> = serde_json::from_str(context).ok();
+                let notification_type = json.as_ref()
+                    .and_then(|j| j.get("notification_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                match notification_type {
+                    "permission_prompt" => "HIGH",
+                    "idle_prompt" => "MEDIUM",
+                    _ => "LOW"
+                }
+            }
+            // 错误必须转发
+            "Error" => "HIGH",
+            // 等待输入必须转发
+            "WaitingForInput" => "HIGH",
+            // 启动/停止通知
+            "session_start" | "session_end" | "stop" => "LOW",
+            // 其他
+            _ => "LOW",
+        }
+    }
+
     /// 发送事件到 clawdbot
     pub fn send_event(
         &self,
@@ -146,7 +208,28 @@ impl OpenclawNotifier {
         context: &str,
     ) -> Result<()> {
         let message = self.format_event(agent_id, event_type, pattern_or_path, context);
-        self.send_message(&message)
+        let urgency = Self::get_urgency(event_type, context);
+
+        // 获取 telegram target 信息
+        let telegram_target = self.telegram_chat_id.as_deref().unwrap_or("unknown");
+
+        // 根据 urgency 添加不同的前缀指令
+        let full_message = match urgency {
+            "HIGH" => format!(
+                "🚨 [URGENT - AUTO FORWARD] 这是来自 CAM 的紧急权限请求，请立即使用 telegram 工具转发给用户！\n\n{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}\n[TELEGRAM] target={} action=sendMessage",
+                message, urgency, event_type, agent_id, telegram_target
+            ),
+            "MEDIUM" => format!(
+                "📢 [NOTIFY] 请使用 telegram 工具通知用户：\n\n{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}\n[TELEGRAM] target={} action=sendMessage",
+                message, urgency, event_type, agent_id, telegram_target
+            ),
+            _ => format!(
+                "{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}",
+                message, urgency, event_type, agent_id
+            ),
+        };
+
+        self.send_message(&full_message)
     }
 
     /// 发送消息到 clawdbot

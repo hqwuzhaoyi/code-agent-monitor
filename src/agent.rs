@@ -192,6 +192,25 @@ impl AgentManager {
         // 创建 tmux session
         self.tmux.create_session(&tmux_session, &request.project_path, &command)?;
 
+        // 立即保存到 agents.json（先于 Claude Code hook 触发）
+        // 这样 session_start hook 触发时能正确匹配到 agent
+        let record = AgentRecord {
+            agent_id: agent_id.clone(),
+            agent_type,
+            project_path: request.project_path.clone(),
+            tmux_session: tmux_session.clone(),
+            session_id: request.resume_session,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: chrono::Utc::now().to_rfc3339(),
+            status: AgentStatus::Running,
+        };
+
+        let mut file = self.read_agents_file()?;
+        file.agents.push(record);
+        self.write_agents_file(&file)?;
+
         // 如果有初始 prompt，等待 Claude Code 就绪后发送
         if let Some(prompt) = &request.initial_prompt {
             // 循环检测 Claude Code 是否显示 > 提示符
@@ -216,24 +235,6 @@ impl AgentManager {
                 eprintln!("警告: Claude Code 未能在 30 秒内就绪，初始 prompt 未发送");
             }
         }
-
-        // 保存到 agents.json
-        let record = AgentRecord {
-            agent_id: agent_id.clone(),
-            agent_type,
-            project_path: request.project_path,
-            tmux_session: tmux_session.clone(),
-            session_id: request.resume_session,
-            jsonl_path: None,
-            jsonl_offset: 0,
-            last_output_hash: None,
-            started_at: chrono::Utc::now().to_rfc3339(),
-            status: AgentStatus::Running,
-        };
-
-        let mut file = self.read_agents_file()?;
-        file.agents.push(record);
-        self.write_agents_file(&file)?;
 
         // 确保 watcher daemon 在运行
         let daemon = WatcherDaemon::new();

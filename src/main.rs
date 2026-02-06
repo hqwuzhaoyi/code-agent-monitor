@@ -341,8 +341,51 @@ async fn main() -> Result<()> {
                 let _ = writeln!(file, "[{}] Context: {}", timestamp, context.trim());
             }
 
+            // 如果是 notification 事件且是 idle_prompt，获取最近的终端输出
+            let enriched_context = if event == "notification" {
+                let notification_type = json.as_ref()
+                    .and_then(|j| j.get("notification_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
+                    // 尝试获取 agent 的最近终端输出
+                    if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
+                        if let Ok(logs) = agent_manager.get_logs(&agent.agent_id, 30) {
+                            // 将终端输出添加到 context
+                            let mut enriched = context.clone();
+                            enriched.push_str("\n\n--- 最近终端输出 ---\n");
+                            enriched.push_str(&logs);
+                            enriched
+                        } else {
+                            context.clone()
+                        }
+                    } else if let Some(ref cwd_path) = cwd {
+                        // 通过 cwd 查找
+                        if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
+                            if let Ok(logs) = agent_manager.get_logs(&agent.agent_id, 30) {
+                                let mut enriched = context.clone();
+                                enriched.push_str("\n\n--- 最近终端输出 ---\n");
+                                enriched.push_str(&logs);
+                                enriched
+                            } else {
+                                context.clone()
+                            }
+                        } else {
+                            context.clone()
+                        }
+                    } else {
+                        context.clone()
+                    }
+                } else {
+                    context.clone()
+                }
+            } else {
+                context.clone()
+            };
+
             let notifier = OpenclawNotifier::new();
-            match notifier.send_event(&resolved_agent_id, &event, "", &context) {
+            match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
                 Ok(_) => {
                     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                         let _ = writeln!(file, "[{}] ✅ Notification sent successfully", timestamp);
