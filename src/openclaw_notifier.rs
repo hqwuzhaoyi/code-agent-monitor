@@ -1,50 +1,108 @@
-//! OpenClaw 通知模块 - 通过 openclaw CLI 发送事件到 clawdbot
+//! OpenClaw 通知模块 - 通过 openclaw CLI 发送事件到 channel 或 agent
+//!
+//! 通知路由策略：
+//! - HIGH/MEDIUM urgency → 直接发送到 channel（绕过 Agent 决策）
+//! - LOW urgency → 发送给 Agent（让 Agent 汇总或选择性转发）
 
 use anyhow::Result;
 use std::process::Command;
 use std::fs;
 
+/// Channel 配置
+#[derive(Debug, Clone)]
+pub struct ChannelConfig {
+    /// channel 类型: telegram, whatsapp, discord, slack 等
+    pub channel: String,
+    /// 目标: chat_id, phone number, channel id 等
+    pub target: String,
+}
+
 /// OpenClaw 通知器
 pub struct OpenclawNotifier {
     /// openclaw 命令路径
     openclaw_cmd: String,
-    /// 目标 session id
+    /// 目标 session id（用于发送给 Agent）
     session_id: String,
-    /// Telegram chat_id (从 openclaw 配置读取)
-    telegram_chat_id: Option<String>,
+    /// Channel 配置（用于直接发送）
+    channel_config: Option<ChannelConfig>,
 }
 
 impl OpenclawNotifier {
     /// 创建新的通知器
     pub fn new() -> Self {
-        let telegram_chat_id = Self::read_telegram_chat_id();
+        let channel_config = Self::detect_channel();
         Self {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: "main".to_string(),
-            telegram_chat_id,
+            channel_config,
         }
     }
 
     /// 创建指定 session 的通知器
     pub fn with_session(session_id: &str) -> Self {
-        let telegram_chat_id = Self::read_telegram_chat_id();
+        let channel_config = Self::detect_channel();
         Self {
             openclaw_cmd: Self::find_openclaw_path(),
             session_id: session_id.to_string(),
-            telegram_chat_id,
+            channel_config,
         }
     }
 
-    /// 从 OpenClaw 配置读取 Telegram chat_id
-    fn read_telegram_chat_id() -> Option<String> {
+    /// 从 OpenClaw 配置自动检测 channel
+    /// 按优先级检测: telegram > whatsapp > discord > slack > 其他
+    fn detect_channel() -> Option<ChannelConfig> {
         let config_path = dirs::home_dir()?.join(".openclaw/openclaw.json");
-
         let content = fs::read_to_string(&config_path).ok()?;
         let config: serde_json::Value = serde_json::from_str(&content).ok()?;
+        let channels = config.get("channels")?;
 
-        // 读取 channels.telegram.allowFrom 数组的第一个元素
-        let allow_from = config
-            .get("channels")?
+        // 按优先级尝试检测各个 channel
+        // 1. Telegram
+        if let Some(target) = Self::extract_telegram_target(channels) {
+            return Some(ChannelConfig {
+                channel: "telegram".to_string(),
+                target,
+            });
+        }
+
+        // 2. WhatsApp
+        if let Some(target) = Self::extract_allow_from(channels, "whatsapp") {
+            return Some(ChannelConfig {
+                channel: "whatsapp".to_string(),
+                target,
+            });
+        }
+
+        // 3. Discord
+        if let Some(target) = Self::extract_default_channel(channels, "discord") {
+            return Some(ChannelConfig {
+                channel: "discord".to_string(),
+                target,
+            });
+        }
+
+        // 4. Slack
+        if let Some(target) = Self::extract_default_channel(channels, "slack") {
+            return Some(ChannelConfig {
+                channel: "slack".to_string(),
+                target,
+            });
+        }
+
+        // 5. Signal
+        if let Some(target) = Self::extract_allow_from(channels, "signal") {
+            return Some(ChannelConfig {
+                channel: "signal".to_string(),
+                target,
+            });
+        }
+
+        None
+    }
+
+    /// 提取 Telegram target (chat_id)
+    fn extract_telegram_target(channels: &serde_json::Value) -> Option<String> {
+        let allow_from = channels
             .get("telegram")?
             .get("allowFrom")?
             .as_array()?
@@ -57,8 +115,33 @@ impl OpenclawNotifier {
         if let Some(n) = allow_from.as_i64() {
             return Some(n.to_string());
         }
-
         None
+    }
+
+    /// 提取 allowFrom 数组的第一个元素
+    fn extract_allow_from(channels: &serde_json::Value, channel_name: &str) -> Option<String> {
+        let allow_from = channels
+            .get(channel_name)?
+            .get("allowFrom")?
+            .as_array()?
+            .first()?;
+
+        if let Some(s) = allow_from.as_str() {
+            return Some(s.to_string());
+        }
+        if let Some(n) = allow_from.as_i64() {
+            return Some(n.to_string());
+        }
+        None
+    }
+
+    /// 提取 defaultChannel
+    fn extract_default_channel(channels: &serde_json::Value, channel_name: &str) -> Option<String> {
+        channels
+            .get(channel_name)?
+            .get("defaultChannel")?
+            .as_str()
+            .map(|s| s.to_string())
     }
 
     /// 查找 openclaw 可执行文件路径
@@ -171,9 +254,14 @@ impl OpenclawNotifier {
     }
 
     /// 判断事件是否需要用户关注（用于提示 OpenClaw agent）
+    ///
+    /// 20 个 AI 并行时的关注优先级:
+    /// - HIGH: 必须立即响应（权限请求、错误）→ 阻塞任务进度
+    /// - MEDIUM: 需要知道（完成、空闲）→ 可以分配新任务
+    /// - LOW: 可选（启动）→ 通常不需要通知
     fn get_urgency(event_type: &str, context: &str) -> &'static str {
         match event_type {
-            // 权限请求必须转发
+            // 权限请求必须转发 - 阻塞任务进度
             "permission_request" => "HIGH",
             // notification 类型需要检查具体类型
             "notification" => {
@@ -183,23 +271,27 @@ impl OpenclawNotifier {
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 match notification_type {
-                    "permission_prompt" => "HIGH",
-                    "idle_prompt" => "MEDIUM",
+                    "permission_prompt" => "HIGH",  // 权限确认
+                    "idle_prompt" => "MEDIUM",      // 空闲等待
                     _ => "LOW"
                 }
             }
-            // 错误必须转发
+            // 错误必须转发 - 需要干预
             "Error" => "HIGH",
             // 等待输入必须转发
             "WaitingForInput" => "HIGH",
-            // 启动/停止通知
-            "session_start" | "session_end" | "stop" => "LOW",
+            // Agent 停止/完成 - 需要知道，可以分配新任务
+            "stop" | "session_end" => "MEDIUM",
+            // 启动通知 - 可选
+            "session_start" => "LOW",
             // 其他
             _ => "LOW",
         }
     }
 
-    /// 发送事件到 clawdbot
+    /// 发送事件到 channel 或 agent
+    /// HIGH/MEDIUM urgency → 直接发送到 channel
+    /// LOW urgency → 发送给 Agent
     pub fn send_event(
         &self,
         agent_id: &str,
@@ -210,30 +302,56 @@ impl OpenclawNotifier {
         let message = self.format_event(agent_id, event_type, pattern_or_path, context);
         let urgency = Self::get_urgency(event_type, context);
 
-        // 获取 telegram target 信息
-        let telegram_target = self.telegram_chat_id.as_deref().unwrap_or("unknown");
-
-        // 根据 urgency 添加不同的前缀指令
-        let full_message = match urgency {
-            "HIGH" => format!(
-                "🚨 [URGENT - AUTO FORWARD] 这是来自 CAM 的紧急权限请求，请立即使用 telegram 工具转发给用户！\n\n{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}\n[TELEGRAM] target={} action=sendMessage",
-                message, urgency, event_type, agent_id, telegram_target
-            ),
-            "MEDIUM" => format!(
-                "📢 [NOTIFY] 请使用 telegram 工具通知用户：\n\n{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}\n[TELEGRAM] target={} action=sendMessage",
-                message, urgency, event_type, agent_id, telegram_target
-            ),
-            _ => format!(
-                "{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}",
-                message, urgency, event_type, agent_id
-            ),
-        };
-
-        self.send_message(&full_message)
+        match urgency {
+            "HIGH" | "MEDIUM" => {
+                if self.channel_config.is_some() {
+                    // 直接发送到 channel
+                    self.send_direct(&message)
+                } else {
+                    // Fallback: 没有配置 channel，发给 Agent
+                    let wrapped = self.wrap_for_agent(&message, urgency, event_type, agent_id);
+                    self.send_to_agent(&wrapped)
+                }
+            }
+            _ => {
+                // LOW urgency: 发给 Agent
+                let wrapped = self.wrap_for_agent(&message, urgency, event_type, agent_id);
+                self.send_to_agent(&wrapped)
+            }
+        }
     }
 
-    /// 发送消息到 clawdbot
-    pub fn send_message(&self, message: &str) -> Result<()> {
+    /// 直接发送消息到 channel
+    fn send_direct(&self, message: &str) -> Result<()> {
+        let config = self.channel_config.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
+
+        let result = Command::new(&self.openclaw_cmd)
+            .args([
+                "message", "send",
+                "--channel", &config.channel,
+                "--target", &config.target,
+                "--message", message,
+            ])
+            .output();
+
+        match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("OpenClaw 直接发送失败: {}", stderr);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("无法执行 OpenClaw message send: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    /// 发送消息给 Agent
+    fn send_to_agent(&self, message: &str) -> Result<()> {
         let result = Command::new(&self.openclaw_cmd)
             .args([
                 "agent",
@@ -248,15 +366,28 @@ impl OpenclawNotifier {
             Ok(output) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("OpenClaw 通知失败: {}", stderr);
+                    eprintln!("OpenClaw Agent 发送失败: {}", stderr);
                 }
                 Ok(())
             }
             Err(e) => {
-                eprintln!("无法执行 OpenClaw: {}", e);
+                eprintln!("无法执行 OpenClaw agent: {}", e);
                 Err(e.into())
             }
         }
+    }
+
+    /// 为 Agent 包装消息（添加元数据）
+    fn wrap_for_agent(&self, message: &str, urgency: &str, event_type: &str, agent_id: &str) -> String {
+        format!(
+            "{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}",
+            message, urgency, event_type, agent_id
+        )
+    }
+
+    /// 发送消息到 clawdbot (保留兼容性)
+    pub fn send_message(&self, message: &str) -> Result<()> {
+        self.send_to_agent(message)
     }
 }
 
@@ -269,6 +400,49 @@ impl Default for OpenclawNotifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_get_urgency_high() {
+        assert_eq!(OpenclawNotifier::get_urgency("permission_request", ""), "HIGH");
+        assert_eq!(OpenclawNotifier::get_urgency("Error", ""), "HIGH");
+        assert_eq!(OpenclawNotifier::get_urgency("WaitingForInput", ""), "HIGH");
+
+        // notification with permission_prompt
+        let context = r#"{"notification_type": "permission_prompt"}"#;
+        assert_eq!(OpenclawNotifier::get_urgency("notification", context), "HIGH");
+    }
+
+    #[test]
+    fn test_get_urgency_medium() {
+        assert_eq!(OpenclawNotifier::get_urgency("stop", ""), "MEDIUM");
+        assert_eq!(OpenclawNotifier::get_urgency("session_end", ""), "MEDIUM");
+
+        // notification with idle_prompt
+        let context = r#"{"notification_type": "idle_prompt"}"#;
+        assert_eq!(OpenclawNotifier::get_urgency("notification", context), "MEDIUM");
+    }
+
+    #[test]
+    fn test_get_urgency_low() {
+        assert_eq!(OpenclawNotifier::get_urgency("session_start", ""), "LOW");
+        assert_eq!(OpenclawNotifier::get_urgency("unknown_event", ""), "LOW");
+
+        // notification with unknown type
+        let context = r#"{"notification_type": "other"}"#;
+        assert_eq!(OpenclawNotifier::get_urgency("notification", context), "LOW");
+    }
+
+    #[test]
+    fn test_wrap_for_agent() {
+        let notifier = OpenclawNotifier::new();
+        let wrapped = notifier.wrap_for_agent("Test message", "HIGH", "Error", "cam-123");
+
+        assert!(wrapped.contains("Test message"));
+        assert!(wrapped.contains("[CAM_META]"));
+        assert!(wrapped.contains("urgency=HIGH"));
+        assert!(wrapped.contains("event_type=Error"));
+        assert!(wrapped.contains("agent_id=cam-123"));
+    }
 
     #[test]
     fn test_format_waiting_event() {
