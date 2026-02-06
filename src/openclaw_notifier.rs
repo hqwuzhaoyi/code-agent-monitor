@@ -530,4 +530,239 @@ mod tests {
         assert!(message.contains("已退出"));
         assert!(message.contains("/workspace/myapp"));
     }
+
+    // ==================== 终端快照测试 ====================
+
+    #[test]
+    fn test_format_event_with_terminal_snapshot() {
+        let notifier = OpenclawNotifier::new();
+
+        // 模拟带终端快照的 context
+        let context_with_snapshot = r#"{"cwd": "/workspace"}
+
+--- 终端快照 ---
+$ cargo build
+   Compiling myapp v0.1.0
+    Finished release target"#;
+
+        let message = notifier.format_event(
+            "cam-123",
+            "stop",
+            "",
+            context_with_snapshot,
+        );
+
+        assert!(message.contains("已停止"));
+        assert!(message.contains("📸 终端快照"));
+        assert!(message.contains("cargo build"));
+    }
+
+    #[test]
+    fn test_format_event_snapshot_truncation() {
+        let notifier = OpenclawNotifier::new();
+
+        // 创建超过 15 行的终端输出
+        let mut long_output = String::from(r#"{"cwd": "/tmp"}
+
+--- 终端快照 ---
+"#);
+        for i in 1..=20 {
+            long_output.push_str(&format!("line {}\n", i));
+        }
+
+        let message = notifier.format_event(
+            "cam-123",
+            "stop",
+            "",
+            &long_output,
+        );
+
+        // 应该只包含最后 15 行
+        assert!(message.contains("line 20"));
+        assert!(message.contains("line 6"));
+        assert!(!message.contains("line 5\n")); // line 5 应该被截断
+    }
+
+    #[test]
+    fn test_format_event_without_snapshot() {
+        let notifier = OpenclawNotifier::new();
+
+        let message = notifier.format_event(
+            "cam-123",
+            "stop",
+            "",
+            r#"{"cwd": "/workspace"}"#,
+        );
+
+        assert!(message.contains("已停止"));
+        assert!(!message.contains("📸 终端快照"));
+    }
+
+    // ==================== 各事件类型格式化测试 ====================
+
+    #[test]
+    fn test_format_permission_request() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "cwd": "/workspace"}"#;
+        let message = notifier.format_event("cam-123", "permission_request", "", context);
+
+        assert!(message.contains("🔐"));
+        assert!(message.contains("请求权限"));
+        assert!(message.contains("Bash"));
+        assert!(message.contains("rm -rf /tmp/test"));
+        assert!(message.contains("/workspace"));
+        assert!(message.contains("请回复: 1=允许"));
+    }
+
+    #[test]
+    fn test_format_notification_idle_prompt() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "idle_prompt", "message": "Task completed, waiting for next instruction"}"#;
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
+        assert!(message.contains("Task completed"));
+    }
+
+    #[test]
+    fn test_format_notification_permission_prompt() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "permission_prompt", "message": "Allow file write?"}"#;
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("🔐"));
+        assert!(message.contains("权限确认"));
+        assert!(message.contains("Allow file write?"));
+        assert!(message.contains("请回复: 1=允许"));
+    }
+
+    #[test]
+    fn test_format_session_start() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"cwd": "/Users/admin/project"}"#;
+        let message = notifier.format_event("cam-123", "session_start", "", context);
+
+        assert!(message.contains("🚀"));
+        assert!(message.contains("已启动"));
+        assert!(message.contains("/Users/admin/project"));
+    }
+
+    #[test]
+    fn test_format_stop_event() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"cwd": "/workspace/app"}"#;
+        let message = notifier.format_event("cam-123", "stop", "", context);
+
+        assert!(message.contains("✅"));
+        assert!(message.contains("已停止"));
+        assert!(message.contains("/workspace/app"));
+    }
+
+    #[test]
+    fn test_format_session_end() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"cwd": "/workspace"}"#;
+        let message = notifier.format_event("cam-123", "session_end", "", context);
+
+        assert!(message.contains("✅"));
+        assert!(message.contains("已停止"));
+    }
+
+    #[test]
+    fn test_format_agent_exited_with_snapshot() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"
+
+--- 终端快照 ---
+All tests passed!
+Build successful."#;
+
+        let message = notifier.format_event("cam-123", "AgentExited", "/myproject", context);
+
+        assert!(message.contains("已退出"));
+        assert!(message.contains("/myproject"));
+        assert!(message.contains("📸 终端快照"));
+        assert!(message.contains("All tests passed"));
+    }
+
+    // ==================== Channel 检测测试 ====================
+
+    #[test]
+    fn test_extract_telegram_target_string() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "telegram": {
+                "allowFrom": ["123456789"]
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_telegram_target(&channels);
+        assert_eq!(target, Some("123456789".to_string()));
+    }
+
+    #[test]
+    fn test_extract_telegram_target_number() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "telegram": {
+                "allowFrom": [123456789]
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_telegram_target(&channels);
+        assert_eq!(target, Some("123456789".to_string()));
+    }
+
+    #[test]
+    fn test_extract_default_channel() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "discord": {
+                "defaultChannel": "general"
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_default_channel(&channels, "discord");
+        assert_eq!(target, Some("general".to_string()));
+    }
+
+    #[test]
+    fn test_extract_allow_from() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "whatsapp": {
+                "allowFrom": ["+1234567890"]
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_allow_from(&channels, "whatsapp");
+        assert_eq!(target, Some("+1234567890".to_string()));
+    }
+
+    // ==================== Wrap for Agent 测试 ====================
+
+    #[test]
+    fn test_wrap_for_agent_low_urgency() {
+        let notifier = OpenclawNotifier::new();
+        let wrapped = notifier.wrap_for_agent("Session started", "LOW", "session_start", "cam-456");
+
+        assert!(wrapped.contains("Session started"));
+        assert!(wrapped.contains("urgency=LOW"));
+        assert!(wrapped.contains("event_type=session_start"));
+        assert!(wrapped.contains("agent_id=cam-456"));
+    }
+
+    #[test]
+    fn test_wrap_for_agent_contains_separator() {
+        let notifier = OpenclawNotifier::new();
+        let wrapped = notifier.wrap_for_agent("Test", "HIGH", "Error", "cam-789");
+
+        // 应该包含分隔符
+        assert!(wrapped.contains("---"));
+        assert!(wrapped.contains("[CAM_META]"));
+    }
 }
