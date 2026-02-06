@@ -114,6 +114,16 @@ CAM 支持自动推送 Agent 状态变化到 clawdbot：
 - 错误发生
 - 等待用户输入（支持中英文模式检测）
 
+**通知路由策略**：
+
+| Urgency | 事件类型 | 发送方式 |
+|---------|---------|---------|
+| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | 直接发送到 channel |
+| **MEDIUM** | stop, session_end, AgentExited, notification(idle_prompt) | 直接发送到 channel |
+| **LOW** | session_start, 其他 notification | 发给 OpenClaw Agent |
+
+Channel 自动从 `~/.openclaw/openclaw.json` 检测，按优先级：telegram > whatsapp > discord > slack > signal
+
 **通知流程**：
 1. Watcher 检测到事件
 2. 通过 `openclaw agent --session-id main` 发送到 clawdbot
