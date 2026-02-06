@@ -344,45 +344,45 @@ async fn main() -> Result<()> {
                 let _ = writeln!(file, "[{}] Context: {}", timestamp, context.trim());
             }
 
-            // 如果是 notification 事件且是 idle_prompt，获取最近的终端输出
-            let enriched_context = if event == "notification" {
-                let notification_type = json.as_ref()
-                    .and_then(|j| j.get("notification_type"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
+            // 判断是否需要获取终端快照（HIGH/MEDIUM urgency 事件）
+            let needs_snapshot = match event.as_str() {
+                "permission_request" | "Error" | "WaitingForInput" => true,
+                "stop" | "session_end" | "AgentExited" => true,
+                "notification" => {
+                    let notification_type = json.as_ref()
+                        .and_then(|j| j.get("notification_type"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("");
+                    notification_type == "idle_prompt" || notification_type == "permission_prompt"
+                }
+                _ => false,
+            };
 
-                if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
-                    // 尝试获取 agent 的最近终端输出
-                    if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
-                        if let Ok(logs) = agent_manager.get_logs(&agent.agent_id, 30) {
-                            // 将终端输出添加到 context
-                            let mut enriched = context.clone();
-                            enriched.push_str("\n\n--- 最近终端输出 ---\n");
-                            enriched.push_str(&logs);
-                            enriched
-                        } else {
-                            context.clone()
-                        }
-                    } else if let Some(ref cwd_path) = cwd {
-                        // 通过 cwd 查找
-                        if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
-                            if let Ok(logs) = agent_manager.get_logs(&agent.agent_id, 30) {
-                                let mut enriched = context.clone();
-                                enriched.push_str("\n\n--- 最近终端输出 ---\n");
-                                enriched.push_str(&logs);
-                                enriched
-                            } else {
-                                context.clone()
-                            }
-                        } else {
-                            context.clone()
-                        }
+            // 获取终端快照
+            let terminal_snapshot = if needs_snapshot {
+                // 尝试通过 session_id 查找 agent
+                if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
+                    agent_manager.get_logs(&agent.agent_id, 30).ok()
+                } else if let Some(ref cwd_path) = cwd {
+                    // 通过 cwd 查找
+                    if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
+                        agent_manager.get_logs(&agent.agent_id, 30).ok()
                     } else {
-                        context.clone()
+                        None
                     }
                 } else {
-                    context.clone()
+                    None
                 }
+            } else {
+                None
+            };
+
+            // 构建 enriched context
+            let enriched_context = if let Some(snapshot) = terminal_snapshot {
+                let mut enriched = context.clone();
+                enriched.push_str("\n\n--- 终端快照 ---\n");
+                enriched.push_str(&snapshot);
+                enriched
             } else {
                 context.clone()
             };

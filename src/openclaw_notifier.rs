@@ -180,8 +180,28 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> String {
+        // 分离终端快照和原始 context
+        let (raw_context, terminal_snapshot) = if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+            let (before, after) = context.split_at(idx);
+            let snapshot = after.trim_start_matches("\n\n--- 终端快照 ---\n");
+            (before, Some(snapshot))
+        } else {
+            (context, None)
+        };
+
         // 尝试解析 JSON context 获取更多信息
-        let json: Option<serde_json::Value> = serde_json::from_str(context).ok();
+        let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
+
+        // 格式化终端快照（截取最后 15 行，避免消息过长）
+        let snapshot_section = terminal_snapshot.map(|s| {
+            let lines: Vec<&str> = s.lines().collect();
+            let display_lines = if lines.len() > 15 {
+                lines[lines.len() - 15..].join("\n")
+            } else {
+                s.to_string()
+            };
+            format!("\n\n📸 终端快照:\n```\n{}\n```", display_lines)
+        }).unwrap_or_default();
 
         match event_type {
             "permission_request" => {
@@ -200,8 +220,8 @@ impl OpenclawNotifier {
                     .unwrap_or("");
 
                 format!(
-                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝",
-                    agent_id, tool_name, cwd, tool_input
+                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝",
+                    agent_id, tool_name, cwd, tool_input, snapshot_section
                 )
             }
             "notification" => {
@@ -215,11 +235,11 @@ impl OpenclawNotifier {
                     .unwrap_or("");
 
                 if notification_type == "idle_prompt" {
-                    format!("⏸️ [CAM] {} 等待输入\n\n{}", agent_id, message)
+                    format!("⏸️ [CAM] {} 等待输入\n\n{}{}", agent_id, message, snapshot_section)
                 } else if notification_type == "permission_prompt" {
-                    format!("🔐 [CAM] {} 需要权限确认\n\n{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝", agent_id, message)
+                    format!("🔐 [CAM] {} 需要权限确认\n\n{}{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝", agent_id, message, snapshot_section)
                 } else {
-                    format!("📢 [CAM] {} 通知\n\n{}", agent_id, message)
+                    format!("📢 [CAM] {} 通知\n\n{}{}", agent_id, message, snapshot_section)
                 }
             }
             "session_start" => {
@@ -234,32 +254,27 @@ impl OpenclawNotifier {
                     .and_then(|j| j.get("cwd"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                format!("✅ [CAM] {} 已停止\n\n目录: {}", agent_id, cwd)
+                format!("✅ [CAM] {} 已停止\n\n目录: {}{}", agent_id, cwd, snapshot_section)
             }
             "WaitingForInput" => {
                 format!(
-                    "⏸️ [CAM] {} 等待输入\n\n类型: {}\n上下文:\n---\n{}\n---\n\n请问如何响应？",
-                    agent_id, pattern_or_path, context
+                    "⏸️ [CAM] {} 等待输入\n\n类型: {}{}",
+                    agent_id, pattern_or_path, snapshot_section
                 )
             }
             "Error" => {
                 format!(
-                    "❌ [CAM] {} 发生错误\n\n错误信息:\n---\n{}\n---\n\n请问如何处理？",
-                    agent_id, context
+                    "❌ [CAM] {} 发生错误\n\n错误信息:\n---\n{}\n---{}\n\n请问如何处理？",
+                    agent_id, raw_context, snapshot_section
                 )
             }
             "AgentExited" => {
-                let last_output = if context.is_empty() {
-                    String::new()
-                } else {
-                    format!("\n\n最后输出:\n---\n{}\n---", context)
-                };
                 format!(
                     "✅ [CAM] {} 已退出\n\n项目: {}{}",
-                    agent_id, pattern_or_path, last_output
+                    agent_id, pattern_or_path, snapshot_section
                 )
             }
-            _ => format!("[CAM] {} - {}: {}", agent_id, event_type, context),
+            _ => format!("[CAM] {} - {}: {}{}", agent_id, event_type, raw_context, snapshot_section),
         }
     }
 
@@ -342,12 +357,15 @@ impl OpenclawNotifier {
             return Ok(());
         }
 
+        // 添加发送方式标识
+        let tagged_message = format!("{}\n\n📡 via direct", message);
+
         let result = Command::new(&self.openclaw_cmd)
             .args([
                 "message", "send",
                 "--channel", &config.channel,
                 "--target", &config.target,
-                "--message", message,
+                "--message", &tagged_message,
             ])
             .output();
 
