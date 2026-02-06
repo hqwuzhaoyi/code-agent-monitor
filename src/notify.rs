@@ -2,9 +2,9 @@
 
 use crate::process::{AgentInfo, ProcessScanner};
 use crate::session::SessionManager;
+use crate::openclaw_notifier::OpenclawNotifier;
 use anyhow::Result;
 use std::collections::HashMap;
-use std::process::Command;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -23,36 +23,16 @@ pub enum NotifyEvent {
 pub struct Notifier {
     /// 是否使用 OpenClaw 发送通知
     use_openclaw: bool,
-    /// OpenClaw 命令路径
-    openclaw_cmd: String,
+    /// OpenClaw 通知器（用于直接发送到 channel）
+    openclaw: OpenclawNotifier,
 }
 
 impl Notifier {
     pub fn new(use_openclaw: bool) -> Self {
-        // 尝试查找 openclaw 路径
-        let openclaw_cmd = Self::find_openclaw_path();
         Self {
             use_openclaw,
-            openclaw_cmd,
+            openclaw: OpenclawNotifier::new(),
         }
-    }
-
-    /// 查找 openclaw 可执行文件路径
-    fn find_openclaw_path() -> String {
-        let possible_paths = [
-            "/Users/admin/.volta/bin/openclaw",
-            "/opt/homebrew/bin/openclaw",
-            "/usr/local/bin/openclaw",
-            "openclaw",
-        ];
-
-        for path in possible_paths {
-            if std::path::Path::new(path).exists() || path == "openclaw" {
-                return path.to_string();
-            }
-        }
-
-        "openclaw".to_string()
     }
 
     /// 发送通知
@@ -78,35 +58,13 @@ impl Notifier {
     /// 发送自定义文本通知
     pub fn notify_text(&self, message: &str) -> Result<()> {
         if self.use_openclaw {
-            self.send_via_openclaw(message)?;
-        } else {
-            println!("[通知] {}", message);
-        }
-
-        Ok(())
-    }
-
-    /// 通过 OpenClaw 发送通知
-    fn send_via_openclaw(&self, message: &str) -> Result<()> {
-        // 使用 openclaw message send 发送 Telegram 消息
-        let result = Command::new(&self.openclaw_cmd)
-            .args(["message", "send", "--channel", "telegram", "--target", "1440537501", "--message", message])
-            .output();
-
-        match result {
-            Ok(output) => {
-                if !output.status.success() {
-                    let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("OpenClaw 通知失败: {}", stderr);
-                    // 回退到控制台输出
-                    println!("[通知] {}", message);
-                }
-            }
-            Err(e) => {
-                eprintln!("无法执行 OpenClaw: {}", e);
+            if let Err(e) = self.openclaw.send_direct_text(message) {
+                eprintln!("OpenClaw 通知失败: {}", e);
                 // 回退到控制台输出
                 println!("[通知] {}", message);
             }
+        } else {
+            println!("[通知] {}", message);
         }
 
         Ok(())

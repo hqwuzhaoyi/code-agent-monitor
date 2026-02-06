@@ -115,16 +115,23 @@ impl OpenclawNotifier {
         let allow_from = channels
             .get("telegram")?
             .get("allowFrom")?
-            .as_array()?
-            .first()?;
+            .as_array()?;
 
-        // 处理字符串或数字类型
-        if let Some(s) = allow_from.as_str() {
-            return Some(s.to_string());
+        // allowFrom 本质是“入站发送者 allowlist”。这里用作出站通知收件人时，只能做启发式：
+        // 取第一个“具体的”条目，并跳过 "*" 这种通配符（常见于 dmPolicy/groupPolicy="open" 配置）。
+        for entry in allow_from {
+            if let Some(s) = entry.as_str() {
+                let s = s.trim();
+                if s.is_empty() || s == "*" {
+                    continue;
+                }
+                return Some(s.to_string());
+            }
+            if let Some(n) = entry.as_i64() {
+                return Some(n.to_string());
+            }
         }
-        if let Some(n) = allow_from.as_i64() {
-            return Some(n.to_string());
-        }
+
         None
     }
 
@@ -133,15 +140,22 @@ impl OpenclawNotifier {
         let allow_from = channels
             .get(channel_name)?
             .get("allowFrom")?
-            .as_array()?
-            .first()?;
+            .as_array()?;
 
-        if let Some(s) = allow_from.as_str() {
-            return Some(s.to_string());
+        // 同 extract_telegram_target：跳过 "*" 这种通配符，选择第一个具体条目。
+        for entry in allow_from {
+            if let Some(s) = entry.as_str() {
+                let s = s.trim();
+                if s.is_empty() || s == "*" {
+                    continue;
+                }
+                return Some(s.to_string());
+            }
+            if let Some(n) = entry.as_i64() {
+                return Some(n.to_string());
+            }
         }
-        if let Some(n) = allow_from.as_i64() {
-            return Some(n.to_string());
-        }
+
         None
     }
 
@@ -220,8 +234,8 @@ impl OpenclawNotifier {
                     .unwrap_or("");
 
                 format!(
-                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝",
-                    agent_id, tool_name, cwd, tool_input, snapshot_section
+                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```{}\n\n请回复:\n{} 1 = 允许\n{} 2 = 允许并记住\n{} 3 = 拒绝",
+                    agent_id, tool_name, cwd, tool_input, snapshot_section, agent_id, agent_id, agent_id
                 )
             }
             "notification" => {
@@ -237,7 +251,10 @@ impl OpenclawNotifier {
                 if notification_type == "idle_prompt" {
                     format!("⏸️ [CAM] {} 等待输入\n\n{}{}", agent_id, message, snapshot_section)
                 } else if notification_type == "permission_prompt" {
-                    format!("🔐 [CAM] {} 需要权限确认\n\n{}{}\n\n请回复: 1=允许, 2=允许并记住, 3=拒绝", agent_id, message, snapshot_section)
+                    format!(
+                        "🔐 [CAM] {} 需要权限确认\n\n{}{}\n\n请回复:\n{} 1 = 允许\n{} 2 = 允许并记住\n{} 3 = 拒绝",
+                        agent_id, message, snapshot_section, agent_id, agent_id, agent_id
+                    )
                 } else {
                     format!("📢 [CAM] {} 通知\n\n{}{}", agent_id, message, snapshot_section)
                 }
@@ -285,12 +302,20 @@ impl OpenclawNotifier {
     /// - MEDIUM: 需要知道（完成、空闲）→ 可以分配新任务
     /// - LOW: 可选（启动）→ 通常不需要通知
     fn get_urgency(event_type: &str, context: &str) -> &'static str {
+        // `cam notify` 会把终端快照追加到 JSON context 后面，导致直接解析失败。
+        // 这里先剥离快照部分，保证 urgency 判断稳定。
+        let raw_context = if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+            &context[..idx]
+        } else {
+            context
+        };
+
         match event_type {
             // 权限请求必须转发 - 阻塞任务进度
             "permission_request" => "HIGH",
             // notification 类型需要检查具体类型
             "notification" => {
-                let json: Option<serde_json::Value> = serde_json::from_str(context).ok();
+                let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
                 let notification_type = json.as_ref()
                     .and_then(|j| j.get("notification_type"))
                     .and_then(|v| v.as_str())
@@ -429,6 +454,14 @@ impl OpenclawNotifier {
     pub fn send_message(&self, message: &str) -> Result<()> {
         self.send_to_agent(message)
     }
+
+    /// 直接发送纯文本到检测到的 channel。
+    ///
+    /// 主要用于老的 `cam watch --openclaw` 路径，避免在多个模块里重复实现
+    /// `openclaw message send` 的参数拼装和 channel detection。
+    pub fn send_direct_text(&self, message: &str) -> Result<()> {
+        self.send_direct(message)
+    }
 }
 
 impl Default for OpenclawNotifier {
@@ -471,6 +504,24 @@ mod tests {
         // notification with unknown type
         let context = r#"{"notification_type": "other"}"#;
         assert_eq!(OpenclawNotifier::get_urgency("notification", context), "LOW");
+    }
+
+    #[test]
+    fn test_get_urgency_notification_idle_prompt_with_terminal_snapshot() {
+        let context = r#"{"notification_type": "idle_prompt", "message": "waiting"}
+
+--- 终端快照 ---
+line 1"#;
+        assert_eq!(OpenclawNotifier::get_urgency("notification", context), "MEDIUM");
+    }
+
+    #[test]
+    fn test_get_urgency_notification_permission_prompt_with_terminal_snapshot() {
+        let context = r#"{"notification_type": "permission_prompt", "message": "confirm?"}
+
+--- 终端快照 ---
+line 1"#;
+        assert_eq!(OpenclawNotifier::get_urgency("notification", context), "HIGH");
     }
 
     #[test]
@@ -612,7 +663,10 @@ $ cargo build
         assert!(message.contains("Bash"));
         assert!(message.contains("rm -rf /tmp/test"));
         assert!(message.contains("/workspace"));
-        assert!(message.contains("请回复: 1=允许"));
+        assert!(message.contains("请回复"));
+        assert!(message.contains("cam-123 1"));
+        assert!(message.contains("cam-123 2"));
+        assert!(message.contains("cam-123 3"));
     }
 
     #[test]
@@ -637,7 +691,10 @@ $ cargo build
         assert!(message.contains("🔐"));
         assert!(message.contains("权限确认"));
         assert!(message.contains("Allow file write?"));
-        assert!(message.contains("请回复: 1=允许"));
+        assert!(message.contains("请回复"));
+        assert!(message.contains("cam-123 1"));
+        assert!(message.contains("cam-123 2"));
+        assert!(message.contains("cam-123 3"));
     }
 
     #[test]
@@ -720,6 +777,18 @@ Build successful."#;
     }
 
     #[test]
+    fn test_extract_telegram_target_skips_wildcard() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "telegram": {
+                "allowFrom": ["*", "123456789"]
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_telegram_target(&channels);
+        assert_eq!(target, Some("123456789".to_string()));
+    }
+
+    #[test]
     fn test_extract_default_channel() {
         let channels: serde_json::Value = serde_json::from_str(r#"{
             "discord": {
@@ -736,6 +805,18 @@ Build successful."#;
         let channels: serde_json::Value = serde_json::from_str(r#"{
             "whatsapp": {
                 "allowFrom": ["+1234567890"]
+            }
+        }"#).unwrap();
+
+        let target = OpenclawNotifier::extract_allow_from(&channels, "whatsapp");
+        assert_eq!(target, Some("+1234567890".to_string()));
+    }
+
+    #[test]
+    fn test_extract_allow_from_skips_wildcard() {
+        let channels: serde_json::Value = serde_json::from_str(r#"{
+            "whatsapp": {
+                "allowFrom": ["*", "+1234567890"]
             }
         }"#).unwrap();
 
