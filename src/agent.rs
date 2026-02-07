@@ -218,7 +218,7 @@ impl AgentManager {
             let mut ready = false;
             for _ in 0..max_attempts {
                 std::thread::sleep(std::time::Duration::from_secs(1));
-                if let Ok(output) = self.tmux.capture_pane(&tmux_session, 20) {
+                if let Ok(output) = self.tmux.capture_pane(&tmux_session, 30) {
                     // 检测 Claude Code 就绪的标志：使用正则匹配行首 > 提示符
                     let claude_prompt_re = regex::Regex::new(r"(?m)^>\s*$").unwrap();
                     if claude_prompt_re.is_match(&output) || output.contains("Welcome to") || output.contains("Claude Code") {

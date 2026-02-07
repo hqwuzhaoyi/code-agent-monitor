@@ -5,7 +5,9 @@
 use clap::{Parser, Subcommand};
 use code_agent_monitor::{
     ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
-    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon
+    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon,
+    discover_teams, get_team_members,
+    list_tasks, list_team_names
 };
 use anyhow::Result;
 
@@ -93,6 +95,28 @@ enum Commands {
         /// Dry-run 模式（只打印不发送）
         #[arg(long)]
         dry_run: bool,
+    },
+    /// 列出所有 Claude Code Agent Teams
+    Teams {
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 列出指定 Team 的成员
+    TeamMembers {
+        /// Team 名称
+        team: String,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 列出指定 Team 的任务
+    Tasks {
+        /// Team 名称（可选，不指定则列出所有 team）
+        team: Option<String>,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -252,7 +276,12 @@ async fn main() -> Result<()> {
                             eprintln!("检测到等待输入: {} ({})", agent_id, pattern_type);
                             let _ = notifier.send_event(agent_id, "WaitingForInput", pattern_type, context);
                         }
-                        _ => {} // 忽略其他事件
+                        WatchEvent::ToolUse { agent_id, tool_name, tool_target, .. } => {
+                            eprintln!("检测到工具调用: {} - {}", agent_id, tool_name);
+                            let context = tool_target.as_deref().unwrap_or("");
+                            let _ = notifier.send_event(agent_id, "ToolUse", tool_name, context);
+                        }
+                        _ => {} // 忽略其他事件 (ToolUseBatch, AgentResumed)
                     }
                 }
 
@@ -405,6 +434,87 @@ async fn main() -> Result<()> {
                     }
                     eprintln!("通知发送失败: {}", e);
                     return Err(e);
+                }
+            }
+        }
+        Commands::Teams { json } => {
+            let teams = discover_teams();
+
+            if json {
+                println!("{}", serde_json::to_string_pretty(&teams)?);
+            } else {
+                if teams.is_empty() {
+                    println!("未发现任何 Team");
+                } else {
+                    println!("发现 {} 个 Team:\n", teams.len());
+                    for team in teams {
+                        println!("  {} ({} 成员)", team.team_name, team.members.len());
+                    }
+                }
+            }
+        }
+        Commands::TeamMembers { team, json } => {
+            match get_team_members(&team) {
+                Some(members) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&members)?);
+                    } else {
+                        println!("Team '{}' 的成员 ({}):\n", team, members.len());
+                        for member in members {
+                            println!("  {} | ID: {} | 类型: {}",
+                                member.name, member.agent_id, member.agent_type);
+                        }
+                    }
+                }
+                None => {
+                    eprintln!("未找到 Team: {}", team);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Tasks { team, json } => {
+            match team {
+                Some(team_name) => {
+                    let tasks = list_tasks(&team_name);
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&tasks)?);
+                    } else {
+                        if tasks.is_empty() {
+                            println!("Team '{}' 没有任务", team_name);
+                        } else {
+                            println!("Team '{}' 的任务 ({}):\n", team_name, tasks.len());
+                            for task in tasks {
+                                let owner_str = task.owner.as_deref().unwrap_or("-");
+                                let blocked_str = if task.blocked_by.is_empty() {
+                                    String::new()
+                                } else {
+                                    format!(" [blocked by: {}]", task.blocked_by.join(", "))
+                                };
+                                println!("  #{} [{}] {} (owner: {}){}",
+                                    task.id, task.status, task.subject, owner_str, blocked_str);
+                            }
+                        }
+                    }
+                }
+                None => {
+                    // 列出所有 team 的任务
+                    let team_names = list_team_names();
+                    if team_names.is_empty() {
+                        println!("未发现任何 Team");
+                    } else {
+                        for team_name in team_names {
+                            let tasks = list_tasks(&team_name);
+                            if !tasks.is_empty() {
+                                println!("Team '{}' ({} 任务):", team_name, tasks.len());
+                                for task in tasks {
+                                    let owner_str = task.owner.as_deref().unwrap_or("-");
+                                    println!("  #{} [{}] {} (owner: {})",
+                                        task.id, task.status, task.subject, owner_str);
+                                }
+                                println!();
+                            }
+                        }
+                    }
                 }
             }
         }

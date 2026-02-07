@@ -12,6 +12,8 @@ pub mod agent_watcher;
 pub mod throttle;
 pub mod openclaw_notifier;
 pub mod watcher_daemon;
+pub mod team_discovery;
+pub mod task_list;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -25,3 +27,5 @@ pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_ev
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use openclaw_notifier::OpenclawNotifier;
 pub use watcher_daemon::WatcherDaemon;
+pub use team_discovery::{TeamConfig, TeamMember, discover_teams, get_team_members, get_active_team_members};
+pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};

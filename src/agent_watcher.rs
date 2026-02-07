@@ -155,7 +155,7 @@ impl AgentWatcher {
             }
 
             // 3. 检测输入等待状态
-            if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 20) {
+            if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 30) {
                 let wait_result = self.input_detector.detect(&agent.agent_id, &output);
                 let was_waiting = self.last_waiting_state.get(&agent.agent_id).copied().unwrap_or(false);
 

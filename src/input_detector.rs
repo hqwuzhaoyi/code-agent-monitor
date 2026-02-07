@@ -55,8 +55,10 @@ impl InputWaitDetector {
     /// 创建带自定义空闲阈值的检测器
     pub fn with_idle_threshold(idle_threshold: Duration) -> Self {
         let patterns = vec![
-            // Claude Code 的 > 提示符（行首或空白后）
-            (Regex::new(r"(?m)^>\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
+            // Claude Code 的提示符（支持 > 和 ❯）
+            (Regex::new(r"(?m)^[>❯]\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
+            // Claude Code 的 ❯ 提示符（Unicode U+276F）
+            (Regex::new(r"❯\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
             // 确认提示 - 英文
             (Regex::new(r"\[Y/n\]").unwrap(), InputWaitPattern::Confirmation),
             (Regex::new(r"\[y/N\]").unwrap(), InputWaitPattern::Confirmation),
@@ -135,7 +137,7 @@ impl InputWaitDetector {
         }
 
         // 获取最后几行作为上下文
-        let context = Self::get_last_lines(output, 5);
+        let context = Self::get_last_lines(output, 15);
 
         // 检测等待模式
         for (pattern, pattern_type) in &self.patterns {
@@ -158,7 +160,7 @@ impl InputWaitDetector {
 
     /// 立即检测（不考虑空闲时间）
     pub fn detect_immediate(&self, output: &str) -> InputWaitResult {
-        let context = Self::get_last_lines(output, 5);
+        let context = Self::get_last_lines(output, 15);
 
         for (pattern, pattern_type) in &self.patterns {
             if pattern.is_match(&context) {
@@ -205,6 +207,30 @@ mod tests {
     fn test_detect_claude_prompt() {
         let detector = InputWaitDetector::new();
         let output = "Some output\n>\n";
+
+        let result = detector.detect_immediate(output);
+
+        assert!(result.is_waiting);
+        assert_eq!(result.pattern_type, Some(InputWaitPattern::ClaudePrompt));
+    }
+
+    #[test]
+    fn test_detect_claude_prompt_unicode() {
+        let detector = InputWaitDetector::new();
+        // Claude Code 使用 ❯ (U+276F) 作为提示符
+        let output = "Some output\n❯ \n";
+
+        let result = detector.detect_immediate(output);
+
+        assert!(result.is_waiting);
+        assert_eq!(result.pattern_type, Some(InputWaitPattern::ClaudePrompt));
+    }
+
+    #[test]
+    fn test_detect_claude_prompt_unicode_end_of_line() {
+        let detector = InputWaitDetector::new();
+        // 实际 Claude Code 终端输出格式
+        let output = "选择一个选项：\n1. 选项一\n2. 选项二\n❯ ";
 
         let result = detector.detect_immediate(output);
 

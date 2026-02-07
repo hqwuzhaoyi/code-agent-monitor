@@ -181,17 +181,17 @@ CAM 支持自动推送 Agent 状态变化到 clawdbot：
 
 | Urgency | 事件类型 | 发送方式 |
 |---------|---------|---------|
-| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | 直接发送到 channel |
-| **MEDIUM** | stop, session_end, AgentExited, notification(idle_prompt) | 直接发送到 channel |
-| **LOW** | session_start, 其他 notification | 发给 OpenClaw Agent |
+| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | system event → AI 处理 → channel |
+| **MEDIUM** | stop, session_end, AgentExited, ToolUse, notification(idle_prompt) | system event → AI 处理 → channel |
+| **LOW** | session_start, 其他 notification | 静默（不发送） |
 
 Channel 自动从 `~/.openclaw/openclaw.json` 检测，按优先级：telegram > whatsapp > discord > slack > signal
 
-**通知流程**：
-1. Watcher 检测到事件
-2. 通过 `openclaw agent --session-id main` 发送到 clawdbot
-3. clawdbot 询问用户如何处理
-4. 用户确认后，clawdbot 调用 `cam_agent_send` 执行
+**通知流程**（2026-02 更新）：
+1. Watcher/Hook 检测到事件
+2. 通过 `openclaw system event --text <payload> --mode now` 发送结构化 JSON payload
+3. OpenClaw Agent 收到 payload，AI 智能处理（风险评估、自然语言描述）
+4. 用户收到简洁的通知，可用 y/n 快捷回复
 
 **手动控制 watcher**：
 ```bash
@@ -404,12 +404,27 @@ openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送�
 ```
 src/
 ├── main.rs              # CLI 入口，处理 notify/watch 等命令
-├── openclaw_notifier.rs # 通知系统核心（urgency 分类、channel 检测、消息格式化）
+├── openclaw_notifier.rs # 通知系统核心（urgency 分类、payload 生成、路由）
 ├── agent.rs             # Agent 管理（启动、停止、列表）
 ├── tmux.rs              # Tmux 会话操作
-├── input_detector.rs    # 终端输入模式检测
+├── input_detector.rs    # 终端输入模式检测（20+ 种模式）
 ├── session.rs           # Claude Code 会话管理
+├── team_discovery.rs    # Agent Teams 发现（读取 ~/.claude/teams/）
+├── task_list.rs         # Task List 集成（读取 ~/.claude/tasks/）
 └── mcp.rs               # MCP Server 实现
+```
+
+### 新增 CLI 命令（2026-02）
+
+```bash
+# 列出所有 Agent Teams
+cam teams [--json]
+
+# 列出 team 成员
+cam team-members <team> [--json]
+
+# 列出 team 任务
+cam tasks <team> [--json]
 ```
 
 ### 运行测试
@@ -442,13 +457,25 @@ cargo build --release
 
 1. 在 `get_urgency()` 中添加 urgency 分类
 2. 在 `format_event()` 中添加消息格式化
-3. 在 `main.rs` 的 `needs_snapshot` 中决定是否需要终端快照
-4. 添加对应的单元测试
+3. 在 `build_event_object()` 中添加结构化 payload
+4. 在 `generate_summary()` 中添加摘要生成
+5. 在 `main.rs` 的 `needs_snapshot` 中决定是否需要终端快照
+6. 添加对应的单元测试
 
-### 通知系统架构
+### 更新插件二进制
+
+修改代码后，需要更新插件目录的二进制文件：
+
+```bash
+cargo build --release
+cp target/release/cam plugins/cam/bin/cam
+openclaw gateway restart
+```
+
+### 通知系统架构（2026-02 更新）
 
 ```
-Claude Code Hook
+Claude Code Hook / Watcher Daemon
        │
        ▼
   cam notify
@@ -459,11 +486,45 @@ Claude Code Hook
 ├──────────────────┤
 │ 1. 解析 context  │
 │ 2. 判断 urgency  │
-│ 3. 格式化消息    │
+│ 3. 创建 payload  │
 │ 4. 路由发送      │
 └──────────────────┘
        │
-       ├─── HIGH/MEDIUM ──▶ openclaw message send (直接到 channel)
+       ├─── HIGH/MEDIUM ──▶ openclaw system event (结构化 payload)
+       │                           │
+       │                           ▼
+       │                    OpenClaw Agent (AI 处理)
+       │                           │
+       │                           ▼
+       │                    channel (Telegram/WhatsApp)
        │
-       └─── LOW ──────────▶ openclaw agent (发给 Agent)
+       └─── LOW ──────────▶ 静默（不发送）
 ```
+
+### Payload 格式
+
+HIGH/MEDIUM urgency 事件发送结构化 JSON payload：
+
+```json
+{
+  "type": "cam_notification",
+  "version": "1.0",
+  "urgency": "HIGH",
+  "event_type": "permission_request",
+  "agent_id": "cam-xxx",
+  "project": "/path/to/project",
+  "summary": "请求执行 Bash 工具",
+  "event": { "tool_name": "Bash", "tool_input": {...} },
+  "timestamp": "2026-02-08T00:00:00Z"
+}
+```
+
+### 快捷回复
+
+用户可以用简单的 y/n 回复，而不需要输入 agent_id：
+
+| 用户输入 | 处理方式 |
+|----------|----------|
+| y / yes / 是 / 好 / 可以 | 发送 "y" 到等待中的 agent |
+| n / no / 否 / 不 / 取消 | 发送 "n" 到等待中的 agent |
+| 1 / 2 / 3 | 发送对应选项到等待中的 agent |

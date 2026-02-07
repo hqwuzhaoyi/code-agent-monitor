@@ -1,12 +1,27 @@
 //! OpenClaw 通知模块 - 通过 openclaw CLI 发送事件到 channel 或 agent
 //!
 //! 通知路由策略：
-//! - HIGH/MEDIUM urgency → 直接发送到 channel（绕过 Agent 决策）
-//! - LOW urgency → 发送给 Agent（让 Agent 汇总或选择性转发）
+//! - HIGH/MEDIUM urgency → 通过 system event 发送结构化 payload（触发 heartbeat）
+//! - LOW urgency → 静默处理（避免上下文累积）
+//!
+//! Payload 格式：
+//! ```json
+//! {
+//!   "type": "cam_notification",
+//!   "version": "1.0",
+//!   "urgency": "HIGH",
+//!   "event_type": "permission_request",
+//!   "agent_id": "cam-xxx",
+//!   "project": "/path/to/project",
+//!   "event": { ... },
+//!   "summary": "简短摘要"
+//! }
+//! ```
 
 use anyhow::Result;
 use std::process::Command;
 use std::fs;
+use chrono::Utc;
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -291,6 +306,15 @@ impl OpenclawNotifier {
                     agent_id, pattern_or_path, snapshot_section
                 )
             }
+            "ToolUse" => {
+                // pattern_or_path = tool_name, raw_context = tool_target
+                let target_info = if raw_context.is_empty() {
+                    String::new()
+                } else {
+                    format!(" → {}", raw_context)
+                };
+                format!("🔧 [CAM] {} 执行: {}{}", agent_id, pattern_or_path, target_info)
+            }
             _ => format!("[CAM] {} - {}: {}{}", agent_id, event_type, raw_context, snapshot_section),
         }
     }
@@ -301,7 +325,7 @@ impl OpenclawNotifier {
     /// - HIGH: 必须立即响应（权限请求、错误）→ 阻塞任务进度
     /// - MEDIUM: 需要知道（完成、空闲）→ 可以分配新任务
     /// - LOW: 可选（启动）→ 通常不需要通知
-    fn get_urgency(event_type: &str, context: &str) -> &'static str {
+    pub fn get_urgency(event_type: &str, context: &str) -> &'static str {
         // `cam notify` 会把终端快照追加到 JSON context 后面，导致直接解析失败。
         // 这里先剥离快照部分，保证 urgency 判断稳定。
         let raw_context = if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
@@ -334,14 +358,182 @@ impl OpenclawNotifier {
             "stop" | "session_end" | "AgentExited" => "MEDIUM",
             // 启动通知 - 可选
             "session_start" => "LOW",
+            // 工具调用 - 跟踪信息
+            "ToolUse" => "MEDIUM",
             // 其他
             _ => "LOW",
         }
     }
 
-    /// 发送事件到 channel 或 agent
-    /// HIGH/MEDIUM urgency → 直接发送到 channel
-    /// LOW urgency → 发送给 Agent
+    /// 创建结构化 payload 用于 gateway wake
+    fn create_payload(
+        &self,
+        agent_id: &str,
+        event_type: &str,
+        pattern_or_path: &str,
+        context: &str,
+    ) -> serde_json::Value {
+        let urgency = Self::get_urgency(event_type, context);
+
+        // 分离终端快照和原始 context
+        let (raw_context, terminal_snapshot) = if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+            let (before, after) = context.split_at(idx);
+            let snapshot = after.trim_start_matches("\n\n--- 终端快照 ---\n");
+            (before, Some(snapshot.to_string()))
+        } else {
+            (context, None)
+        };
+
+        // 尝试解析 JSON context
+        let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
+
+        // 提取项目路径
+        let project = json.as_ref()
+            .and_then(|j| j.get("cwd"))
+            .and_then(|v| v.as_str())
+            .unwrap_or(pattern_or_path);
+
+        // 构建 event 对象
+        let event = self.build_event_object(event_type, pattern_or_path, &json, raw_context);
+
+        // 生成简短摘要
+        let summary = self.generate_summary(event_type, &json, pattern_or_path);
+
+        let mut payload = serde_json::json!({
+            "type": "cam_notification",
+            "version": "1.0",
+            "urgency": urgency,
+            "event_type": event_type,
+            "agent_id": agent_id,
+            "project": project,
+            "timestamp": Utc::now().to_rfc3339(),
+            "event": event,
+            "summary": summary
+        });
+
+        // 添加终端快照（如果有）
+        if let Some(snapshot) = terminal_snapshot {
+            // 截取最后 15 行
+            let lines: Vec<&str> = snapshot.lines().collect();
+            let truncated = if lines.len() > 15 {
+                lines[lines.len() - 15..].join("\n")
+            } else {
+                snapshot
+            };
+            payload["terminal_snapshot"] = serde_json::Value::String(truncated);
+        }
+
+        payload
+    }
+
+    /// 构建 event 对象
+    fn build_event_object(
+        &self,
+        event_type: &str,
+        pattern_or_path: &str,
+        json: &Option<serde_json::Value>,
+        raw_context: &str,
+    ) -> serde_json::Value {
+        match event_type {
+            "permission_request" => {
+                let tool_name = json.as_ref()
+                    .and_then(|j| j.get("tool_name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let tool_input = json.as_ref()
+                    .and_then(|j| j.get("tool_input"))
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null);
+
+                serde_json::json!({
+                    "tool_name": tool_name,
+                    "tool_input": tool_input
+                })
+            }
+            "notification" => {
+                let message = json.as_ref()
+                    .and_then(|j| j.get("message"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                let notification_type = json.as_ref()
+                    .and_then(|j| j.get("notification_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+
+                serde_json::json!({
+                    "notification_type": notification_type,
+                    "message": message
+                })
+            }
+            "WaitingForInput" => {
+                serde_json::json!({
+                    "pattern_type": pattern_or_path,
+                    "prompt": raw_context
+                })
+            }
+            "Error" => {
+                serde_json::json!({
+                    "message": raw_context
+                })
+            }
+            "AgentExited" => {
+                serde_json::json!({
+                    "project_path": pattern_or_path
+                })
+            }
+            "ToolUse" => {
+                serde_json::json!({
+                    "tool_name": pattern_or_path,
+                    "tool_target": raw_context
+                })
+            }
+            _ => {
+                serde_json::json!({
+                    "raw_context": raw_context
+                })
+            }
+        }
+    }
+
+    /// 生成简短摘要
+    fn generate_summary(
+        &self,
+        event_type: &str,
+        json: &Option<serde_json::Value>,
+        pattern_or_path: &str,
+    ) -> String {
+        match event_type {
+            "permission_request" => {
+                let tool_name = json.as_ref()
+                    .and_then(|j| j.get("tool_name"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                format!("请求执行 {} 工具", tool_name)
+            }
+            "notification" => {
+                let notification_type = json.as_ref()
+                    .and_then(|j| j.get("notification_type"))
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("");
+                match notification_type {
+                    "idle_prompt" => "等待用户输入".to_string(),
+                    "permission_prompt" => "需要权限确认".to_string(),
+                    _ => "通知".to_string()
+                }
+            }
+            "WaitingForInput" => format!("等待输入: {}", pattern_or_path),
+            "Error" => "发生错误".to_string(),
+            "AgentExited" => "Agent 已退出".to_string(),
+            "ToolUse" => format!("执行工具: {}", pattern_or_path),
+            "stop" | "session_end" => "会话已结束".to_string(),
+            "session_start" => "会话已启动".to_string(),
+            _ => event_type.to_string()
+        }
+    }
+
+    /// 发送事件到 channel
+    /// HIGH/MEDIUM urgency → 通过 gateway wake 发送结构化 payload
+    /// LOW urgency → 静默处理（避免 agent session 上下文累积导致去重问题）
     pub fn send_event(
         &self,
         agent_id: &str,
@@ -349,24 +541,32 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<()> {
-        let message = self.format_event(agent_id, event_type, pattern_or_path, context);
         let urgency = Self::get_urgency(event_type, context);
 
         match urgency {
             "HIGH" | "MEDIUM" => {
-                if self.channel_config.is_some() {
-                    // 直接发送到 channel
-                    self.send_direct(&message)
-                } else {
-                    // Fallback: 没有配置 channel，发给 Agent
-                    let wrapped = self.wrap_for_agent(&message, urgency, event_type, agent_id);
-                    self.send_to_agent(&wrapped)
+                // 创建结构化 payload
+                let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
+
+                // 通过 gateway wake 发送
+                let result = self.send_via_gateway_wake_payload(&payload);
+
+                // 如果 gateway wake 失败且有 channel 配置，回退到直接发送
+                if result.is_err() && self.channel_config.is_some() {
+                    eprintln!("Gateway wake 失败，回退到直接发送");
+                    let message = self.format_event(agent_id, event_type, pattern_or_path, context);
+                    return self.send_direct(&message);
                 }
+
+                result
             }
             _ => {
-                // LOW urgency: 发给 Agent
-                let wrapped = self.wrap_for_agent(&message, urgency, event_type, agent_id);
-                self.send_to_agent(&wrapped)
+                // LOW urgency: 静默处理，不发送通知
+                // 参考 coding-agent skill 设计：启动通知由调用方自己说，不需要系统推送
+                if self.dry_run {
+                    eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type, agent_id);
+                }
+                Ok(())
             }
         }
     }
@@ -409,7 +609,76 @@ impl OpenclawNotifier {
         }
     }
 
-    /// 发送消息给 Agent
+    /// 通过 system event 发送结构化 payload
+    /// 参考 coding-agent skill 设计：一次性事件，触发 heartbeat
+    fn send_via_gateway_wake_payload(&self, payload: &serde_json::Value) -> Result<()> {
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send via system event");
+            eprintln!("[DRY-RUN] Payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
+            return Ok(());
+        }
+
+        let payload_text = payload.to_string();
+
+        let result = Command::new(&self.openclaw_cmd)
+            .args([
+                "system", "event",
+                "--text", &payload_text,
+                "--mode", "now",
+            ])
+            .output();
+
+        match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("System event 发送失败: {}", stderr);
+                    return Err(anyhow::anyhow!("System event failed: {}", stderr));
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("无法执行 system event: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    /// 通过 system event 发送通知（旧接口，保留兼容性）
+    /// 参考 coding-agent skill 设计：一次性事件，触发 heartbeat
+    #[allow(dead_code)]
+    fn send_via_gateway_wake(&self, message: &str) -> Result<()> {
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send via system event");
+            eprintln!("[DRY-RUN] Message: {}", message);
+            return Ok(());
+        }
+
+        let result = Command::new(&self.openclaw_cmd)
+            .args([
+                "system", "event",
+                "--text", message,
+                "--mode", "now",
+            ])
+            .output();
+
+        match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("System event 发送失败: {}", stderr);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("无法执行 system event: {}", e);
+                Err(e.into())
+            }
+        }
+    }
+
+    /// 发送消息给 Agent (已废弃，保留兼容性)
+    #[allow(dead_code)]
     fn send_to_agent(&self, message: &str) -> Result<()> {
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send to agent session={}", self.session_id);
@@ -442,7 +711,8 @@ impl OpenclawNotifier {
         }
     }
 
-    /// 为 Agent 包装消息（添加元数据）
+    /// 为 Agent 包装消息（添加元数据）- 已废弃
+    #[allow(dead_code)]
     fn wrap_for_agent(&self, message: &str, urgency: &str, event_type: &str, agent_id: &str) -> String {
         format!(
             "{}\n\n---\n[CAM_META] urgency={} event_type={} agent_id={}",
@@ -450,7 +720,8 @@ impl OpenclawNotifier {
         )
     }
 
-    /// 发送消息到 clawdbot (保留兼容性)
+    /// 发送消息到 clawdbot (已废弃，保留兼容性)
+    #[allow(dead_code)]
     pub fn send_message(&self, message: &str) -> Result<()> {
         self.send_to_agent(message)
     }
@@ -490,6 +761,7 @@ mod tests {
         assert_eq!(OpenclawNotifier::get_urgency("stop", ""), "MEDIUM");
         assert_eq!(OpenclawNotifier::get_urgency("session_end", ""), "MEDIUM");
         assert_eq!(OpenclawNotifier::get_urgency("AgentExited", ""), "MEDIUM");
+        assert_eq!(OpenclawNotifier::get_urgency("ToolUse", ""), "MEDIUM");
 
         // notification with idle_prompt
         let context = r#"{"notification_type": "idle_prompt"}"#;
@@ -750,6 +1022,24 @@ Build successful."#;
         assert!(message.contains("All tests passed"));
     }
 
+    #[test]
+    fn test_format_tool_use() {
+        let notifier = OpenclawNotifier::new();
+
+        // 带 target 的工具调用
+        let message = notifier.format_event("cam-123", "ToolUse", "Edit", "src/main.rs");
+        assert!(message.contains("🔧"));
+        assert!(message.contains("cam-123"));
+        assert!(message.contains("Edit"));
+        assert!(message.contains("src/main.rs"));
+
+        // 不带 target 的工具调用
+        let message2 = notifier.format_event("cam-456", "ToolUse", "Read", "");
+        assert!(message2.contains("🔧"));
+        assert!(message2.contains("Read"));
+        assert!(!message2.contains("→"));
+    }
+
     // ==================== Channel 检测测试 ====================
 
     #[test]
@@ -845,5 +1135,135 @@ Build successful."#;
         // 应该包含分隔符
         assert!(wrapped.contains("---"));
         assert!(wrapped.contains("[CAM_META]"));
+    }
+
+    // ==================== Payload 创建测试 ====================
+
+    #[test]
+    fn test_create_payload_permission_request() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "cwd": "/workspace"}"#;
+        let payload = notifier.create_payload("cam-123", "permission_request", "", context);
+
+        assert_eq!(payload["type"], "cam_notification");
+        assert_eq!(payload["version"], "1.0");
+        assert_eq!(payload["urgency"], "HIGH");
+        assert_eq!(payload["event_type"], "permission_request");
+        assert_eq!(payload["agent_id"], "cam-123");
+        assert_eq!(payload["project"], "/workspace");
+        assert_eq!(payload["event"]["tool_name"], "Bash");
+        assert!(payload["event"]["tool_input"]["command"].as_str().unwrap().contains("rm -rf"));
+        assert!(payload["summary"].as_str().unwrap().contains("Bash"));
+        assert!(payload["timestamp"].as_str().is_some());
+    }
+
+    #[test]
+    fn test_create_payload_error() {
+        let notifier = OpenclawNotifier::new();
+
+        let payload = notifier.create_payload("cam-456", "Error", "", "API rate limit exceeded");
+
+        assert_eq!(payload["type"], "cam_notification");
+        assert_eq!(payload["urgency"], "HIGH");
+        assert_eq!(payload["event_type"], "Error");
+        assert_eq!(payload["event"]["message"], "API rate limit exceeded");
+        assert_eq!(payload["summary"], "发生错误");
+    }
+
+    #[test]
+    fn test_create_payload_waiting_for_input() {
+        let notifier = OpenclawNotifier::new();
+
+        let payload = notifier.create_payload("cam-789", "WaitingForInput", "Confirmation", "Continue? [Y/n]");
+
+        assert_eq!(payload["urgency"], "HIGH");
+        assert_eq!(payload["event_type"], "WaitingForInput");
+        assert_eq!(payload["event"]["pattern_type"], "Confirmation");
+        assert_eq!(payload["event"]["prompt"], "Continue? [Y/n]");
+        assert!(payload["summary"].as_str().unwrap().contains("Confirmation"));
+    }
+
+    #[test]
+    fn test_create_payload_agent_exited() {
+        let notifier = OpenclawNotifier::new();
+
+        let payload = notifier.create_payload("cam-abc", "AgentExited", "/myproject", "");
+
+        assert_eq!(payload["urgency"], "MEDIUM");
+        assert_eq!(payload["event_type"], "AgentExited");
+        assert_eq!(payload["event"]["project_path"], "/myproject");
+        assert_eq!(payload["summary"], "Agent 已退出");
+    }
+
+    #[test]
+    fn test_create_payload_notification_idle_prompt() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "idle_prompt", "message": "Task completed"}"#;
+        let payload = notifier.create_payload("cam-def", "notification", "", context);
+
+        assert_eq!(payload["urgency"], "MEDIUM");
+        assert_eq!(payload["event"]["notification_type"], "idle_prompt");
+        assert_eq!(payload["event"]["message"], "Task completed");
+        assert_eq!(payload["summary"], "等待用户输入");
+    }
+
+    #[test]
+    fn test_create_payload_with_terminal_snapshot() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"cwd": "/workspace"}
+
+--- 终端快照 ---
+$ cargo build
+   Compiling myapp v0.1.0
+    Finished release target"#;
+
+        let payload = notifier.create_payload("cam-123", "stop", "", context);
+
+        assert_eq!(payload["urgency"], "MEDIUM");
+        assert!(payload["terminal_snapshot"].as_str().is_some());
+        assert!(payload["terminal_snapshot"].as_str().unwrap().contains("cargo build"));
+    }
+
+    #[test]
+    fn test_create_payload_snapshot_truncation() {
+        let notifier = OpenclawNotifier::new();
+
+        // 创建超过 15 行的终端输出
+        let mut long_output = String::from(r#"{"cwd": "/tmp"}
+
+--- 终端快照 ---
+"#);
+        for i in 1..=20 {
+            long_output.push_str(&format!("line {}\n", i));
+        }
+
+        let payload = notifier.create_payload("cam-123", "stop", "", &long_output);
+
+        let snapshot = payload["terminal_snapshot"].as_str().unwrap();
+        // 应该只包含最后 15 行
+        assert!(snapshot.contains("line 20"));
+        assert!(snapshot.contains("line 6"));
+        assert!(!snapshot.contains("line 5\n"));
+    }
+
+    #[test]
+    fn test_generate_summary() {
+        let notifier = OpenclawNotifier::new();
+
+        // permission_request
+        let json: Option<serde_json::Value> = serde_json::from_str(r#"{"tool_name": "Write"}"#).ok();
+        assert!(notifier.generate_summary("permission_request", &json, "").contains("Write"));
+
+        // Error
+        assert_eq!(notifier.generate_summary("Error", &None, ""), "发生错误");
+
+        // AgentExited
+        assert_eq!(notifier.generate_summary("AgentExited", &None, ""), "Agent 已退出");
+
+        // WaitingForInput
+        assert!(notifier.generate_summary("WaitingForInput", &None, "Confirmation").contains("Confirmation"));
     }
 }

@@ -6,6 +6,8 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::{ProcessScanner, SessionManager, AgentManager, StartAgentRequest};
 use crate::jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use};
 use crate::input_detector::InputWaitDetector;
+use crate::team_discovery;
+use crate::task_list;
 
 /// MCP 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,6 +116,9 @@ impl McpServer {
             "agent/logs" => self.handle_agent_logs(request.params),
             "agent/stop" => self.handle_agent_stop(request.params),
             "agent/status" => self.handle_agent_status(request.params),
+            // Team discovery methods
+            "team/list" => self.handle_team_list(),
+            "team/members" => self.handle_team_members(request.params),
             _ => Err(anyhow::anyhow!("Method not found: {}", request.method)),
         };
 
@@ -291,6 +296,49 @@ impl McpServer {
             "recent_errors": errors_formatted,
             "started_at": agent.started_at
         }))
+    }
+
+    /// 处理 team/list - 列出所有 teams
+    fn handle_team_list(&self) -> Result<serde_json::Value> {
+        let teams = team_discovery::discover_teams();
+
+        let teams_json: Vec<serde_json::Value> = teams.iter().map(|t| {
+            serde_json::json!({
+                "team_name": t.team_name,
+                "member_count": t.members.len()
+            })
+        }).collect();
+
+        Ok(serde_json::json!({
+            "teams": teams_json
+        }))
+    }
+
+    /// 处理 team/members - 获取指定 team 的成员
+    fn handle_team_members(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let team_name = params["team_name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing team_name"))?;
+
+        match team_discovery::get_team_members(team_name) {
+            Some(members) => {
+                let members_json: Vec<serde_json::Value> = members.iter().map(|m| {
+                    serde_json::json!({
+                        "name": m.name,
+                        "agent_id": m.agent_id,
+                        "agent_type": m.agent_type
+                    })
+                }).collect();
+
+                Ok(serde_json::json!({
+                    "team_name": team_name,
+                    "members": members_json
+                }))
+            }
+            None => Err(anyhow::anyhow!("Team not found: {}", team_name)),
+        }
     }
 
     /// 处理 initialize
@@ -534,6 +582,86 @@ impl McpServer {
                     "required": ["session_id"]
                 }),
             },
+            // Team discovery tools
+            McpTool {
+                name: "team_list".to_string(),
+                description: "列出所有 Claude Code Agent Teams".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
+            McpTool {
+                name: "team_members".to_string(),
+                description: "获取指定 Team 的成员列表".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team_name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["team_name"]
+                }),
+            },
+            // Task list tools
+            McpTool {
+                name: "task_list".to_string(),
+                description: "列出指定 Team 的所有任务".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team_name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["team_name"]
+                }),
+            },
+            McpTool {
+                name: "task_get".to_string(),
+                description: "获取指定任务的详细信息".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team_name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": "任务 ID"
+                        }
+                    },
+                    "required": ["team_name", "task_id"]
+                }),
+            },
+            McpTool {
+                name: "task_update".to_string(),
+                description: "更新任务状态".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team_name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "task_id": {
+                            "type": "string",
+                            "description": "任务 ID"
+                        },
+                        "status": {
+                            "type": "string",
+                            "enum": ["pending", "in_progress", "completed", "deleted"],
+                            "description": "新状态"
+                        }
+                    },
+                    "required": ["team_name", "task_id", "status"]
+                }),
+            },
         ];
 
         Ok(serde_json::json!({ "tools": tools }))
@@ -724,6 +852,95 @@ impl McpServer {
                     "content": [{
                         "type": "text",
                         "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            // Team discovery tools
+            "team_list" => {
+                let result = self.handle_team_list()?;
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "team_members" => {
+                let result = self.handle_team_members(Some(arguments))?;
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            // Task list tools
+            "task_list" => {
+                let team_name = arguments.get("team_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
+
+                let tasks = task_list::list_tasks(team_name);
+                let result: Vec<serde_json::Value> = tasks.iter().map(|t| {
+                    serde_json::json!({
+                        "id": t.id,
+                        "subject": t.subject,
+                        "status": t.status.to_string(),
+                        "owner": t.owner,
+                        "blocked_by": t.blocked_by
+                    })
+                }).collect();
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "task_get" => {
+                let team_name = arguments.get("team_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
+                let task_id = arguments.get("task_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 task_id 参数"))?;
+
+                let task = task_list::get_task(team_name, task_id)
+                    .ok_or_else(|| anyhow::anyhow!("任务 {} 不存在", task_id))?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&task)?
+                    }]
+                }))
+            }
+            "task_update" => {
+                let team_name = arguments.get("team_name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
+                let task_id = arguments.get("task_id")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 task_id 参数"))?;
+                let status_str = arguments.get("status")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 status 参数"))?;
+
+                let status = match status_str {
+                    "pending" => task_list::TaskStatus::Pending,
+                    "in_progress" => task_list::TaskStatus::InProgress,
+                    "completed" => task_list::TaskStatus::Completed,
+                    "deleted" => task_list::TaskStatus::Deleted,
+                    _ => return Err(anyhow::anyhow!("无效的状态: {}", status_str)),
+                };
+
+                task_list::update_task_status(team_name, task_id, status)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("任务 {} 状态已更新为 {}", task_id, status_str)
                     }]
                 }))
             }
