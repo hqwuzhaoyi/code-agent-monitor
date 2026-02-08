@@ -7,7 +7,8 @@ use code_agent_monitor::{
     ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
     AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult,
     discover_teams, get_team_members,
-    list_tasks, list_team_names
+    list_tasks, list_team_names,
+    TeamBridge, InboxMessage
 };
 use anyhow::Result;
 
@@ -120,6 +121,64 @@ enum Commands {
         /// 输出 JSON 格式
         #[arg(long)]
         json: bool,
+    },
+    /// 创建新的 Agent Team
+    TeamCreate {
+        /// Team 名称
+        name: String,
+        /// Team 描述
+        #[arg(long, short)]
+        description: Option<String>,
+        /// 项目路径
+        #[arg(long, short)]
+        project: Option<String>,
+    },
+    /// 删除 Agent Team
+    TeamDelete {
+        /// Team 名称
+        name: String,
+    },
+    /// 获取 Team 状态
+    TeamStatus {
+        /// Team 名称
+        name: String,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 读取成员 inbox
+    Inbox {
+        /// Team 名称
+        team: String,
+        /// 成员名称
+        #[arg(long, short)]
+        member: Option<String>,
+        /// 只显示未读消息
+        #[arg(long)]
+        unread: bool,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 发送消息到成员 inbox
+    InboxSend {
+        /// Team 名称
+        team: String,
+        /// 成员名称
+        member: String,
+        /// 消息内容
+        message: String,
+        /// 发送者名称
+        #[arg(long, default_value = "cam")]
+        from: String,
+    },
+    /// 实时监控 Team inbox
+    TeamWatch {
+        /// Team 名称
+        team: String,
+        /// 轮询间隔（秒）
+        #[arg(long, short, default_value = "2")]
+        interval: u64,
     },
 }
 
@@ -426,8 +485,11 @@ async fn main() -> Result<()> {
 
             // 获取终端快照
             let terminal_snapshot = if needs_snapshot {
-                // 尝试通过 session_id 查找 agent
-                if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
+                // 优先通过 resolved_agent_id 直接获取
+                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 15) {
+                    Some(logs)
+                } else if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
+                    // 尝试通过 session_id 查找 agent
                     agent_manager.get_logs(&agent.agent_id, 15).ok()
                 } else if let Some(ref cwd_path) = cwd {
                     // 通过 cwd 查找
@@ -576,6 +638,212 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
+            }
+        }
+        Commands::TeamCreate { name, description, project } => {
+            let bridge = TeamBridge::new();
+            let desc = description.as_deref().unwrap_or("Created by CAM");
+            let proj = project.as_deref().unwrap_or(".");
+
+            match bridge.create_team(&name, desc, proj) {
+                Ok(_) => {
+                    println!("已创建 Team: {}", name);
+                    println!("  描述: {}", desc);
+                    println!("  项目路径: {}", proj);
+                }
+                Err(e) => {
+                    eprintln!("创建 Team 失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::TeamDelete { name } => {
+            let bridge = TeamBridge::new();
+
+            match bridge.delete_team(&name) {
+                Ok(_) => {
+                    println!("已删除 Team: {}", name);
+                }
+                Err(e) => {
+                    eprintln!("删除 Team 失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::TeamStatus { name, json } => {
+            let bridge = TeamBridge::new();
+
+            match bridge.get_team_status(&name) {
+                Ok(status) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&status)?);
+                    } else {
+                        println!("Team: {}", status.team_name);
+                        if let Some(desc) = &status.description {
+                            println!("  描述: {}", desc);
+                        }
+                        if let Some(path) = &status.project_path {
+                            println!("  项目路径: {}", path);
+                        }
+                        println!("  成员: {} 人", status.members.len());
+                        for member in &status.members {
+                            let active = if member.is_active { "活跃" } else { "空闲" };
+                            println!("    - {} ({}) [未读: {}]", member.name, active, member.unread_count);
+                        }
+                        println!("  任务: {} 待处理, {} 已完成", status.pending_tasks, status.completed_tasks);
+                        println!("  未读消息: {}", status.unread_messages);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("获取 Team 状态失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Inbox { team, member, unread, json } => {
+            let bridge = TeamBridge::new();
+
+            // 如果指定了成员，只读取该成员的 inbox
+            if let Some(member_name) = member {
+                match bridge.read_inbox(&team, &member_name) {
+                    Ok(messages) => {
+                        let filtered: Vec<_> = if unread {
+                            messages.into_iter().filter(|m| !m.read).collect()
+                        } else {
+                            messages
+                        };
+
+                        if json {
+                            println!("{}", serde_json::to_string_pretty(&filtered)?);
+                        } else {
+                            if filtered.is_empty() {
+                                println!("{}@{} 没有{}消息", member_name, team, if unread { "未读" } else { "" });
+                            } else {
+                                println!("{}@{} 的消息 ({}):\n", member_name, team, filtered.len());
+                                for msg in filtered {
+                                    let read_mark = if msg.read { "✓" } else { "●" };
+                                    println!("{} [{}] {}: {}", read_mark, msg.timestamp.format("%H:%M"), msg.from, msg.text);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("读取 inbox 失败: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            } else {
+                // 读取所有成员的 inbox
+                match bridge.get_team_status(&team) {
+                    Ok(status) => {
+                        for member_status in &status.members {
+                            if let Ok(messages) = bridge.read_inbox(&team, &member_status.name) {
+                                let filtered: Vec<_> = if unread {
+                                    messages.into_iter().filter(|m| !m.read).collect()
+                                } else {
+                                    messages
+                                };
+
+                                if !filtered.is_empty() {
+                                    println!("{}@{} ({} 条):", member_status.name, team, filtered.len());
+                                    for msg in filtered.iter().take(3) {
+                                        let read_mark = if msg.read { "✓" } else { "●" };
+                                        let text_preview = if msg.text.len() > 50 {
+                                            format!("{}...", &msg.text[..50])
+                                        } else {
+                                            msg.text.clone()
+                                        };
+                                        println!("  {} {}: {}", read_mark, msg.from, text_preview);
+                                    }
+                                    if filtered.len() > 3 {
+                                        println!("  ... 还有 {} 条消息", filtered.len() - 3);
+                                    }
+                                    println!();
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("获取 Team 状态失败: {}", e);
+                        std::process::exit(1);
+                    }
+                }
+            }
+        }
+        Commands::InboxSend { team, member, message, from } => {
+            let bridge = TeamBridge::new();
+
+            let msg = InboxMessage {
+                from,
+                text: message.clone(),
+                summary: None,
+                timestamp: chrono::Utc::now(),
+                color: None,
+                read: false,
+            };
+
+            match bridge.send_to_inbox(&team, &member, msg) {
+                Ok(_) => {
+                    println!("已发送消息到 {}@{}", member, team);
+                }
+                Err(e) => {
+                    eprintln!("发送消息失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::TeamWatch { team, interval } => {
+            use std::time::Duration;
+            use tokio::time::sleep;
+
+            let bridge = TeamBridge::new();
+            let notifier = OpenclawNotifier::new();
+
+            // 验证 team 存在
+            if !bridge.team_exists(&team) {
+                eprintln!("Team '{}' 不存在", team);
+                std::process::exit(1);
+            }
+
+            println!("开始监控 Team '{}' (间隔: {}秒)", team, interval);
+            println!("按 Ctrl+C 停止\n");
+
+            let mut last_message_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+
+            loop {
+                if let Ok(status) = bridge.get_team_status(&team) {
+                    for member in &status.members {
+                        if let Ok(messages) = bridge.read_inbox(&team, &member.name) {
+                            let last_count = last_message_counts.get(&member.name).copied().unwrap_or(0);
+
+                            if messages.len() > last_count {
+                                // 有新消息
+                                for msg in messages.iter().skip(last_count) {
+                                    println!("[{}] {}@{}: {}",
+                                        chrono::Local::now().format("%H:%M:%S"),
+                                        msg.from, member.name,
+                                        if msg.text.len() > 80 { format!("{}...", &msg.text[..80]) } else { msg.text.clone() }
+                                    );
+
+                                    // 检查是否需要通知
+                                    let text_lower = msg.text.to_lowercase();
+                                    if text_lower.contains("error") || text_lower.contains("错误") || text_lower.contains("permission") {
+                                        let _ = notifier.send_event(
+                                            &format!("{}@{}", member.name, team),
+                                            "inbox_message",
+                                            &msg.from,
+                                            &msg.text
+                                        );
+                                    }
+                                }
+
+                                last_message_counts.insert(member.name.clone(), messages.len());
+                            }
+                        }
+                    }
+                }
+
+                sleep(Duration::from_secs(interval)).await;
             }
         }
     }

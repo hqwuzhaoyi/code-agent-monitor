@@ -555,10 +555,16 @@ impl OpenclawNotifier {
         )
     }
 
+    /// AI 提取超时时间（秒）
+    const AI_EXTRACT_TIMEOUT_SECS: u64 = 5;
+
     /// 使用 AI 提取终端快照中的问题内容
     ///
     /// 当硬编码模式匹配失败时，调用 openclaw agent 进行智能提取。
     /// 返回结构化的提取结果：(问题类型, 核心问题, 回复提示)
+    ///
+    /// 超时机制：如果 AI 提取超过 5 秒，自动终止并返回 None，
+    /// 调用方会回退到显示原始快照。
     fn extract_question_with_ai(&self, terminal_snapshot: &str) -> Option<(String, String, String)> {
         // 如果禁用 AI 提取，直接返回 None
         if self.no_ai {
@@ -593,24 +599,55 @@ impl OpenclawNotifier {
             truncated
         );
 
-        let result = Command::new(&self.openclaw_cmd)
+        // 使用 spawn + try_wait 实现超时机制
+        let mut child = Command::new(&self.openclaw_cmd)
             .args([
                 "agent",
                 "--agent", "main",
                 "--session-id", "cam-extract",
                 "--message", &prompt,
             ])
-            .output()
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
             .ok()?;
 
-        if !result.status.success() {
-            return None;
+        // 轮询等待，每 100ms 检查一次，最多等待 AI_EXTRACT_TIMEOUT_SECS 秒
+        let timeout = std::time::Duration::from_secs(Self::AI_EXTRACT_TIMEOUT_SECS);
+        let poll_interval = std::time::Duration::from_millis(100);
+        let start = std::time::Instant::now();
+
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => {
+                    // 进程已结束
+                    if !status.success() {
+                        return None;
+                    }
+                    break;
+                }
+                Ok(None) => {
+                    // 进程仍在运行，检查是否超时
+                    if start.elapsed() >= timeout {
+                        eprintln!("[AI-EXTRACT] Timeout after {}s, killing process", Self::AI_EXTRACT_TIMEOUT_SECS);
+                        let _ = child.kill();
+                        let _ = child.wait(); // 回收子进程
+                        return None;
+                    }
+                    std::thread::sleep(poll_interval);
+                }
+                Err(_) => {
+                    return None;
+                }
+            }
         }
 
-        let output = String::from_utf8_lossy(&result.stdout);
+        // 读取输出
+        let output = child.wait_with_output().ok()?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
 
         // 尝试从输出中提取 JSON
-        let json_str = Self::extract_json_from_output(&output)?;
+        let json_str = Self::extract_json_from_output(&stdout)?;
         let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
 
         let question_type = parsed.get("question_type")?.as_str()?;
@@ -2156,5 +2193,11 @@ But contains a question somewhere"#;
 
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
+    }
+
+    #[test]
+    fn test_ai_extract_timeout_constant() {
+        // 验证超时常量设置为 5 秒
+        assert_eq!(OpenclawNotifier::AI_EXTRACT_TIMEOUT_SECS, 5);
     }
 }
