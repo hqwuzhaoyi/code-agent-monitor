@@ -40,17 +40,18 @@ impl TmuxManager {
     }
 
     /// 向 session 发送按键
+    /// 使用 -l 标志确保文本被字面解释，避免 "Enter" 等特殊字符串被解释为按键
     pub fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
-        // 文本和 Enter 必须分开发送，否则 Enter 可能不生效
+        // 使用 -l 标志发送字面文本，避免特殊字符被解释
         let status = Command::new("tmux")
-            .args(["send-keys", "-t", session_name, keys])
+            .args(["send-keys", "-t", session_name, "-l", keys])
             .status()?;
 
         if !status.success() {
             return Err(anyhow!("Failed to send keys to session: {}", session_name));
         }
 
-        // 单独发送 Enter
+        // 单独发送 Enter（不使用 -l，因为这里需要解释为按键）
         let status = Command::new("tmux")
             .args(["send-keys", "-t", session_name, "Enter"])
             .status()?;
@@ -63,9 +64,10 @@ impl TmuxManager {
     }
 
     /// 向 session 发送按键（不自动添加 Enter）
+    /// 使用 -l 标志确保文本被字面解释
     pub fn send_keys_raw(&self, session_name: &str, keys: &str) -> Result<()> {
         let status = Command::new("tmux")
-            .args(["send-keys", "-t", session_name, keys])
+            .args(["send-keys", "-t", session_name, "-l", keys])
             .status()?;
 
         if status.success() {

@@ -39,6 +39,15 @@ pub struct ChannelConfig {
     pub target: String,
 }
 
+/// 通知发送结果
+#[derive(Debug, Clone, PartialEq)]
+pub enum SendResult {
+    /// 通知已发送
+    Sent,
+    /// 静默跳过（LOW urgency 或外部会话）
+    Skipped(String),
+}
+
 /// OpenClaw 通知器
 pub struct OpenclawNotifier {
     /// openclaw 命令路径
@@ -288,16 +297,17 @@ impl OpenclawNotifier {
             .filter(|line| !line.trim().is_empty())
             .collect();
 
-        // 只保留最后一个问题块（从最后一个非选项行开始）
-        // 查找最后一个问题（不以数字开头的行）
+        // 只保留最后一个问题块（从最后一个问题/提示行开始）
+        // 查找最后一个问题（以 ? 或 : 结尾，或包含问号）
         let mut last_question_idx = 0;
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            // 如果不是选项行（不以 "数字." 开头），记录位置
+            // 如果不是选项行（不以 "数字." 开头），检查是否是问题/提示行
             if !trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
                 || !trimmed.contains('.') {
-                // 检查是否是问题行（以 ? 结尾或包含问号）
-                if trimmed.contains('?') || trimmed.contains('？') {
+                // 检查是否是问题行（以 ? 或 : 结尾，或包含问号）
+                if trimmed.contains('?') || trimmed.contains('？')
+                    || trimmed.ends_with(':') || trimmed.ends_with('：') {
                     last_question_idx = i;
                 }
             }
@@ -327,6 +337,27 @@ impl OpenclawNotifier {
                     .collect()
             })
             .unwrap_or_default()
+    }
+
+    /// 提取选择题的问题标题（选项之前的非空行）
+    fn extract_choice_question(context: &str) -> Option<String> {
+        let lines: Vec<&str> = context.lines().collect();
+        // 找到第一个选项的位置
+        let first_choice_idx = lines.iter().position(|line| {
+            let trimmed = line.trim();
+            trimmed.starts_with("1.") || trimmed.starts_with("1 ")
+        });
+
+        if let Some(idx) = first_choice_idx {
+            // 向前查找非空的问题行
+            for i in (0..idx).rev() {
+                let line = lines[i].trim();
+                if !line.is_empty() && !line.chars().all(|c| c == '─' || c == '━' || c == '=' || c == '-') {
+                    return Some(line.to_string());
+                }
+            }
+        }
+        None
     }
 
     /// 检测是否为确认提示 [Y/n] 类型
@@ -536,12 +567,20 @@ impl OpenclawNotifier {
                 // 空闲等待 - 显示终端快照中的问题
                 if let Some(snap) = snapshot {
                     if Self::is_numbered_choice(snap) {
+                        let question = Self::extract_choice_question(snap);
                         let choices = Self::extract_choices(snap);
                         let choices_text = choices.join("\n");
-                        format!(
-                            "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
-                            project_name, choices_text
-                        )
+                        if let Some(q) = question {
+                            format!(
+                                "⏸️ {} 等待选择\n\n{}\n\n{}\n\n回复数字选择",
+                                project_name, q, choices_text
+                            )
+                        } else {
+                            format!(
+                                "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                                project_name, choices_text
+                            )
+                        }
                     } else if Self::is_confirmation_prompt(snap) {
                         let question = Self::extract_confirmation_question(snap);
                         format!(
@@ -564,10 +603,34 @@ impl OpenclawNotifier {
                 }
             }
             "permission_prompt" => {
-                format!(
-                    "🔐 {} 需要确认\n\n{}\n\n回复 y 允许 / n 拒绝",
-                    project_name, message
-                )
+                // 权限确认 - 优先使用终端快照，其次使用 message
+                let content = if let Some(snap) = snapshot {
+                    if Self::is_confirmation_prompt(snap) {
+                        Self::extract_confirmation_question(snap)
+                    } else if !snap.trim().is_empty() {
+                        snap.trim().to_string()
+                    } else if !message.is_empty() {
+                        message.to_string()
+                    } else {
+                        String::new()
+                    }
+                } else if !message.is_empty() {
+                    message.to_string()
+                } else {
+                    String::new()
+                };
+
+                if content.is_empty() {
+                    format!(
+                        "🔐 {} 需要确认\n\n回复 y 允许 / n 拒绝",
+                        project_name
+                    )
+                } else {
+                    format!(
+                        "🔐 {} 需要确认\n\n{}\n\n回复 y 允许 / n 拒绝",
+                        project_name, content
+                    )
+                }
             }
             _ => {
                 if !message.is_empty() {
@@ -686,7 +749,7 @@ impl OpenclawNotifier {
             });
 
         format!(
-            "❌ {} 发生错误\n\n{}\n\n回复查看详情",
+            "❌ {} 发生错误\n\n{}",
             project_name, summary
         )
     }
@@ -726,12 +789,14 @@ impl OpenclawNotifier {
             "Error" => "HIGH",
             // 等待输入必须转发
             "WaitingForInput" => "HIGH",
-            // Agent 停止/完成/退出 - 需要知道，可以分配新任务
-            "stop" | "session_end" | "AgentExited" => "MEDIUM",
+            // Agent 异常退出 - 需要知道（可能是崩溃或被杀死）
+            "AgentExited" => "MEDIUM",
+            // stop/session_end - 用户自己触发的停止，无需通知（用户已知道）
+            "stop" | "session_end" => "LOW",
             // 启动通知 - 可选
             "session_start" => "LOW",
-            // 工具调用 - 跟踪信息
-            "ToolUse" => "MEDIUM",
+            // 工具调用 - 太频繁，静默处理
+            "ToolUse" => "LOW",
             // 其他
             _ => "LOW",
         }
@@ -906,20 +971,21 @@ impl OpenclawNotifier {
     /// 发送事件到 channel
     /// HIGH/MEDIUM urgency → 通过 gateway wake 发送结构化 payload
     /// LOW urgency → 静默处理（避免 agent session 上下文累积导致去重问题）
+    /// 返回 SendResult 以区分发送成功和静默跳过
     pub fn send_event(
         &self,
         agent_id: &str,
         event_type: &str,
         pattern_or_path: &str,
         context: &str,
-    ) -> Result<()> {
+    ) -> Result<SendResult> {
         // 外部会话（ext-xxx）不发送通知
         // 原因：外部会话无法远程回复，通知只会造成打扰
         if agent_id.starts_with("ext-") {
             if self.dry_run {
-                eprintln!("[DRY-RUN] External session, skipping: {} {}", agent_id, event_type);
+                eprintln!("[DRY-RUN] External session (cannot reply remotely), skipping: {} {}", agent_id, event_type);
             }
-            return Ok(());
+            return Ok(SendResult::Skipped("external session".to_string()));
         }
 
         let urgency = Self::get_urgency(event_type, context);
@@ -936,16 +1002,18 @@ impl OpenclawNotifier {
                     );
 
                     if needs_reply {
-                        return self.send_direct(&message, agent_id);
+                        self.send_direct(&message, agent_id)?;
                     } else {
                         // stop/session_end 等不需要回复的事件，不添加标记
-                        return self.send_direct_text(&message);
+                        self.send_direct_text(&message)?;
                     }
+                    return Ok(SendResult::Sent);
                 }
 
                 // 如果没有 channel 配置，尝试 system event
                 let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
-                self.send_via_gateway_wake_payload(&payload)
+                self.send_via_gateway_wake_payload(&payload)?;
+                Ok(SendResult::Sent)
             }
             _ => {
                 // LOW urgency: 静默处理，不发送通知
@@ -953,7 +1021,7 @@ impl OpenclawNotifier {
                 if self.dry_run {
                     eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type, agent_id);
                 }
-                Ok(())
+                Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type)))
             }
         }
     }
@@ -989,6 +1057,7 @@ impl OpenclawNotifier {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
                     eprintln!("OpenClaw 直接发送失败: {}", stderr);
+                    return Err(anyhow::anyhow!("OpenClaw send failed: {}", stderr));
                 }
                 Ok(())
             }
@@ -1179,10 +1248,8 @@ mod tests {
 
     #[test]
     fn test_get_urgency_medium() {
-        assert_eq!(OpenclawNotifier::get_urgency("stop", ""), "MEDIUM");
-        assert_eq!(OpenclawNotifier::get_urgency("session_end", ""), "MEDIUM");
+        // AgentExited 是 MEDIUM（可能是异常退出，用户需要知道）
         assert_eq!(OpenclawNotifier::get_urgency("AgentExited", ""), "MEDIUM");
-        assert_eq!(OpenclawNotifier::get_urgency("ToolUse", ""), "MEDIUM");
 
         // notification with idle_prompt
         let context = r#"{"notification_type": "idle_prompt"}"#;
@@ -1191,7 +1258,12 @@ mod tests {
 
     #[test]
     fn test_get_urgency_low() {
+        // stop/session_end 是 LOW（用户自己触发的，无需通知）
+        assert_eq!(OpenclawNotifier::get_urgency("stop", ""), "LOW");
+        assert_eq!(OpenclawNotifier::get_urgency("session_end", ""), "LOW");
         assert_eq!(OpenclawNotifier::get_urgency("session_start", ""), "LOW");
+        // ToolUse 是 LOW（太频繁，静默处理）
+        assert_eq!(OpenclawNotifier::get_urgency("ToolUse", ""), "LOW");
         assert_eq!(OpenclawNotifier::get_urgency("unknown_event", ""), "LOW");
 
         // notification with unknown type
@@ -1300,8 +1372,8 @@ $ cargo build
         );
 
         // 新格式：简洁，不再显示终端快照
-        assert!(message.contains("✅"));
-        assert!(message.contains("已完成") || message.contains("workspace"));
+        assert!(message.contains("⏹️"));
+        assert!(message.contains("已停止") || message.contains("workspace"));
     }
 
     #[test]
@@ -1325,8 +1397,8 @@ $ cargo build
         );
 
         // 新格式：简洁，不再显示终端快照
-        assert!(message.contains("✅"));
-        assert!(message.contains("已完成") || message.contains("tmp"));
+        assert!(message.contains("⏹️"));
+        assert!(message.contains("已停止") || message.contains("tmp"));
     }
 
     #[test]
@@ -1340,8 +1412,8 @@ $ cargo build
             r#"{"cwd": "/workspace"}"#,
         );
 
-        assert!(message.contains("✅"));
-        assert!(message.contains("已完成") || message.contains("workspace"));
+        assert!(message.contains("⏹️"));
+        assert!(message.contains("已停止") || message.contains("workspace"));
     }
 
     // ==================== 各事件类型格式化测试 ====================
@@ -1406,8 +1478,8 @@ $ cargo build
         let context = r#"{"cwd": "/workspace/app"}"#;
         let message = notifier.format_event("cam-123", "stop", "", context);
 
-        assert!(message.contains("✅"));
-        assert!(message.contains("已完成") || message.contains("app"));
+        assert!(message.contains("⏹️"));
+        assert!(message.contains("已停止") || message.contains("app"));
     }
 
     #[test]
@@ -1417,8 +1489,8 @@ $ cargo build
         let context = r#"{"cwd": "/workspace"}"#;
         let message = notifier.format_event("cam-123", "session_end", "", context);
 
-        assert!(message.contains("✅"));
-        assert!(message.contains("已完成") || message.contains("workspace"));
+        assert!(message.contains("🔚"));
+        assert!(message.contains("会话结束") || message.contains("workspace"));
     }
 
     #[test]
@@ -1627,6 +1699,7 @@ Build successful."#;
     fn test_create_payload_with_terminal_snapshot() {
         let notifier = OpenclawNotifier::new();
 
+        // 使用 AgentExited 测试（MEDIUM urgency），因为 stop 现在是 LOW
         let context = r#"{"cwd": "/workspace"}
 
 --- 终端快照 ---
@@ -1634,7 +1707,7 @@ $ cargo build
    Compiling myapp v0.1.0
     Finished release target"#;
 
-        let payload = notifier.create_payload("cam-123", "stop", "", context);
+        let payload = notifier.create_payload("cam-123", "AgentExited", "", context);
 
         assert_eq!(payload["urgency"], "MEDIUM");
         assert!(payload["terminal_snapshot"].as_str().is_some());
@@ -1694,7 +1767,7 @@ $ cargo build
 
     #[test]
     fn test_get_project_name_for_agent() {
-        // 测试 agent_id 简化
+        // 测试 agent_id 简化（当 agents.json 中找不到时）
         let name = OpenclawNotifier::get_project_name_for_agent("cam-1234567890");
         assert_eq!(name, "agent-1234");
 
@@ -1702,9 +1775,10 @@ $ cargo build
         let name2 = OpenclawNotifier::get_project_name_for_agent("cam-123");
         assert_eq!(name2, "cam-123");
 
-        // 外部会话 agent_id 简化
-        let name3 = OpenclawNotifier::get_project_name_for_agent("ext-862c4b15");
-        assert_eq!(name3, "session-862c");
+        // 外部会话 agent_id 简化（当 agents.json 中找不到时）
+        // 注意：如果 agents.json 中有此 agent，会返回实际项目名
+        let name3 = OpenclawNotifier::get_project_name_for_agent("ext-nonexist");
+        assert_eq!(name3, "session-none");
 
         // 短外部会话 agent_id 不简化
         let name4 = OpenclawNotifier::get_project_name_for_agent("ext-123");
@@ -1713,12 +1787,16 @@ $ cargo build
 
     #[test]
     fn test_clean_terminal_context() {
-        let raw = "Some content\n─────────────\n> \n📡 via direct\nActual question?";
+        // 测试：只保留最后一个问题及其后续内容
+        let raw = "Old content\n─────────────\n> \n📡 via direct\nActual question?\n1. Option one\n2. Option two";
         let cleaned = OpenclawNotifier::clean_terminal_context(raw);
-        assert!(cleaned.contains("Some content"));
+        // 应该只保留最后的问题和选项
         assert!(cleaned.contains("Actual question?"));
+        assert!(cleaned.contains("1. Option one"));
         assert!(!cleaned.contains("─────"));
         assert!(!cleaned.contains("📡 via direct"));
+        // Old content 应该被过滤掉（因为在问题之前）
+        assert!(!cleaned.contains("Old content"));
     }
 
     #[test]

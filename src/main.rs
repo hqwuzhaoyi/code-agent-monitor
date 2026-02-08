@@ -5,7 +5,7 @@
 use clap::{Parser, Subcommand};
 use code_agent_monitor::{
     ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
-    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon,
+    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult,
     discover_teams, get_team_members,
     list_tasks, list_team_names
 };
@@ -404,16 +404,19 @@ async fn main() -> Result<()> {
                 let _ = writeln!(file, "[{}] Context: {}", timestamp, context.trim());
             }
 
-            // 判断是否需要获取终端快照（HIGH/MEDIUM urgency 事件）
+            // 判断是否需要获取终端快照
+            // 注意：permission_request 不需要终端快照，因为 stdin 已包含完整的 tool_name 和 tool_input
             let needs_snapshot = match event.as_str() {
-                "permission_request" | "Error" | "WaitingForInput" => true,
+                "Error" | "WaitingForInput" => true,
                 "stop" | "session_end" | "AgentExited" => true,
                 "notification" => {
                     let notification_type = json.as_ref()
                         .and_then(|j| j.get("notification_type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
-                    notification_type == "idle_prompt" || notification_type == "permission_prompt"
+                    // idle_prompt 需要终端快照来获取当前问题
+                    // permission_prompt 不需要，stdin 已有完整信息
+                    notification_type == "idle_prompt"
                 }
                 _ => false,
             };
@@ -449,14 +452,26 @@ async fn main() -> Result<()> {
 
             let notifier = OpenclawNotifier::new().with_dry_run(dry_run);
             match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
-                Ok(_) => {
-                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                        let _ = writeln!(file, "[{}] ✅ Notification sent successfully", timestamp);
-                    }
-                    if dry_run {
-                        eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
-                    } else {
-                        eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                Ok(result) => {
+                    match &result {
+                        SendResult::Sent => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ✅ Notification sent: {} {}", timestamp, event, resolved_agent_id);
+                            }
+                            if dry_run {
+                                eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
+                            } else {
+                                eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                            }
+                        }
+                        SendResult::Skipped(reason) => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ⏭️ Notification skipped: {} {} ({})", timestamp, event, resolved_agent_id, reason);
+                            }
+                            if dry_run {
+                                eprintln!("[DRY-RUN] 通知已跳过: {} - {} ({})", resolved_agent_id, event, reason);
+                            }
+                        }
                     }
 
                     // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录

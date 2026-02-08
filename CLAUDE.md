@@ -190,8 +190,10 @@ CAM 支持自动推送 Agent 状态变化到 clawdbot：
 | Urgency | 事件类型 | 发送方式 |
 |---------|---------|---------|
 | **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | system event → AI 处理 → channel |
-| **MEDIUM** | stop, session_end, AgentExited, ToolUse, notification(idle_prompt) | system event → AI 处理 → channel |
-| **LOW** | session_start, 其他 notification | 静默（不发送） |
+| **MEDIUM** | AgentExited, ToolUse, notification(idle_prompt) | system event → AI 处理 → channel |
+| **LOW** | stop, session_end, session_start, 其他 notification | 静默（不发送） |
+
+**注意**：`stop` 和 `session_end` 是用户自己触发的（按 Ctrl+C 或关闭会话），用户已知道，无需通知。`AgentExited` 是 Watcher 检测到进程异常退出，用户需要知道。
 
 Channel 自动从 `~/.openclaw/openclaw.json` 检测，按优先级：telegram > whatsapp > discord > slack > signal
 
@@ -410,6 +412,48 @@ openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送�
 | `:\s*$` | 请输入文件名: | ColonPrompt |
 | `allow this action` | Do you want to allow this action? | PermissionRequest |
 | `是否授权` | 是否授权此操作？ | PermissionRequest |
+
+## Hook API 数据源研究（2026-02）
+
+### 研究结论
+
+| 数据源 | 可用性 | 说明 |
+|--------|--------|------|
+| **Hook stdin** | ✅ 最佳 | PermissionRequest 包含完整 tool_name + tool_input |
+| **终端快照** | ✅ 必需 | idle_prompt 必须用终端快照获取当前问题 |
+| **CLI 命令** | ❌ 不可用 | 无状态查询命令 |
+| **JSONL** | ❌ 不适用 | 历史记录，非实时状态 |
+| **MCP** | ❌ 不可用 | 独立实例，无法访问运行中会话 |
+| **环境变量** | ⚠️ 有限 | 只有基础信息，详情在 stdin |
+
+### Hook stdin 数据结构
+
+**PermissionRequest** - 包含完整工具信息：
+```json
+{
+  "tool_name": "Bash",
+  "tool_input": {"command": "npm install"},
+  "cwd": "/workspace"
+}
+```
+
+**Notification (idle_prompt)** - 只有通用消息：
+```json
+{
+  "notification_type": "idle_prompt",
+  "message": "Claude is ready for input",
+  "cwd": "/workspace"
+}
+```
+
+### 终端快照策略
+
+| 事件类型 | 需要终端快照 | 原因 |
+|----------|-------------|------|
+| permission_request | ❌ 否 | stdin 已有完整 tool_name + tool_input |
+| notification (idle_prompt) | ✅ 是 | stdin 无问题内容，必须从终端获取 |
+| notification (permission_prompt) | ❌ 否 | stdin 已有完整信息 |
+| stop/session_end | ✅ 是 | 需要最终状态上下文 |
 
 ## 开发指南
 
