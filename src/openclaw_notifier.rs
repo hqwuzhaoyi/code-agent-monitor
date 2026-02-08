@@ -889,7 +889,18 @@ impl OpenclawNotifier {
                 // 直接发送到 Telegram（不经过 system event，因为 Agent 可能不处理 cam_notification）
                 if self.channel_config.is_some() {
                     let message = self.format_event(agent_id, event_type, pattern_or_path, context);
-                    return self.send_direct(&message, agent_id);
+
+                    // 只有需要用户回复的事件才添加 agent_id 标记
+                    let needs_reply = matches!(event_type,
+                        "permission_request" | "WaitingForInput" | "Error" | "notification"
+                    );
+
+                    if needs_reply {
+                        return self.send_direct(&message, agent_id);
+                    } else {
+                        // stop/session_end 等不需要回复的事件，不添加标记
+                        return self.send_direct_text(&message);
+                    }
                 }
 
                 // 如果没有 channel 配置，尝试 system event
@@ -920,8 +931,9 @@ impl OpenclawNotifier {
             return Ok(());
         }
 
-        // 添加 agent_id 标记用于回复路由（使用空格分隔，更简洁）
-        let tagged_message = format!("{} {}", message, agent_id);
+        // 添加 agent_id 标记用于回复路由
+        // 使用 Telegram markdown 的 monospace 格式，方便用户点击复制
+        let tagged_message = format!("{} `{}`", message, agent_id);
 
         let result = Command::new(&self.openclaw_cmd)
             .args([
