@@ -8,7 +8,8 @@ use code_agent_monitor::{
     AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult,
     discover_teams, get_team_members,
     list_tasks, list_team_names,
-    TeamBridge, InboxMessage
+    TeamBridge, InboxMessage, TeamOrchestrator,
+    ConversationStateManager, ReplyResult
 };
 use anyhow::Result;
 
@@ -180,6 +181,49 @@ enum Commands {
         #[arg(long, short, default_value = "2")]
         interval: u64,
     },
+    /// 在 Team 中启动新的 Agent
+    TeamSpawn {
+        /// Team 名称
+        team: String,
+        /// 成员名称
+        name: String,
+        /// Agent 类型
+        #[arg(long, short = 't', default_value = "general-purpose")]
+        agent_type: String,
+        /// 启动后立即发送的消息
+        #[arg(long, short)]
+        prompt: Option<String>,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 获取 Team 聚合进度
+    TeamProgress {
+        /// Team 名称
+        team: String,
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 优雅关闭 Team（停止所有 agents）
+    TeamShutdown {
+        /// Team 名称
+        team: String,
+    },
+    /// 获取待处理的确认请求
+    PendingConfirmations {
+        /// 输出 JSON 格式
+        #[arg(long)]
+        json: bool,
+    },
+    /// 回复待处理的确认请求
+    Reply {
+        /// 回复内容（y/n/1/2/3 或自定义文本）
+        reply: String,
+        /// 目标 agent_id 或 confirmation_id（可选）
+        #[arg(long, short)]
+        target: Option<String>,
+    },
 }
 
 #[tokio::main]
@@ -311,9 +355,30 @@ async fn main() -> Result<()> {
 
             eprintln!("CAM Watcher Daemon 启动，轮询间隔: {}秒", interval);
 
+            // 连续错误计数器
+            let mut consecutive_errors = 0;
+            const MAX_CONSECUTIVE_ERRORS: u32 = 10;
+
             loop {
                 // 检查是否还有 agent 在运行
-                let agents = watcher.agent_manager().list_agents()?;
+                let agents = match watcher.agent_manager().list_agents() {
+                    Ok(agents) => {
+                        consecutive_errors = 0; // 重置错误计数
+                        agents
+                    }
+                    Err(e) => {
+                        consecutive_errors += 1;
+                        eprintln!("❌ 获取 agent 列表失败 ({}/{}): {}", consecutive_errors, MAX_CONSECUTIVE_ERRORS, e);
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            eprintln!("❌ 连续错误次数过多，watcher 停止");
+                            daemon.remove_pid()?;
+                            break;
+                        }
+                        sleep(Duration::from_secs(interval)).await;
+                        continue;
+                    }
+                };
+
                 if agents.is_empty() {
                     eprintln!("所有 agent 已退出，watcher 停止");
                     daemon.remove_pid()?;
@@ -321,7 +386,23 @@ async fn main() -> Result<()> {
                 }
 
                 // 轮询一次
-                let events = watcher.poll_once()?;
+                let events = match watcher.poll_once() {
+                    Ok(events) => {
+                        consecutive_errors = 0; // 重置错误计数
+                        events
+                    }
+                    Err(e) => {
+                        consecutive_errors += 1;
+                        eprintln!("❌ 轮询失败 ({}/{}): {}", consecutive_errors, MAX_CONSECUTIVE_ERRORS, e);
+                        if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
+                            eprintln!("❌ 连续错误次数过多，watcher 停止");
+                            daemon.remove_pid()?;
+                            break;
+                        }
+                        sleep(Duration::from_secs(interval)).await;
+                        continue;
+                    }
+                };
 
                 // 只处理关键事件
                 for event in events {
@@ -844,6 +925,118 @@ async fn main() -> Result<()> {
                 }
 
                 sleep(Duration::from_secs(interval)).await;
+            }
+        }
+        Commands::TeamSpawn { team, name, agent_type, prompt, json } => {
+            let orchestrator = TeamOrchestrator::new();
+
+            match orchestrator.spawn_agent(&team, &name, &agent_type, prompt.as_deref()) {
+                Ok(result) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&result)?);
+                    } else {
+                        println!("已在 Team '{}' 中启动 Agent", team);
+                        println!("  成员名称: {}", result.member_name);
+                        println!("  agent_id: {}", result.agent_id);
+                        println!("  tmux_session: {}", result.tmux_session);
+                        println!("\n查看输出: /opt/homebrew/bin/tmux attach -t {}", result.tmux_session);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("启动 Agent 失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::TeamProgress { team, json } => {
+            let orchestrator = TeamOrchestrator::new();
+
+            match orchestrator.get_team_progress(&team) {
+                Ok(progress) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&progress)?);
+                    } else {
+                        println!("Team: {}", progress.team_name);
+                        println!("  成员: {} 总计, {} 活跃", progress.total_members, progress.active_members);
+                        println!("  任务: {} 待处理, {} 已完成", progress.pending_tasks, progress.completed_tasks);
+                        if !progress.waiting_for_input.is_empty() {
+                            println!("  等待输入: {}", progress.waiting_for_input.join(", "));
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("获取 Team 进度失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::TeamShutdown { team } => {
+            let orchestrator = TeamOrchestrator::new();
+
+            match orchestrator.shutdown_team(&team) {
+                Ok(_) => {
+                    println!("已关闭 Team: {}", team);
+                }
+                Err(e) => {
+                    eprintln!("关闭 Team 失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::PendingConfirmations { json } => {
+            let state_manager = ConversationStateManager::new();
+
+            match state_manager.get_pending_confirmations() {
+                Ok(pending) => {
+                    if json {
+                        println!("{}", serde_json::to_string_pretty(&pending)?);
+                    } else {
+                        if pending.is_empty() {
+                            println!("没有待处理的确认请求");
+                        } else {
+                            println!("待处理的确认请求 ({}):\n", pending.len());
+                            for (i, conf) in pending.iter().enumerate() {
+                                println!("  {}. [{}] {}", i + 1, conf.agent_id, conf.context);
+                                println!("     ID: {} | 创建时间: {}", conf.id, conf.created_at.format("%H:%M:%S"));
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("获取待处理确认失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Reply { reply, target } => {
+            let state_manager = ConversationStateManager::new();
+
+            match state_manager.handle_reply(&reply, target.as_deref()) {
+                Ok(result) => {
+                    match result {
+                        ReplyResult::Sent { agent_id, reply } => {
+                            println!("已发送回复 '{}' 到 {}", reply, agent_id);
+                        }
+                        ReplyResult::NeedSelection { options } => {
+                            println!("有多个待处理的确认，请指定目标：\n");
+                            for (i, opt) in options.iter().enumerate() {
+                                println!("  {}. [{}] {}", i + 1, opt.agent_id, opt.context);
+                            }
+                            println!("\n使用 --target <agent_id> 指定目标");
+                        }
+                        ReplyResult::NoPending => {
+                            println!("没有待处理的确认请求");
+                        }
+                        ReplyResult::InvalidSelection(msg) => {
+                            eprintln!("无效的选择: {}", msg);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                Err(e) => {
+                    eprintln!("发送回复失败: {}", e);
+                    std::process::exit(1);
+                }
             }
         }
     }
