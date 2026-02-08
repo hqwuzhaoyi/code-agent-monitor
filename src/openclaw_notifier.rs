@@ -885,6 +885,15 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<()> {
+        // 外部会话（ext-xxx）不发送通知
+        // 原因：外部会话无法远程回复，通知只会造成打扰
+        if agent_id.starts_with("ext-") {
+            if self.dry_run {
+                eprintln!("[DRY-RUN] External session, skipping: {} {}", agent_id, event_type);
+            }
+            return Ok(());
+        }
+
         let urgency = Self::get_urgency(event_type, context);
 
         match urgency {
