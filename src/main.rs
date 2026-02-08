@@ -366,6 +366,7 @@ async fn main() -> Result<()> {
             }
 
             // 查找对应的 agent_id（优先通过 session_id，其次通过 cwd）
+            // 如果找不到且有 session_id + cwd，自动注册为外部会话
             let resolved_agent_id = if let Some(ref sid) = session_id {
                 // 先尝试通过 session_id 查找
                 if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(sid) {
@@ -375,8 +376,16 @@ async fn main() -> Result<()> {
                     if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
                         agent.agent_id
                     } else {
-                        // 回退到 session_id
-                        sid.clone()
+                        // 找不到 agent，自动注册为外部会话（不仅限于 session_start 事件）
+                        match agent_manager.register_external_session(sid, cwd_path) {
+                            Ok(ext_id) => {
+                                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                    let _ = writeln!(file, "[{}] ✅ Auto-registered external session {} as {} (event: {})", timestamp, sid, ext_id, event);
+                                }
+                                ext_id
+                            }
+                            Err(_) => sid.clone() // 注册失败，回退到 session_id
+                        }
                     }
                 } else {
                     sid.clone()
