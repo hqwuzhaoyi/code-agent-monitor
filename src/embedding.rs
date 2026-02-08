@@ -388,7 +388,9 @@ fn is_noise_line(line: &str) -> bool {
     }
 
     // Claude Code 思考/生成状态
-    if trimmed.starts_with('✶') || trimmed.contains("Brewing") || trimmed.contains("Thinking") {
+    if trimmed.starts_with('✶') || trimmed.starts_with('✽')
+        || trimmed.contains("Brewing") || trimmed.contains("Thinking")
+        || trimmed.contains("Actioning") {
         return true;
     }
 

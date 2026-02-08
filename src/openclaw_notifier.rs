@@ -293,10 +293,11 @@ impl OpenclawNotifier {
             // Claude Code 框架线
             r"(?m)^[╭╮╰╯│├┤┬┴┼]+.*$",
             // 工具调用状态和思考状态
-            r"(?m)^.*[✓◐⏺✻✶].*$",
+            r"(?m)^.*[✓◐⏺✻✶✽].*$",
             // Claude Code 思考/生成状态
             r"(?m)^.*Brewing.*$",
             r"(?m)^.*Thinking.*$",
+            r"(?m)^.*Actioning.*$",
         ];
 
         let mut result = raw.to_string();
