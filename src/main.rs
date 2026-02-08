@@ -422,11 +422,11 @@ async fn main() -> Result<()> {
             let terminal_snapshot = if needs_snapshot {
                 // 尝试通过 session_id 查找 agent
                 if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
-                    agent_manager.get_logs(&agent.agent_id, 30).ok()
+                    agent_manager.get_logs(&agent.agent_id, 15).ok()
                 } else if let Some(ref cwd_path) = cwd {
                     // 通过 cwd 查找
                     if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
-                        agent_manager.get_logs(&agent.agent_id, 30).ok()
+                        agent_manager.get_logs(&agent.agent_id, 15).ok()
                     } else {
                         None
                     }

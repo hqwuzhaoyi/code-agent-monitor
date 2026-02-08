@@ -252,7 +252,7 @@ impl OpenclawNotifier {
         }
     }
 
-    /// 清洗终端上下文，移除噪音内容
+    /// 清洗终端上下文，移除噪音内容，只保留最近的问题
     fn clean_terminal_context(raw: &str) -> String {
         // 需要过滤的模式
         let noise_patterns = [
@@ -261,6 +261,8 @@ impl OpenclawNotifier {
             r"(?m)^.*\d+\s*hooks.*$",
             r"(?m)^.*\d+%.*context.*$",
             r"(?m)^.*⏱️.*$",
+            r"(?m)^.*\[Opus.*\].*$",
+            r"(?m)^.*git:\(.*\).*$",
             // 分隔线
             r"(?m)^[─━═\-]{3,}$",
             // 空行和单独提示符
@@ -270,6 +272,8 @@ impl OpenclawNotifier {
             r"(?m)^.*📡\s*via\s*direct.*$",
             // Claude Code 框架线
             r"(?m)^[╭╮╰╯│├┤┬┴┼]+.*$",
+            // 工具调用状态
+            r"(?m)^.*[✓◐⏺✻].*$",
         ];
 
         let mut result = raw.to_string();
@@ -283,7 +287,28 @@ impl OpenclawNotifier {
         let lines: Vec<&str> = result.lines()
             .filter(|line| !line.trim().is_empty())
             .collect();
-        lines.join("\n")
+
+        // 只保留最后一个问题块（从最后一个非选项行开始）
+        // 查找最后一个问题（不以数字开头的行）
+        let mut last_question_idx = 0;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            // 如果不是选项行（不以 "数字." 开头），记录位置
+            if !trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                || !trimmed.contains('.') {
+                // 检查是否是问题行（以 ? 结尾或包含问号）
+                if trimmed.contains('?') || trimmed.contains('？') {
+                    last_question_idx = i;
+                }
+            }
+        }
+
+        // 从最后一个问题开始截取
+        if last_question_idx > 0 && last_question_idx < lines.len() {
+            lines[last_question_idx..].join("\n")
+        } else {
+            lines.join("\n")
+        }
     }
 
     /// 检测是否为编号选择题
