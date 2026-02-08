@@ -17,11 +17,18 @@
 //!   "summary": "简短摘要"
 //! }
 //! ```
+//!
+//! 通知格式设计原则：
+//! 1. 简洁 - 一眼看懂，核心内容不超过 5 行
+//! 2. 可操作 - 明确告诉用户怎么做
+//! 3. 专业 - 现代机器人风格，无冗余信息
+//! 4. 友好 ID - 用项目名替代 cam-xxxxxxxxxx
 
 use anyhow::Result;
 use std::process::Command;
 use std::fs;
 use chrono::Utc;
+use regex::Regex;
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -201,7 +208,165 @@ impl OpenclawNotifier {
         "openclaw".to_string()
     }
 
-    /// 格式化事件消息
+    // ==================== 通知格式化辅助函数 ====================
+
+    /// 从路径提取项目名（最后一个目录名）
+    fn extract_project_name(path: &str) -> String {
+        if path.is_empty() {
+            return "unknown".to_string();
+        }
+        std::path::Path::new(path)
+            .file_name()
+            .map(|s| s.to_string_lossy().to_string())
+            .unwrap_or_else(|| path.to_string())
+    }
+
+    /// 从 agent_id 获取项目名
+    /// 优先从 agents.json 查找，否则返回 agent_id
+    fn get_project_name_for_agent(agent_id: &str) -> String {
+        // 尝试从 agents.json 读取项目路径
+        if let Some(home) = dirs::home_dir() {
+            let agents_path = home.join(".claude-monitor/agents.json");
+            if let Ok(content) = fs::read_to_string(&agents_path) {
+                if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
+                    if let Some(agents) = data.get("agents").and_then(|a| a.as_array()) {
+                        for agent in agents {
+                            if agent.get("agent_id").and_then(|v| v.as_str()) == Some(agent_id) {
+                                if let Some(path) = agent.get("project_path").and_then(|v| v.as_str()) {
+                                    return Self::extract_project_name(path);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 如果找不到，返回简化的 agent_id
+        if agent_id.starts_with("cam-") && agent_id.len() > 8 {
+            format!("agent-{}", &agent_id[4..8])
+        } else {
+            agent_id.to_string()
+        }
+    }
+
+    /// 清洗终端上下文，移除噪音内容
+    fn clean_terminal_context(raw: &str) -> String {
+        // 需要过滤的模式
+        let noise_patterns = [
+            // 状态栏（包含 MCPs, hooks, %, ⏱️, context window）
+            r"(?m)^.*\d+\s*MCPs.*$",
+            r"(?m)^.*\d+\s*hooks.*$",
+            r"(?m)^.*\d+%.*context.*$",
+            r"(?m)^.*⏱️.*$",
+            // 分隔线
+            r"(?m)^[─━═\-]{3,}$",
+            // 空行和单独提示符
+            r"(?m)^[>❯]\s*$",
+            r"(?m)^\s*$",
+            // 📡 via direct 标记
+            r"(?m)^.*📡\s*via\s*direct.*$",
+            // Claude Code 框架线
+            r"(?m)^[╭╮╰╯│├┤┬┴┼]+.*$",
+        ];
+
+        let mut result = raw.to_string();
+        for pattern in &noise_patterns {
+            if let Ok(re) = Regex::new(pattern) {
+                result = re.replace_all(&result, "").to_string();
+            }
+        }
+
+        // 移除多余空行，保留最多一个
+        let lines: Vec<&str> = result.lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+        lines.join("\n")
+    }
+
+    /// 检测是否为编号选择题
+    fn is_numbered_choice(context: &str) -> bool {
+        Regex::new(r"(?m)^\s*[1-9]\.\s+")
+            .map(|re| re.is_match(context))
+            .unwrap_or(false)
+    }
+
+    /// 提取编号选项
+    fn extract_choices(context: &str) -> Vec<String> {
+        Regex::new(r"(?m)^\s*([1-9])\.\s+(.+)$")
+            .map(|re| {
+                re.captures_iter(context)
+                    .map(|cap| format!("{}. {}", &cap[1], cap[2].trim()))
+                    .collect()
+            })
+            .unwrap_or_default()
+    }
+
+    /// 检测是否为确认提示 [Y/n] 类型
+    fn is_confirmation_prompt(context: &str) -> bool {
+        let patterns = [
+            r"\[Y\]es\s*/\s*\[N\]o",
+            r"\[Y/n\]",
+            r"\[y/N\]",
+            r"\[yes/no\]",
+            r"\[是/否\]",
+        ];
+        patterns.iter().any(|p| {
+            Regex::new(p)
+                .map(|re| re.is_match(context))
+                .unwrap_or(false)
+        })
+    }
+
+    /// 提取确认问题（去掉选项行）
+    fn extract_confirmation_question(context: &str) -> String {
+        let mut result = context.to_string();
+
+        // 移除 [Y]es / [N]o 等选项行
+        if let Ok(re) = Regex::new(r"(?m)^\s*\[Y\]es\s*/\s*\[N\]o.*$") {
+            result = re.replace_all(&result, "").to_string();
+        }
+        if let Ok(re) = Regex::new(r"\s*\[Y/n\]|\[y/N\]|\[yes/no\]|\[是/否\]") {
+            result = re.replace_all(&result, "").to_string();
+        }
+
+        // 提取最后一个问题行
+        let lines: Vec<&str> = result.lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+
+        if let Some(last) = lines.last() {
+            last.trim().to_string()
+        } else {
+            context.trim().to_string()
+        }
+    }
+
+    /// 检测是否为冒号结尾的自由输入提示
+    fn is_colon_prompt(context: &str) -> bool {
+        let trimmed = context.trim();
+        trimmed.ends_with(':') || trimmed.ends_with('：')
+    }
+
+    /// 提取冒号提示的问题
+    fn extract_colon_question(context: &str) -> String {
+        let lines: Vec<&str> = context.lines()
+            .filter(|line| !line.trim().is_empty())
+            .collect();
+
+        if let Some(last) = lines.last() {
+            last.trim().to_string()
+        } else {
+            context.trim().to_string()
+        }
+    }
+
+    /// 格式化事件消息（新设计：简洁、可操作、专业）
+    ///
+    /// 设计原则：
+    /// 1. 用项目名替代 agent_id
+    /// 2. 智能提取问题和选项
+    /// 3. 移除技术细节
+    /// 4. 简化回复指引
     pub fn format_event(
         &self,
         agent_id: &str,
@@ -221,102 +386,278 @@ impl OpenclawNotifier {
         // 尝试解析 JSON context 获取更多信息
         let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
 
-        // 格式化终端快照（截取最后 15 行，避免消息过长）
-        let snapshot_section = terminal_snapshot.map(|s| {
-            let lines: Vec<&str> = s.lines().collect();
-            let display_lines = if lines.len() > 15 {
-                lines[lines.len() - 15..].join("\n")
-            } else {
-                s.to_string()
-            };
-            format!("\n\n📸 终端快照:\n```\n{}\n```", display_lines)
-        }).unwrap_or_default();
+        // 获取项目名（优先从 JSON 的 cwd，否则从 agent_id 查找）
+        let project_name = json.as_ref()
+            .and_then(|j| j.get("cwd"))
+            .and_then(|v| v.as_str())
+            .map(Self::extract_project_name)
+            .unwrap_or_else(|| {
+                if !pattern_or_path.is_empty() {
+                    Self::extract_project_name(pattern_or_path)
+                } else {
+                    Self::get_project_name_for_agent(agent_id)
+                }
+            });
+
+        // 清洗终端快照
+        let cleaned_snapshot = terminal_snapshot
+            .map(Self::clean_terminal_context)
+            .filter(|s| !s.is_empty());
 
         match event_type {
             "permission_request" => {
-                // 提取工具名和输入
-                let tool_name = json.as_ref()
-                    .and_then(|j| j.get("tool_name"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("unknown");
-                let tool_input = json.as_ref()
-                    .and_then(|j| j.get("tool_input"))
-                    .map(|v| serde_json::to_string_pretty(v).unwrap_or_default())
-                    .unwrap_or_default();
-                let cwd = json.as_ref()
-                    .and_then(|j| j.get("cwd"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                format!(
-                    "🔐 [CAM] {} 请求权限\n\n工具: {}\n目录: {}\n参数:\n```\n{}\n```{}\n\n请回复:\n{} 1 = 允许\n{} 2 = 允许并记住\n{} 3 = 拒绝",
-                    agent_id, tool_name, cwd, tool_input, snapshot_section, agent_id, agent_id, agent_id
-                )
+                self.format_permission_request(&project_name, &json, &cleaned_snapshot)
             }
             "notification" => {
-                let message = json.as_ref()
-                    .and_then(|j| j.get("message"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                let notification_type = json.as_ref()
-                    .and_then(|j| j.get("notification_type"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-
-                if notification_type == "idle_prompt" {
-                    format!("⏸️ [CAM] {} 等待输入\n\n{}{}", agent_id, message, snapshot_section)
-                } else if notification_type == "permission_prompt" {
-                    format!(
-                        "🔐 [CAM] {} 需要权限确认\n\n{}{}\n\n请回复:\n{} 1 = 允许\n{} 2 = 允许并记住\n{} 3 = 拒绝",
-                        agent_id, message, snapshot_section, agent_id, agent_id, agent_id
-                    )
-                } else {
-                    format!("📢 [CAM] {} 通知\n\n{}{}", agent_id, message, snapshot_section)
-                }
+                self.format_notification(&project_name, &json, &cleaned_snapshot)
             }
             "session_start" => {
-                let cwd = json.as_ref()
-                    .and_then(|j| j.get("cwd"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                format!("🚀 [CAM] {} 已启动\n\n目录: {}", agent_id, cwd)
+                format!("🚀 {} 已启动", project_name)
             }
             "session_end" | "stop" => {
-                let cwd = json.as_ref()
-                    .and_then(|j| j.get("cwd"))
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("");
-                format!("✅ [CAM] {} 已停止\n\n目录: {}{}", agent_id, cwd, snapshot_section)
+                format!("✅ {} 已完成", project_name)
             }
             "WaitingForInput" => {
-                format!(
-                    "⏸️ [CAM] {} 等待输入\n\n类型: {}\n上下文: {}{}",
-                    agent_id, pattern_or_path, raw_context, snapshot_section
-                )
+                self.format_waiting_for_input(&project_name, pattern_or_path, raw_context, &cleaned_snapshot)
             }
             "Error" => {
-                format!(
-                    "❌ [CAM] {} 发生错误\n\n错误信息:\n---\n{}\n---{}\n\n请问如何处理？",
-                    agent_id, raw_context, snapshot_section
-                )
+                self.format_error(&project_name, raw_context, &cleaned_snapshot)
             }
             "AgentExited" => {
-                format!(
-                    "✅ [CAM] {} 已退出\n\n项目: {}{}",
-                    agent_id, pattern_or_path, snapshot_section
-                )
+                format!("✅ {} 已完成", project_name)
             }
             "ToolUse" => {
                 // pattern_or_path = tool_name, raw_context = tool_target
-                let target_info = if raw_context.is_empty() {
-                    String::new()
+                if raw_context.is_empty() {
+                    format!("🔧 {} 执行 {}", project_name, pattern_or_path)
                 } else {
-                    format!(" → {}", raw_context)
-                };
-                format!("🔧 [CAM] {} 执行: {}{}", agent_id, pattern_or_path, target_info)
+                    format!("🔧 {} 执行 {} → {}", project_name, pattern_or_path, raw_context)
+                }
             }
-            _ => format!("[CAM] {} - {}: {}{}", agent_id, event_type, raw_context, snapshot_section),
+            _ => format!("{} - {}", project_name, event_type),
         }
+    }
+
+    /// 格式化权限请求通知
+    fn format_permission_request(
+        &self,
+        project_name: &str,
+        json: &Option<serde_json::Value>,
+        _snapshot: &Option<String>,
+    ) -> String {
+        let tool_name = json.as_ref()
+            .and_then(|j| j.get("tool_name"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+
+        // 提取关键参数
+        let key_param = json.as_ref()
+            .and_then(|j| j.get("tool_input"))
+            .and_then(|input| {
+                // 根据工具类型提取最关键的参数
+                match tool_name {
+                    "Bash" => input.get("command").and_then(|v| v.as_str()),
+                    "Write" | "Edit" | "Read" => input.get("file_path").and_then(|v| v.as_str()),
+                    _ => input.get("file_path")
+                        .or_else(|| input.get("path"))
+                        .or_else(|| input.get("command"))
+                        .and_then(|v| v.as_str())
+                }
+            });
+
+        let param_line = key_param
+            .map(|p| {
+                // 截断过长的参数
+                if p.len() > 60 {
+                    format!("{}...", &p[..57])
+                } else {
+                    p.to_string()
+                }
+            })
+            .map(|p| format!("\n{}", p))
+            .unwrap_or_default();
+
+        format!(
+            "🔐 {} 请求权限\n\n执行: {}{}\n\n回复 y 允许 / n 拒绝",
+            project_name, tool_name, param_line
+        )
+    }
+
+    /// 格式化通知事件
+    fn format_notification(
+        &self,
+        project_name: &str,
+        json: &Option<serde_json::Value>,
+        snapshot: &Option<String>,
+    ) -> String {
+        let notification_type = json.as_ref()
+            .and_then(|j| j.get("notification_type"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        let message = json.as_ref()
+            .and_then(|j| j.get("message"))
+            .and_then(|v| v.as_str())
+            .unwrap_or("");
+
+        match notification_type {
+            "idle_prompt" => {
+                // 空闲等待 - 显示终端快照中的问题
+                if let Some(snap) = snapshot {
+                    if Self::is_numbered_choice(snap) {
+                        let choices = Self::extract_choices(snap);
+                        let choices_text = choices.join("\n");
+                        format!(
+                            "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                            project_name, choices_text
+                        )
+                    } else if Self::is_confirmation_prompt(snap) {
+                        let question = Self::extract_confirmation_question(snap);
+                        format!(
+                            "⏸️ {} 请求确认\n\n{}\n\n回复 y/n",
+                            project_name, question
+                        )
+                    } else if Self::is_colon_prompt(snap) {
+                        let question = Self::extract_colon_question(snap);
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, question
+                        )
+                    } else {
+                        format!("⏸️ {} 等待输入", project_name)
+                    }
+                } else if !message.is_empty() {
+                    format!("⏸️ {} 等待输入\n\n{}", project_name, message)
+                } else {
+                    format!("⏸️ {} 等待输入", project_name)
+                }
+            }
+            "permission_prompt" => {
+                format!(
+                    "🔐 {} 需要确认\n\n{}\n\n回复 y 允许 / n 拒绝",
+                    project_name, message
+                )
+            }
+            _ => {
+                if !message.is_empty() {
+                    format!("📢 {} {}", project_name, message)
+                } else {
+                    format!("📢 {} 通知", project_name)
+                }
+            }
+        }
+    }
+
+    /// 格式化等待输入事件
+    fn format_waiting_for_input(
+        &self,
+        project_name: &str,
+        pattern_type: &str,
+        raw_context: &str,
+        snapshot: &Option<String>,
+    ) -> String {
+        // 优先使用终端快照
+        let context_to_analyze = snapshot.as_deref().unwrap_or(raw_context);
+        let cleaned = Self::clean_terminal_context(context_to_analyze);
+
+        // 根据模式类型格式化
+        match pattern_type {
+            "Confirmation" | "PermissionRequest" => {
+                if Self::is_confirmation_prompt(&cleaned) {
+                    let question = Self::extract_confirmation_question(&cleaned);
+                    format!(
+                        "⏸️ {} 请求确认\n\n{}\n\n回复 y/n",
+                        project_name, question
+                    )
+                } else {
+                    format!(
+                        "⏸️ {} 请求确认\n\n回复 y/n",
+                        project_name
+                    )
+                }
+            }
+            "ClaudePrompt" => {
+                // Claude 主提示符 - 检查是否有选项
+                if Self::is_numbered_choice(&cleaned) {
+                    let choices = Self::extract_choices(&cleaned);
+                    let choices_text = choices.join("\n");
+                    format!(
+                        "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                        project_name, choices_text
+                    )
+                } else {
+                    format!("⏸️ {} 等待输入", project_name)
+                }
+            }
+            "ColonPrompt" => {
+                let question = Self::extract_colon_question(&cleaned);
+                format!(
+                    "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                    project_name, question
+                )
+            }
+            "PressEnter" | "Continue" => {
+                format!(
+                    "⏸️ {} 等待继续\n\n回复 Enter 继续",
+                    project_name
+                )
+            }
+            _ => {
+                // 通用处理
+                if Self::is_numbered_choice(&cleaned) {
+                    let choices = Self::extract_choices(&cleaned);
+                    let choices_text = choices.join("\n");
+                    format!(
+                        "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                        project_name, choices_text
+                    )
+                } else if Self::is_confirmation_prompt(&cleaned) {
+                    let question = Self::extract_confirmation_question(&cleaned);
+                    format!(
+                        "⏸️ {} 请求确认\n\n{}\n\n回复 y/n",
+                        project_name, question
+                    )
+                } else if Self::is_colon_prompt(&cleaned) {
+                    let question = Self::extract_colon_question(&cleaned);
+                    format!(
+                        "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                        project_name, question
+                    )
+                } else {
+                    format!("⏸️ {} 等待输入", project_name)
+                }
+            }
+        }
+    }
+
+    /// 格式化错误通知
+    fn format_error(
+        &self,
+        project_name: &str,
+        raw_context: &str,
+        _snapshot: &Option<String>,
+    ) -> String {
+        // 提取错误摘要（第一行或前 100 字符）
+        let summary = raw_context.lines().next()
+            .map(|line| {
+                if line.len() > 100 {
+                    format!("{}...", &line[..97])
+                } else {
+                    line.to_string()
+                }
+            })
+            .unwrap_or_else(|| {
+                if raw_context.len() > 100 {
+                    format!("{}...", &raw_context[..97])
+                } else {
+                    raw_context.to_string()
+                }
+            });
+
+        format!(
+            "❌ {} 发生错误\n\n{}\n\n回复查看详情",
+            project_name, summary
+        )
     }
 
     /// 判断事件是否需要用户关注（用于提示 OpenClaw agent）
@@ -814,9 +1155,10 @@ line 1"#;
             "Do you want to continue? [Y/n]",
         );
 
-        assert!(message.contains("cam-1234567890"));
-        assert!(message.contains("等待输入"));
-        assert!(message.contains("[Y/n]"));
+        // 新格式：使用项目名（从 agent_id 简化）
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("请求确认") || message.contains("等待"));
+        assert!(message.contains("y/n"));
     }
 
     #[test]
@@ -830,6 +1172,7 @@ line 1"#;
             "API rate limit exceeded",
         );
 
+        assert!(message.contains("❌"));
         assert!(message.contains("错误"));
         assert!(message.contains("API rate limit"));
     }
@@ -845,8 +1188,9 @@ line 1"#;
             "",
         );
 
-        assert!(message.contains("已退出"));
-        assert!(message.contains("/workspace/myapp"));
+        // 新格式：使用项目名
+        assert!(message.contains("✅"));
+        assert!(message.contains("myapp") || message.contains("已完成"));
     }
 
     // ==================== 终端快照测试 ====================
@@ -870,9 +1214,9 @@ $ cargo build
             context_with_snapshot,
         );
 
-        assert!(message.contains("已停止"));
-        assert!(message.contains("📸 终端快照"));
-        assert!(message.contains("cargo build"));
+        // 新格式：简洁，不再显示终端快照
+        assert!(message.contains("✅"));
+        assert!(message.contains("已完成") || message.contains("workspace"));
     }
 
     #[test]
@@ -895,10 +1239,9 @@ $ cargo build
             &long_output,
         );
 
-        // 应该只包含最后 15 行
-        assert!(message.contains("line 20"));
-        assert!(message.contains("line 6"));
-        assert!(!message.contains("line 5\n")); // line 5 应该被截断
+        // 新格式：简洁，不再显示终端快照
+        assert!(message.contains("✅"));
+        assert!(message.contains("已完成") || message.contains("tmp"));
     }
 
     #[test]
@@ -912,8 +1255,8 @@ $ cargo build
             r#"{"cwd": "/workspace"}"#,
         );
 
-        assert!(message.contains("已停止"));
-        assert!(!message.contains("📸 终端快照"));
+        assert!(message.contains("✅"));
+        assert!(message.contains("已完成") || message.contains("workspace"));
     }
 
     // ==================== 各事件类型格式化测试 ====================
@@ -929,11 +1272,8 @@ $ cargo build
         assert!(message.contains("请求权限"));
         assert!(message.contains("Bash"));
         assert!(message.contains("rm -rf /tmp/test"));
-        assert!(message.contains("/workspace"));
-        assert!(message.contains("请回复"));
-        assert!(message.contains("cam-123 1"));
-        assert!(message.contains("cam-123 2"));
-        assert!(message.contains("cam-123 3"));
+        // 新格式：简化回复指引
+        assert!(message.contains("y 允许") || message.contains("n 拒绝"));
     }
 
     #[test]
@@ -945,7 +1285,6 @@ $ cargo build
 
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-        assert!(message.contains("Task completed"));
     }
 
     #[test]
@@ -956,12 +1295,10 @@ $ cargo build
         let message = notifier.format_event("cam-123", "notification", "", context);
 
         assert!(message.contains("🔐"));
-        assert!(message.contains("权限确认"));
+        assert!(message.contains("确认") || message.contains("需要"));
         assert!(message.contains("Allow file write?"));
-        assert!(message.contains("请回复"));
-        assert!(message.contains("cam-123 1"));
-        assert!(message.contains("cam-123 2"));
-        assert!(message.contains("cam-123 3"));
+        // 新格式：简化回复指引
+        assert!(message.contains("y") && message.contains("n"));
     }
 
     #[test]
@@ -973,7 +1310,8 @@ $ cargo build
 
         assert!(message.contains("🚀"));
         assert!(message.contains("已启动"));
-        assert!(message.contains("/Users/admin/project"));
+        // 新格式：使用项目名
+        assert!(message.contains("project"));
     }
 
     #[test]
@@ -984,8 +1322,7 @@ $ cargo build
         let message = notifier.format_event("cam-123", "stop", "", context);
 
         assert!(message.contains("✅"));
-        assert!(message.contains("已停止"));
-        assert!(message.contains("/workspace/app"));
+        assert!(message.contains("已完成") || message.contains("app"));
     }
 
     #[test]
@@ -996,7 +1333,7 @@ $ cargo build
         let message = notifier.format_event("cam-123", "session_end", "", context);
 
         assert!(message.contains("✅"));
-        assert!(message.contains("已停止"));
+        assert!(message.contains("已完成") || message.contains("workspace"));
     }
 
     #[test]
@@ -1011,10 +1348,9 @@ Build successful."#;
 
         let message = notifier.format_event("cam-123", "AgentExited", "/myproject", context);
 
-        assert!(message.contains("已退出"));
-        assert!(message.contains("/myproject"));
-        assert!(message.contains("📸 终端快照"));
-        assert!(message.contains("All tests passed"));
+        // 新格式：简洁，使用项目名
+        assert!(message.contains("✅"));
+        assert!(message.contains("myproject") || message.contains("已完成"));
     }
 
     #[test]
@@ -1024,7 +1360,6 @@ Build successful."#;
         // 带 target 的工具调用
         let message = notifier.format_event("cam-123", "ToolUse", "Edit", "src/main.rs");
         assert!(message.contains("🔧"));
-        assert!(message.contains("cam-123"));
         assert!(message.contains("Edit"));
         assert!(message.contains("src/main.rs"));
 
@@ -1032,7 +1367,6 @@ Build successful."#;
         let message2 = notifier.format_event("cam-456", "ToolUse", "Read", "");
         assert!(message2.contains("🔧"));
         assert!(message2.contains("Read"));
-        assert!(!message2.contains("→"));
     }
 
     // ==================== Channel 检测测试 ====================
@@ -1260,5 +1594,144 @@ $ cargo build
 
         // WaitingForInput
         assert!(notifier.generate_summary("WaitingForInput", &None, "Confirmation").contains("Confirmation"));
+    }
+
+    // ==================== 新格式辅助函数测试 ====================
+
+    #[test]
+    fn test_extract_project_name() {
+        assert_eq!(OpenclawNotifier::extract_project_name("/Users/admin/workspace/myapp"), "myapp");
+        assert_eq!(OpenclawNotifier::extract_project_name("/workspace"), "workspace");
+        assert_eq!(OpenclawNotifier::extract_project_name(""), "unknown");
+        // Root path returns "/" as the file_name
+        assert_eq!(OpenclawNotifier::extract_project_name("/"), "/");
+    }
+
+    #[test]
+    fn test_get_project_name_for_agent() {
+        // 测试 agent_id 简化
+        let name = OpenclawNotifier::get_project_name_for_agent("cam-1234567890");
+        assert_eq!(name, "agent-1234");
+
+        // 短 agent_id 不简化
+        let name2 = OpenclawNotifier::get_project_name_for_agent("cam-123");
+        assert_eq!(name2, "cam-123");
+    }
+
+    #[test]
+    fn test_clean_terminal_context() {
+        let raw = "Some content\n─────────────\n> \n📡 via direct\nActual question?";
+        let cleaned = OpenclawNotifier::clean_terminal_context(raw);
+        assert!(cleaned.contains("Some content"));
+        assert!(cleaned.contains("Actual question?"));
+        assert!(!cleaned.contains("─────"));
+        assert!(!cleaned.contains("📡 via direct"));
+    }
+
+    #[test]
+    fn test_is_numbered_choice() {
+        assert!(OpenclawNotifier::is_numbered_choice("1. Option one\n2. Option two"));
+        assert!(OpenclawNotifier::is_numbered_choice("  1. Indented option"));
+        assert!(!OpenclawNotifier::is_numbered_choice("No numbers here"));
+        assert!(!OpenclawNotifier::is_numbered_choice("10. Double digit")); // 只匹配 1-9
+    }
+
+    #[test]
+    fn test_extract_choices() {
+        let context = "Choose:\n1. First option\n2. Second option\n3. Third";
+        let choices = OpenclawNotifier::extract_choices(context);
+        assert_eq!(choices.len(), 3);
+        assert_eq!(choices[0], "1. First option");
+        assert_eq!(choices[1], "2. Second option");
+        assert_eq!(choices[2], "3. Third");
+    }
+
+    #[test]
+    fn test_is_confirmation_prompt() {
+        assert!(OpenclawNotifier::is_confirmation_prompt("Continue? [Y/n]"));
+        assert!(OpenclawNotifier::is_confirmation_prompt("Delete? [y/N]"));
+        assert!(OpenclawNotifier::is_confirmation_prompt("[Y]es / [N]o / [A]lways"));
+        assert!(OpenclawNotifier::is_confirmation_prompt("确认？[是/否]"));
+        assert!(!OpenclawNotifier::is_confirmation_prompt("Enter your name:"));
+    }
+
+    #[test]
+    fn test_extract_confirmation_question() {
+        let context = "Write to /tmp/test.txt?\n[Y]es / [N]o / [A]lways";
+        let question = OpenclawNotifier::extract_confirmation_question(context);
+        assert!(question.contains("Write to /tmp/test.txt"));
+        assert!(!question.contains("[Y]es"));
+    }
+
+    #[test]
+    fn test_is_colon_prompt() {
+        assert!(OpenclawNotifier::is_colon_prompt("Enter your name:"));
+        assert!(OpenclawNotifier::is_colon_prompt("请输入文件名："));
+        assert!(!OpenclawNotifier::is_colon_prompt("Continue? [Y/n]"));
+    }
+
+    #[test]
+    fn test_extract_colon_question() {
+        let context = "Some info\nEnter your name:";
+        let question = OpenclawNotifier::extract_colon_question(context);
+        assert_eq!(question, "Enter your name:");
+    }
+
+    // ==================== 新格式集成测试 ====================
+
+    #[test]
+    fn test_format_numbered_choice_notification() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "idle_prompt", "message": ""}
+
+--- 终端快照 ---
+Choose an option:
+1. Create new file
+2. Edit existing
+3. Delete file
+❯ "#;
+
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待选择"));
+        assert!(message.contains("1. Create new file"));
+        assert!(message.contains("2. Edit existing"));
+        assert!(message.contains("回复数字"));
+    }
+
+    #[test]
+    fn test_format_confirmation_notification() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "idle_prompt", "message": ""}
+
+--- 终端快照 ---
+Write to /tmp/test.txt?
+[Y]es / [N]o / [A]lways / [D]on't ask"#;
+
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("请求确认") || message.contains("确认"));
+        assert!(message.contains("y/n"));
+    }
+
+    #[test]
+    fn test_format_colon_prompt_notification() {
+        let notifier = OpenclawNotifier::new();
+
+        let context = r#"{"notification_type": "idle_prompt", "message": ""}
+
+--- 终端快照 ---
+Enter the file name:"#;
+
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
+        assert!(message.contains("Enter the file name:"));
+        assert!(message.contains("回复内容"));
     }
 }
