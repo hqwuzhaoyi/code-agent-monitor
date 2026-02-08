@@ -30,6 +30,7 @@ use std::fs;
 use chrono::Utc;
 use regex::Regex;
 use crate::embedding::extract_question_with_embedding;
+use crate::notification_summarizer::NotificationSummarizer;
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -332,19 +333,41 @@ impl OpenclawNotifier {
             }
         }
 
-        // 查找选项块
-        let mut first_option_idx = None;
-        let mut last_option_idx = None;
+        // 查找最后一组连续的选项块
+        // 关键改进：只提取最后一组连续的选项，而不是所有选项
+        // 这样可以正确处理多轮对话的情况（每轮都有自己的选项）
+        let mut option_groups: Vec<(usize, usize)> = Vec::new();
+        let mut current_group_start: Option<usize> = None;
+        let mut current_group_end: Option<usize> = None;
+
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            if trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-                && trimmed.contains('.') {
-                if first_option_idx.is_none() {
-                    first_option_idx = Some(i);
+            let is_option = trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                && trimmed.contains('.');
+
+            if is_option {
+                if current_group_start.is_none() {
+                    current_group_start = Some(i);
                 }
-                last_option_idx = Some(i);
+                current_group_end = Some(i);
+            } else if current_group_start.is_some() {
+                // 非选项行，结束当前组
+                if let (Some(start), Some(end)) = (current_group_start, current_group_end) {
+                    option_groups.push((start, end));
+                }
+                current_group_start = None;
+                current_group_end = None;
             }
         }
+        // 处理最后一组（如果存在）
+        if let (Some(start), Some(end)) = (current_group_start, current_group_end) {
+            option_groups.push((start, end));
+        }
+
+        // 使用最后一组选项
+        let (first_option_idx, last_option_idx) = option_groups.last()
+            .map(|(s, e)| (Some(*s), Some(*e)))
+            .unwrap_or((None, None));
 
         // 根据问题和选项的位置关系决定返回内容
         match (last_question_idx, first_option_idx, last_option_idx) {
@@ -595,20 +618,24 @@ impl OpenclawNotifier {
             .and_then(|v| v.as_str())
             .unwrap_or("unknown");
 
-        // 提取关键参数
-        let key_param = json.as_ref()
+        let tool_input = json.as_ref()
             .and_then(|j| j.get("tool_input"))
-            .and_then(|input| {
-                // 根据工具类型提取最关键的参数
-                match tool_name {
-                    "Bash" => input.get("command").and_then(|v| v.as_str()),
-                    "Write" | "Edit" | "Read" => input.get("file_path").and_then(|v| v.as_str()),
-                    _ => input.get("file_path")
-                        .or_else(|| input.get("path"))
-                        .or_else(|| input.get("command"))
-                        .and_then(|v| v.as_str())
-                }
-            });
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
+
+        // 使用 NotificationSummarizer 进行风险评估
+        let summarizer = NotificationSummarizer::new();
+        let summary = summarizer.summarize_permission(tool_name, &tool_input);
+
+        // 提取关键参数用于显示
+        let key_param = match tool_name {
+            "Bash" => tool_input.get("command").and_then(|v| v.as_str()),
+            "Write" | "Edit" | "Read" => tool_input.get("file_path").and_then(|v| v.as_str()),
+            _ => tool_input.get("file_path")
+                .or_else(|| tool_input.get("path"))
+                .or_else(|| tool_input.get("command"))
+                .and_then(|v| v.as_str())
+        };
 
         let param_line = key_param
             .map(|p| {
@@ -622,9 +649,12 @@ impl OpenclawNotifier {
             .map(|p| format!("\n{}", p))
             .unwrap_or_default();
 
+        // 根据风险等级选择 emoji
+        let risk_emoji = summary.risk_level.emoji();
+
         format!(
-            "🔐 {} 请求权限\n\n执行: {}{}\n\n回复 y 允许 / n 拒绝",
-            project_name, tool_name, param_line
+            "{} {} 请求权限\n\n{}\n执行: {}{}\n\n回复 y 允许 / n 拒绝",
+            risk_emoji, project_name, summary.recommendation, tool_name, param_line
         )
     }
 
@@ -1134,6 +1164,24 @@ impl OpenclawNotifier {
         // 生成简短摘要
         let summary = self.generate_summary(event_type, &json, pattern_or_path);
 
+        // 对于权限请求，添加风险评估
+        let risk_level = if event_type == "permission_request" {
+            let tool_name = json.as_ref()
+                .and_then(|j| j.get("tool_name"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let tool_input = json.as_ref()
+                .and_then(|j| j.get("tool_input"))
+                .cloned()
+                .unwrap_or(serde_json::json!({}));
+
+            let summarizer = NotificationSummarizer::new();
+            let perm_summary = summarizer.summarize_permission(tool_name, &tool_input);
+            Some(format!("{:?}", perm_summary.risk_level).to_uppercase())
+        } else {
+            None
+        };
+
         let mut payload = serde_json::json!({
             "type": "cam_notification",
             "version": "1.0",
@@ -1145,6 +1193,11 @@ impl OpenclawNotifier {
             "event": event,
             "summary": summary
         });
+
+        // 添加风险等级（如果有）
+        if let Some(risk) = risk_level {
+            payload["risk_level"] = serde_json::Value::String(risk);
+        }
 
         // 添加终端快照（如果有）
         if let Some(snapshot) = terminal_snapshot {
@@ -1723,7 +1776,9 @@ $ cargo build
         let context = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "cwd": "/workspace"}"#;
         let message = notifier.format_event("cam-123", "permission_request", "", context);
 
-        assert!(message.contains("🔐"));
+        // 新格式：使用风险等级 emoji（✅/⚠️/🔴）替代固定的 🔐
+        // rm -rf /tmp/test 是低风险（/tmp 路径）
+        assert!(message.contains("✅") || message.contains("⚠️") || message.contains("🔴"));
         assert!(message.contains("请求权限"));
         assert!(message.contains("Bash"));
         assert!(message.contains("rm -rf /tmp/test"));
