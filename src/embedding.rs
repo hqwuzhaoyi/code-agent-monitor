@@ -387,6 +387,11 @@ fn is_noise_line(line: &str) -> bool {
         return true;
     }
 
+    // Claude Code 思考/生成状态
+    if trimmed.starts_with('✶') || trimmed.contains("Brewing") || trimmed.contains("Thinking") {
+        return true;
+    }
+
     // 单独的提示符
     if trimmed == ">" || trimmed == "❯" || trimmed == "$" {
         return true;
