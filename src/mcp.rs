@@ -170,9 +170,11 @@ impl McpServer {
         let agent_id = params["agent_id"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing agent_id"))?;
+        // 同时支持 input 和 message 参数（兼容 plugin）
         let input = params["input"]
             .as_str()
-            .ok_or_else(|| anyhow::anyhow!("Missing input"))?;
+            .or_else(|| params["message"].as_str())
+            .ok_or_else(|| anyhow::anyhow!("Missing input or message"))?;
 
         self.agent_manager.send_input(agent_id, input)?;
 
