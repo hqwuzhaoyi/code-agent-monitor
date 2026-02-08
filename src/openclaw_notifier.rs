@@ -889,7 +889,7 @@ impl OpenclawNotifier {
                 // 直接发送到 Telegram（不经过 system event，因为 Agent 可能不处理 cam_notification）
                 if self.channel_config.is_some() {
                     let message = self.format_event(agent_id, event_type, pattern_or_path, context);
-                    return self.send_direct(&message);
+                    return self.send_direct(&message, agent_id);
                 }
 
                 // 如果没有 channel 配置，尝试 system event
@@ -908,18 +908,20 @@ impl OpenclawNotifier {
     }
 
     /// 直接发送消息到 channel
-    fn send_direct(&self, message: &str) -> Result<()> {
+    /// agent_id 用于在消息末尾添加路由标记 [agent_id]，方便用户回复时路由到正确的 agent
+    fn send_direct(&self, message: &str, agent_id: &str) -> Result<()> {
         let config = self.channel_config.as_ref()
             .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
 
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
             eprintln!("[DRY-RUN] Message: {}", message);
+            eprintln!("[DRY-RUN] Agent ID tag: [{}]", agent_id);
             return Ok(());
         }
 
-        // 添加发送方式标识
-        let tagged_message = format!("{}\n\n📡 via direct", message);
+        // 添加 agent_id 标记用于回复路由
+        let tagged_message = format!("{} [{}]", message, agent_id);
 
         let result = Command::new(&self.openclaw_cmd)
             .args([
@@ -1066,8 +1068,39 @@ impl OpenclawNotifier {
     ///
     /// 主要用于老的 `cam watch --openclaw` 路径，避免在多个模块里重复实现
     /// `openclaw message send` 的参数拼装和 channel detection。
+    /// 注意：此方法不添加 agent_id 标记，因为调用方通常没有 agent_id 上下文。
     pub fn send_direct_text(&self, message: &str) -> Result<()> {
-        self.send_direct(message)
+        let config = self.channel_config.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
+
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
+            eprintln!("[DRY-RUN] Message: {}", message);
+            return Ok(());
+        }
+
+        let result = Command::new(&self.openclaw_cmd)
+            .args([
+                "message", "send",
+                "--channel", &config.channel,
+                "--target", &config.target,
+                "--message", message,
+            ])
+            .output();
+
+        match result {
+            Ok(output) => {
+                if !output.status.success() {
+                    let stderr = String::from_utf8_lossy(&output.stderr);
+                    eprintln!("OpenClaw 直接发送失败: {}", stderr);
+                }
+                Ok(())
+            }
+            Err(e) => {
+                eprintln!("无法执行 OpenClaw message send: {}", e);
+                Err(e.into())
+            }
+        }
     }
 }
 
