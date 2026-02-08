@@ -342,8 +342,18 @@ async fn main() -> Result<()> {
                             }
                         }
                         Ok(false) => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ⚠️ No matching agent found for cwd {}", timestamp, cwd_path);
+                            // 没有匹配的 CAM agent，注册为外部会话
+                            match agent_manager.register_external_session(sid, cwd_path) {
+                                Ok(ext_id) => {
+                                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                        let _ = writeln!(file, "[{}] ✅ Registered external session {} as {}", timestamp, sid, ext_id);
+                                    }
+                                }
+                                Err(e) => {
+                                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                        let _ = writeln!(file, "[{}] ❌ Failed to register external session: {}", timestamp, e);
+                                    }
+                                }
                             }
                         }
                         Err(e) => {
@@ -438,6 +448,17 @@ async fn main() -> Result<()> {
                         eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
                     } else {
                         eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
+                    }
+
+                    // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
+                    if (event == "session_end" || event == "stop") && resolved_agent_id.starts_with("ext-") {
+                        if let Err(e) = agent_manager.remove_agent(&resolved_agent_id) {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ⚠️ Failed to cleanup external session {}: {}", timestamp, resolved_agent_id, e);
+                            }
+                        } else if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                            let _ = writeln!(file, "[{}] ✅ Cleaned up external session {}", timestamp, resolved_agent_id);
+                        }
                     }
                 }
                 Err(e) => {

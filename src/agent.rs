@@ -404,6 +404,49 @@ impl AgentManager {
         let cwd_canonical = canonicalize_path(cwd);
         Ok(agents.into_iter().find(|a| canonicalize_path(&a.project_path) == cwd_canonical))
     }
+
+    /// 注册外部（非 CAM 管理）的 Claude Code 会话
+    /// 用于支持直接运行 claude 命令的场景
+    pub fn register_external_session(&self, session_id: &str, cwd: &str) -> Result<String> {
+        // 生成 agent_id: ext-{session_id前8位}
+        let short_id = &session_id[..8.min(session_id.len())];
+        let agent_id = format!("ext-{}", short_id);
+
+        // 检查是否已存在
+        let file = self.read_agents_file()?;
+        if file.agents.iter().any(|a| a.agent_id == agent_id) {
+            return Ok(agent_id);
+        }
+
+        let record = AgentRecord {
+            agent_id: agent_id.clone(),
+            agent_type: AgentType::Claude,
+            project_path: cwd.to_string(),
+            tmux_session: String::new(), // 无 tmux 管理
+            session_id: Some(session_id.to_string()),
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: chrono::Utc::now().to_rfc3339(),
+            status: AgentStatus::Running,
+        };
+
+        // 保存到 agents.json
+        let mut file = self.read_agents_file()?;
+        file.agents.push(record);
+        self.write_agents_file(&file)?;
+
+        Ok(agent_id)
+    }
+
+    /// 移除 Agent 记录（不终止 tmux session）
+    /// 用于清理外部会话记录
+    pub fn remove_agent(&self, agent_id: &str) -> Result<()> {
+        let mut file = self.read_agents_file()?;
+        file.agents.retain(|a| a.agent_id != agent_id);
+        self.write_agents_file(&file)?;
+        Ok(())
+    }
 }
 
 /// 规范化路径，解析符号链接
@@ -565,5 +608,80 @@ mod tests {
 
         // Then: 不包含已死亡的 agent
         assert!(!agents.iter().any(|a| a.agent_id == response.agent_id));
+    }
+
+    #[test]
+    fn test_register_external_session() {
+        // Given: AgentManager with clean state
+        let manager = AgentManager::new_for_test();
+        // Clean up any existing agents file
+        let _ = std::fs::remove_file(manager.agents_file_path());
+
+        // When: 注册外部会话
+        let session_id = "862c4b15-f02a-45d6-b349-995d4d848765";
+        let cwd = "/Users/admin/workspace/myproject";
+        let result = manager.register_external_session(session_id, cwd);
+
+        // Then: 返回 ext-{前8位}
+        assert!(result.is_ok());
+        let agent_id = result.unwrap();
+        assert_eq!(agent_id, "ext-862c4b15");
+
+        // 验证记录已保存（使用 read_agents_file 而非 list_agents，因为外部会话无 tmux）
+        let file = manager.read_agents_file().unwrap();
+        let agent = file.agents.iter().find(|a| a.agent_id == agent_id);
+        assert!(agent.is_some(), "Agent should be found in agents.json");
+        let agent = agent.unwrap();
+        assert_eq!(agent.project_path, cwd);
+        assert_eq!(agent.session_id, Some(session_id.to_string()));
+        assert!(agent.tmux_session.is_empty()); // 无 tmux 管理
+
+        // Cleanup
+        let _ = manager.remove_agent(&agent_id);
+    }
+
+    #[test]
+    fn test_register_external_session_idempotent() {
+        // Given: AgentManager with clean state
+        let manager = AgentManager::new_for_test();
+        // Clean up any existing agents file
+        let _ = std::fs::remove_file(manager.agents_file_path());
+
+        let session_id = "test1234-f02a-45d6-b349-995d4d848765";
+        let cwd = "/tmp/test";
+        let agent_id = manager.register_external_session(session_id, cwd).unwrap();
+
+        // When: 再次注册相同的会话
+        let result = manager.register_external_session(session_id, cwd);
+
+        // Then: 返回相同的 agent_id，不创建重复记录
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), agent_id);
+
+        let file = manager.read_agents_file().unwrap();
+        let count = file.agents.iter().filter(|a| a.agent_id == agent_id).count();
+        assert_eq!(count, 1);
+
+        // Cleanup
+        let _ = manager.remove_agent(&agent_id);
+    }
+
+    #[test]
+    fn test_remove_agent() {
+        // Given: AgentManager with clean state
+        let manager = AgentManager::new_for_test();
+        // Clean up any existing agents file
+        let _ = std::fs::remove_file(manager.agents_file_path());
+
+        let session_id = "remove12-f02a-45d6-b349-995d4d848765";
+        let agent_id = manager.register_external_session(session_id, "/tmp").unwrap();
+
+        // When: 移除记录
+        let result = manager.remove_agent(&agent_id);
+
+        // Then: 成功，记录已删除
+        assert!(result.is_ok());
+        let file = manager.read_agents_file().unwrap();
+        assert!(!file.agents.iter().any(|a| a.agent_id == agent_id));
     }
 }

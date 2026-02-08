@@ -244,6 +244,9 @@ impl OpenclawNotifier {
         // 如果找不到，返回简化的 agent_id
         if agent_id.starts_with("cam-") && agent_id.len() > 8 {
             format!("agent-{}", &agent_id[4..8])
+        } else if agent_id.starts_with("ext-") && agent_id.len() > 8 {
+            // 外部会话：ext-xxxxxxxx -> session-xxxx
+            format!("session-{}", &agent_id[4..8])
         } else {
             agent_id.to_string()
         }
@@ -1661,6 +1664,14 @@ $ cargo build
         // 短 agent_id 不简化
         let name2 = OpenclawNotifier::get_project_name_for_agent("cam-123");
         assert_eq!(name2, "cam-123");
+
+        // 外部会话 agent_id 简化
+        let name3 = OpenclawNotifier::get_project_name_for_agent("ext-862c4b15");
+        assert_eq!(name3, "session-862c");
+
+        // 短外部会话 agent_id 不简化
+        let name4 = OpenclawNotifier::get_project_name_for_agent("ext-123");
+        assert_eq!(name4, "ext-123");
     }
 
     #[test]
