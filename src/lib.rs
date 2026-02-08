@@ -14,6 +14,9 @@ pub mod openclaw_notifier;
 pub mod watcher_daemon;
 pub mod team_discovery;
 pub mod task_list;
+pub mod team_bridge;
+pub mod inbox_watcher;
+pub mod embedding;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -29,3 +32,6 @@ pub use openclaw_notifier::{OpenclawNotifier, SendResult};
 pub use watcher_daemon::WatcherDaemon;
 pub use team_discovery::{TeamConfig, TeamMember, discover_teams, get_team_members, get_active_team_members};
 pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
+pub use team_bridge::{TeamBridge, InboxMessage, SpecialMessage, AgentId, TeamStatus, TeamMemberStatus};
+pub use inbox_watcher::{InboxWatcher, NotifyDecision, PendingPermissionRequest};
+pub use embedding::{EmbeddingClient, EmbeddingConfig, QuestionExtractor, extract_question_with_embedding};

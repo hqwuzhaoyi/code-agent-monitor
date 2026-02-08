@@ -29,6 +29,7 @@ use std::process::Command;
 use std::fs;
 use chrono::Utc;
 use regex::Regex;
+use crate::embedding::extract_question_with_embedding;
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -271,7 +272,7 @@ impl OpenclawNotifier {
         }
     }
 
-    /// 清洗终端上下文，移除噪音内容，只保留最近的问题
+    /// 清洗终端上下文，移除噪音内容，只保留最近的问题和选项
     fn clean_terminal_context(raw: &str) -> String {
         // 需要过滤的模式
         let noise_patterns = [
@@ -307,27 +308,67 @@ impl OpenclawNotifier {
             .filter(|line| !line.trim().is_empty())
             .collect();
 
-        // 只保留最后一个问题块（从最后一个问题/提示行开始）
-        // 查找最后一个问题（以 ? 或 : 结尾，或包含问号）
-        let mut last_question_idx = 0;
+        // 查找最后一个问题/提示行
+        // 问题行特征：以 ? 或 ？ 结尾，以 : 或 ： 结尾，或包含确认提示模式
+        let mut last_question_idx = None;
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            // 如果不是选项行（不以 "数字." 开头），检查是否是问题/提示行
-            if !trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-                || !trimmed.contains('.') {
-                // 检查是否是问题行（以 ? 或 : 结尾，或包含问号）
-                if trimmed.contains('?') || trimmed.contains('？')
-                    || trimmed.ends_with(':') || trimmed.ends_with('：') {
-                    last_question_idx = i;
-                }
+            // 检查是否是问题行（以 ? 或 ？ 结尾）
+            if trimmed.ends_with('?') || trimmed.ends_with('？') {
+                last_question_idx = Some(i);
+            }
+            // 检查是否是提示行（以 : 或 ： 结尾）
+            else if trimmed.ends_with(':') || trimmed.ends_with('：') {
+                last_question_idx = Some(i);
+            }
+            // 检查是否是确认提示行（[Y]es / [N]o 等）
+            else if trimmed.contains("[Y]es") || trimmed.contains("[Y/n]")
+                || trimmed.contains("[y/N]") || trimmed.contains("[是/否]") {
+                last_question_idx = Some(i);
             }
         }
 
-        // 从最后一个问题开始截取
-        if last_question_idx > 0 && last_question_idx < lines.len() {
-            lines[last_question_idx..].join("\n")
-        } else {
-            lines.join("\n")
+        // 查找选项块
+        let mut first_option_idx = None;
+        let mut last_option_idx = None;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                && trimmed.contains('.') {
+                if first_option_idx.is_none() {
+                    first_option_idx = Some(i);
+                }
+                last_option_idx = Some(i);
+            }
+        }
+
+        // 根据问题和选项的位置关系决定返回内容
+        match (last_question_idx, first_option_idx, last_option_idx) {
+            // 有问题和选项
+            (Some(q_idx), Some(first_opt), Some(last_opt)) => {
+                if q_idx < first_opt {
+                    // 格式1：问题在前，选项在后
+                    // 返回从问题到最后一个选项
+                    lines[q_idx..=last_opt].join("\n")
+                } else if q_idx > last_opt {
+                    // 格式2：选项在前，问题在后
+                    // 返回从第一个选项到问题
+                    lines[first_opt..=q_idx].join("\n")
+                } else {
+                    // 问题在选项中间（异常情况），返回全部
+                    lines[first_opt..=q_idx.max(last_opt)].join("\n")
+                }
+            }
+            // 只有问题，没有选项
+            (Some(q_idx), None, None) => {
+                lines[q_idx..].join("\n")
+            }
+            // 只有选项，没有问题
+            (None, Some(first_opt), Some(last_opt)) => {
+                lines[first_opt..=last_opt].join("\n")
+            }
+            // 都没有，返回全部
+            _ => lines.join("\n")
         }
     }
 
@@ -349,24 +390,52 @@ impl OpenclawNotifier {
             .unwrap_or_default()
     }
 
-    /// 提取选择题的问题标题（选项之前的非空行）
+    /// 提取选择题的问题标题
+    /// 支持两种格式：
+    /// - 格式1：问题在前，选项在后
+    /// - 格式2：选项在前，问题在后
     fn extract_choice_question(context: &str) -> Option<String> {
         let lines: Vec<&str> = context.lines().collect();
-        // 找到第一个选项的位置
-        let first_choice_idx = lines.iter().position(|line| {
-            let trimmed = line.trim();
-            trimmed.starts_with("1.") || trimmed.starts_with("1 ")
-        });
 
-        if let Some(idx) = first_choice_idx {
-            // 向前查找非空的问题行
-            for i in (0..idx).rev() {
+        // 找到第一个和最后一个选项的位置
+        let mut first_choice_idx = None;
+        let mut last_choice_idx = None;
+        for (i, line) in lines.iter().enumerate() {
+            let trimmed = line.trim();
+            if trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
+                && trimmed.contains('.') {
+                if first_choice_idx.is_none() {
+                    first_choice_idx = Some(i);
+                }
+                last_choice_idx = Some(i);
+            }
+        }
+
+        // 先尝试向后查找问题行（格式2：选项在前，问题在后）
+        if let Some(idx) = last_choice_idx {
+            for i in (idx + 1)..lines.len() {
                 let line = lines[i].trim();
-                if !line.is_empty() && !line.chars().all(|c| c == '─' || c == '━' || c == '=' || c == '-') {
+                if !line.is_empty() && (line.ends_with('?') || line.ends_with('？')
+                    || line.ends_with(':') || line.ends_with('：')) {
                     return Some(line.to_string());
                 }
             }
         }
+
+        // 再尝试向前查找问题行（格式1：问题在前，选项在后）
+        if let Some(idx) = first_choice_idx {
+            for i in (0..idx).rev() {
+                let line = lines[i].trim();
+                if !line.is_empty() && !line.chars().all(|c| c == '─' || c == '━' || c == '=' || c == '-') {
+                    // 检查是否是问题/提示行
+                    if line.ends_with('?') || line.ends_with('？')
+                        || line.ends_with(':') || line.ends_with('：') {
+                        return Some(line.to_string());
+                    }
+                }
+            }
+        }
+
         None
     }
 
@@ -722,8 +791,14 @@ impl OpenclawNotifier {
                             project_name, question
                         )
                     } else if !snap.trim().is_empty() {
-                        // 有快照内容但不匹配特定模式，尝试 AI 提取
-                        if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
+                        // 有快照内容但不匹配特定模式
+                        // 优先级：1. Embedding 提取 → 2. AI 提取 → 3. 显示原始快照
+                        if let Some(question) = extract_question_with_embedding(snap) {
+                            format!(
+                                "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                                project_name, question
+                            )
+                        } else if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
                             let emoji = match question_type.as_str() {
                                 "confirm" => "⏸️",
                                 "choice" => "⏸️",
@@ -734,7 +809,7 @@ impl OpenclawNotifier {
                                 emoji, project_name, question, reply_hint
                             )
                         } else {
-                            // AI 提取失败，回退到显示原始快照
+                            // AI 提取也失败，回退到显示原始快照
                             format!(
                                 "⏸️ {} 等待输入\n\n{}\n\n回复内容",
                                 project_name, snap.trim()
@@ -818,14 +893,53 @@ impl OpenclawNotifier {
                 }
             }
             "ClaudePrompt" => {
-                // Claude 主提示符 - 检查是否有选项
+                // Claude 主提示符 - 检查是否有选项或问题
                 if Self::is_numbered_choice(&cleaned) {
+                    let question = Self::extract_choice_question(&cleaned);
                     let choices = Self::extract_choices(&cleaned);
                     let choices_text = choices.join("\n");
+                    if let Some(q) = question {
+                        format!(
+                            "⏸️ {} 等待选择\n\n{}\n\n{}\n\n回复数字选择",
+                            project_name, q, choices_text
+                        )
+                    } else {
+                        format!(
+                            "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                            project_name, choices_text
+                        )
+                    }
+                } else if Self::is_confirmation_prompt(&cleaned) {
+                    let question = Self::extract_confirmation_question(&cleaned);
                     format!(
-                        "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
-                        project_name, choices_text
+                        "⏸️ {} 请求确认\n\n{}\n\n回复 y/n",
+                        project_name, question
                     )
+                } else if !cleaned.trim().is_empty() {
+                    // 有内容但不匹配特定模式
+                    // 优先级：1. Embedding 提取 → 2. AI 提取 → 3. 显示清洗后的内容
+                    if let Some(question) = extract_question_with_embedding(&cleaned) {
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, question
+                        )
+                    } else if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(&cleaned) {
+                        let emoji = match question_type.as_str() {
+                            "confirm" => "⏸️",
+                            "choice" => "⏸️",
+                            _ => "⏸️",
+                        };
+                        format!(
+                            "{} {} 等待输入\n\n{}\n\n{}",
+                            emoji, project_name, question, reply_hint
+                        )
+                    } else {
+                        // AI 提取也失败，回退到显示清洗后的内容
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, cleaned.trim()
+                        )
+                    }
                 } else {
                     format!("⏸️ {} 等待输入", project_name)
                 }
@@ -844,14 +958,22 @@ impl OpenclawNotifier {
                 )
             }
             _ => {
-                // 通用处理
+                // 通用处理（包括 pattern_type 为空的情况）
                 if Self::is_numbered_choice(&cleaned) {
+                    let question = Self::extract_choice_question(&cleaned);
                     let choices = Self::extract_choices(&cleaned);
                     let choices_text = choices.join("\n");
-                    format!(
-                        "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
-                        project_name, choices_text
-                    )
+                    if let Some(q) = question {
+                        format!(
+                            "⏸️ {} 等待选择\n\n{}\n\n{}\n\n回复数字选择",
+                            project_name, q, choices_text
+                        )
+                    } else {
+                        format!(
+                            "⏸️ {} 等待选择\n\n{}\n\n回复数字选择",
+                            project_name, choices_text
+                        )
+                    }
                 } else if Self::is_confirmation_prompt(&cleaned) {
                     let question = Self::extract_confirmation_question(&cleaned);
                     format!(
@@ -864,6 +986,31 @@ impl OpenclawNotifier {
                         "⏸️ {} 等待输入\n\n{}\n\n回复内容",
                         project_name, question
                     )
+                } else if !cleaned.trim().is_empty() {
+                    // 有内容但不匹配特定模式
+                    // 优先级：1. Embedding 提取 → 2. AI 提取 → 3. 显示清洗后的内容
+                    if let Some(question) = extract_question_with_embedding(&cleaned) {
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, question
+                        )
+                    } else if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(&cleaned) {
+                        let emoji = match question_type.as_str() {
+                            "confirm" => "⏸️",
+                            "choice" => "⏸️",
+                            _ => "⏸️",
+                        };
+                        format!(
+                            "{} {} 等待输入\n\n{}\n\n{}",
+                            emoji, project_name, question, reply_hint
+                        )
+                    } else {
+                        // AI 提取也失败，回退到显示清洗后的内容
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, cleaned.trim()
+                        )
+                    }
                 } else {
                     format!("⏸️ {} 等待输入", project_name)
                 }
@@ -1934,15 +2081,16 @@ $ cargo build
 
     #[test]
     fn test_clean_terminal_context() {
-        // 测试：只保留最后一个问题及其后续内容
-        let raw = "Old content\n─────────────\n> \n📡 via direct\nActual question?\n1. Option one\n2. Option two";
+        // 测试：保留选项和问题（Claude Code 格式：选项在前，问题在后）
+        let raw = "Old content\n─────────────\n> \n📡 via direct\n1. Option one\n2. Option two\nActual question?";
         let cleaned = OpenclawNotifier::clean_terminal_context(raw);
-        // 应该只保留最后的问题和选项
+        // 应该保留选项和问题
         assert!(cleaned.contains("Actual question?"));
         assert!(cleaned.contains("1. Option one"));
+        assert!(cleaned.contains("2. Option two"));
         assert!(!cleaned.contains("─────"));
         assert!(!cleaned.contains("📡 via direct"));
-        // Old content 应该被过滤掉（因为在问题之前）
+        // Old content 应该被过滤掉（因为在选项之前）
         assert!(!cleaned.contains("Old content"));
     }
 
@@ -2199,5 +2347,111 @@ But contains a question somewhere"#;
     fn test_ai_extract_timeout_constant() {
         // 验证超时常量设置为 5 秒
         assert_eq!(OpenclawNotifier::AI_EXTRACT_TIMEOUT_SECS, 5);
+    }
+
+    // ==================== ClaudePrompt 等待输入测试 ====================
+
+    #[test]
+    fn test_format_claude_prompt_with_question() {
+        // 测试 ClaudePrompt 类型能正确显示问题内容
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        // 模拟实际的 Claude Code 终端输出
+        let context = r#"这个结构看起来合适吗？
+❯ "#;
+
+        let message = notifier.format_event("cam-123", "WaitingForInput", "ClaudePrompt", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
+        // 关键：应该包含问题内容
+        assert!(message.contains("这个结构看起来合适吗？"), "Should contain the question");
+        assert!(message.contains("回复内容"));
+    }
+
+    #[test]
+    fn test_format_claude_prompt_with_numbered_choices() {
+        // 测试 ClaudePrompt 类型能正确显示编号选项和问题
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        let context = r#"选择一个选项：
+1. 选项一
+2. 选项二
+3. 选项三
+❯ "#;
+
+        let message = notifier.format_event("cam-123", "WaitingForInput", "ClaudePrompt", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待选择"));
+        assert!(message.contains("选择一个选项"));
+        assert!(message.contains("1. 选项一"));
+        assert!(message.contains("2. 选项二"));
+        assert!(message.contains("回复数字"));
+    }
+
+    #[test]
+    fn test_format_claude_prompt_with_confirmation() {
+        // 测试 ClaudePrompt 类型能正确识别确认提示
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        let context = r#"Write to /tmp/test.txt?
+[Y]es / [N]o / [A]lways
+❯ "#;
+
+        let message = notifier.format_event("cam-123", "WaitingForInput", "ClaudePrompt", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("请求确认") || message.contains("确认"));
+        assert!(message.contains("y/n"));
+    }
+
+    #[test]
+    fn test_format_waiting_input_empty_pattern_type() {
+        // 测试空 pattern_type（通用处理分支）也能正确显示问题内容
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        // 模拟 notify 命令的场景：pattern_type 为空，但有终端快照
+        // 注意：Claude Code 格式是选项在前，问题在后
+        let context = r#"{"cwd": "/workspace"}
+
+--- 终端快照 ---
+1. 个人学习/练习
+2. 作品集展示
+3. 实际使用
+4. 技术探索
+
+你的目标是哪个？
+
+❯ "#;
+
+        // 空 pattern_type
+        let message = notifier.format_event("cam-123", "WaitingForInput", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待选择"));
+        assert!(message.contains("你的目标是哪个？"));
+        assert!(message.contains("1. 个人学习/练习"));
+        assert!(message.contains("回复数字"));
+    }
+
+    #[test]
+    fn test_format_waiting_input_empty_pattern_type_with_question() {
+        // 测试空 pattern_type 时普通问题也能显示
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        let context = r#"{"cwd": "/workspace"}
+
+--- 终端快照 ---
+这个结构看起来合适吗？
+❯ "#;
+
+        let message = notifier.format_event("cam-123", "WaitingForInput", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
+        // 关键：应该包含问题内容
+        assert!(message.contains("这个结构看起来合适吗？"), "Should contain the question");
+        assert!(message.contains("回复内容"));
     }
 }
