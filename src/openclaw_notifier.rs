@@ -916,12 +916,12 @@ impl OpenclawNotifier {
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
             eprintln!("[DRY-RUN] Message: {}", message);
-            eprintln!("[DRY-RUN] Agent ID tag: [{}]", agent_id);
+            eprintln!("[DRY-RUN] Agent ID tag: {}", agent_id);
             return Ok(());
         }
 
-        // 添加 agent_id 标记用于回复路由
-        let tagged_message = format!("{} [{}]", message, agent_id);
+        // 添加 agent_id 标记用于回复路由（使用空格分隔，更简洁）
+        let tagged_message = format!("{} {}", message, agent_id);
 
         let result = Command::new(&self.openclaw_cmd)
             .args([
