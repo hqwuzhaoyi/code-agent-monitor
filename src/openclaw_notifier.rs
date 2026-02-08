@@ -593,6 +593,12 @@ impl OpenclawNotifier {
                             "⏸️ {} 等待输入\n\n{}\n\n回复内容",
                             project_name, question
                         )
+                    } else if !snap.trim().is_empty() {
+                        // 有快照内容但不匹配特定模式，显示快照内容
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, snap.trim()
+                        )
                     } else {
                         format!("⏸️ {} 等待输入", project_name)
                     }
@@ -1904,5 +1910,67 @@ Enter the file name:"#;
         assert!(message.contains("等待输入"));
         assert!(message.contains("Enter the file name:"));
         assert!(message.contains("回复内容"));
+    }
+
+    #[test]
+    fn test_clean_terminal_context_real_output() {
+        // 测试实际的 Claude Code 终端输出
+        let raw = r#"  1. 核心功能 - 添加、删除、标记完成/未完成
+  2. 筛选功能 - 全部/已完成/未完成 切换显示
+  3. 编辑功能 - 双击编辑任务标题
+  4. 清空已完成 - 一键删除所有已完成任务
+
+  推荐选 1 和 2，保持简单实用。你想要哪些？
+
+❯ 1
+
+⏺ 好的，只保留核心功能：添加、删除、标记完成。
+
+  我现在对需求有清晰的理解了，让我呈现设计方案。
+
+  ---
+  设计方案 - 第一部分：项目结构
+
+  react-todo/
+  ├── src/
+  │   ├── components/
+  │   │   ├── TodoInput.tsx      # 输入框组件
+  │   │   ├── TodoItem.tsx       # 单个任务项
+  │   │   └── TodoList.tsx       # 任务列表容器
+  │   ├── hooks/
+  │   │   └── useTodos.ts        # Todo 逻辑 + localStorage 持久化
+  │   ├── types/
+  │   │   └── todo.ts            # Todo 类型定义
+  │   ├── App.tsx                # 主应用组件
+  │   ├── main.tsx               # 入口文件
+  │   └── index.css              # Tailwind 入口
+  ├── index.html
+  ├── package.json
+  ├── tailwind.config.js
+  ├── tsconfig.json
+  └── vite.config.ts
+
+  核心设计决策：
+  - 使用自定义 Hook useTodos 封装所有状态逻辑和 localStorage 操作
+  - 组件保持纯展示，逻辑集中在 Hook 中
+  - 扁平结构，不过度拆分
+
+  这个结构看起来合适吗？
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  [Opus 4.6] ███░░░░░░░ 27% | ⏱️  1h 44m
+  workspace git:(main*)
+  2 MCPs | 5 hooks
+  ✓ Skill ×1 | ✓ Bash ×1"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(raw);
+        println!("=== Cleaned output ===");
+        println!("{}", cleaned);
+        println!("=== End ===");
+
+        // 应该包含最后一个问题
+        assert!(cleaned.contains("这个结构看起来合适吗？"), "Should contain the question");
     }
 }
