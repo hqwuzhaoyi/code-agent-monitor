@@ -95,6 +95,9 @@ enum Commands {
         /// Dry-run 模式（只打印不发送）
         #[arg(long)]
         dry_run: bool,
+        /// 禁用 AI 提取（用于测试/调试）
+        #[arg(long)]
+        no_ai: bool,
     },
     /// 列出所有 Claude Code Agent Teams
     Teams {
@@ -300,7 +303,7 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
-        Commands::Notify { event, agent_id, dry_run } => {
+        Commands::Notify { event, agent_id, dry_run, no_ai } => {
             use std::fs::{OpenOptions, create_dir_all};
             use std::io::Write;
 
@@ -450,7 +453,7 @@ async fn main() -> Result<()> {
                 context.clone()
             };
 
-            let notifier = OpenclawNotifier::new().with_dry_run(dry_run);
+            let notifier = OpenclawNotifier::new().with_dry_run(dry_run).with_no_ai(no_ai);
             match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
                 Ok(result) => {
                     match &result {

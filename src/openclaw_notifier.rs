@@ -58,6 +58,8 @@ pub struct OpenclawNotifier {
     channel_config: Option<ChannelConfig>,
     /// 是否为 dry-run 模式（只打印不发送）
     dry_run: bool,
+    /// 是否禁用 AI 提取（用于测试/调试）
+    no_ai: bool,
 }
 
 impl OpenclawNotifier {
@@ -69,6 +71,7 @@ impl OpenclawNotifier {
             session_id: "main".to_string(),
             channel_config,
             dry_run: false,
+            no_ai: false,
         }
     }
 
@@ -80,12 +83,19 @@ impl OpenclawNotifier {
             session_id: session_id.to_string(),
             channel_config,
             dry_run: false,
+            no_ai: false,
         }
     }
 
     /// 设置 dry-run 模式
     pub fn with_dry_run(mut self, dry_run: bool) -> Self {
         self.dry_run = dry_run;
+        self
+    }
+
+    /// 设置是否禁用 AI 提取
+    pub fn with_no_ai(mut self, no_ai: bool) -> Self {
+        self.no_ai = no_ai;
         self
     }
 
@@ -545,6 +555,87 @@ impl OpenclawNotifier {
         )
     }
 
+    /// 使用 AI 提取终端快照中的问题内容
+    ///
+    /// 当硬编码模式匹配失败时，调用 openclaw agent 进行智能提取。
+    /// 返回结构化的提取结果：(问题类型, 核心问题, 回复提示)
+    fn extract_question_with_ai(&self, terminal_snapshot: &str) -> Option<(String, String, String)> {
+        // 如果禁用 AI 提取，直接返回 None
+        if self.no_ai {
+            return None;
+        }
+
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would call AI to extract question from snapshot");
+            return None;
+        }
+
+        // 截取最后 30 行，避免 prompt 过长
+        let lines: Vec<&str> = terminal_snapshot.lines().collect();
+        let truncated = if lines.len() > 30 {
+            lines[lines.len() - 30..].join("\n")
+        } else {
+            terminal_snapshot.to_string()
+        };
+
+        let prompt = format!(
+            r#"分析以下 AI Agent 终端输出，提取正在询问用户的问题。
+
+终端输出:
+{}
+
+请用 JSON 格式回复，包含以下字段：
+- question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题）
+- question: 核心问题内容（简洁，不超过 100 字）
+- reply_hint: 回复提示（如"回复 y/n"、"回复数字选择"、"回复内容"）
+
+只返回 JSON，不要其他内容。如果没有问题，question_type 设为 "none"。"#,
+            truncated
+        );
+
+        let result = Command::new(&self.openclaw_cmd)
+            .args([
+                "agent",
+                "--agent", "main",
+                "--session-id", "cam-extract",
+                "--message", &prompt,
+            ])
+            .output()
+            .ok()?;
+
+        if !result.status.success() {
+            return None;
+        }
+
+        let output = String::from_utf8_lossy(&result.stdout);
+
+        // 尝试从输出中提取 JSON
+        let json_str = Self::extract_json_from_output(&output)?;
+        let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+
+        let question_type = parsed.get("question_type")?.as_str()?;
+        if question_type == "none" {
+            return None;
+        }
+
+        let question = parsed.get("question")?.as_str()?.to_string();
+        let reply_hint = parsed.get("reply_hint")?.as_str()?.to_string();
+
+        Some((question_type.to_string(), question, reply_hint))
+    }
+
+    /// 从 AI 输出中提取 JSON 字符串
+    fn extract_json_from_output(output: &str) -> Option<String> {
+        // 尝试找到 JSON 对象的开始和结束
+        let start = output.find('{')?;
+        let end = output.rfind('}')?;
+        if end > start {
+            Some(output[start..=end].to_string())
+        } else {
+            None
+        }
+    }
+
     /// 格式化通知事件
     fn format_notification(
         &self,
@@ -594,11 +685,24 @@ impl OpenclawNotifier {
                             project_name, question
                         )
                     } else if !snap.trim().is_empty() {
-                        // 有快照内容但不匹配特定模式，显示快照内容
-                        format!(
-                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
-                            project_name, snap.trim()
-                        )
+                        // 有快照内容但不匹配特定模式，尝试 AI 提取
+                        if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
+                            let emoji = match question_type.as_str() {
+                                "confirm" => "⏸️",
+                                "choice" => "⏸️",
+                                _ => "⏸️",
+                            };
+                            format!(
+                                "{} {} 等待输入\n\n{}\n\n{}",
+                                emoji, project_name, question, reply_hint
+                            )
+                        } else {
+                            // AI 提取失败，回退到显示原始快照
+                            format!(
+                                "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                                project_name, snap.trim()
+                            )
+                        }
                     } else {
                         format!("⏸️ {} 等待输入", project_name)
                     }
@@ -1972,5 +2076,85 @@ Enter the file name:"#;
 
         // 应该包含最后一个问题
         assert!(cleaned.contains("这个结构看起来合适吗？"), "Should contain the question");
+    }
+
+    // ==================== AI 提取测试 ====================
+
+    #[test]
+    fn test_extract_json_from_output() {
+        // 测试从 AI 输出中提取 JSON
+        let output = r#"Here is the extracted question:
+{"question_type": "open", "question": "这个结构看起来合适吗？", "reply_hint": "回复内容"}
+That's the result."#;
+
+        let json = OpenclawNotifier::extract_json_from_output(output);
+        assert!(json.is_some());
+        let json_str = json.unwrap();
+        assert!(json_str.contains("question_type"));
+        assert!(json_str.contains("open"));
+    }
+
+    #[test]
+    fn test_extract_json_from_output_no_json() {
+        let output = "No JSON here, just plain text.";
+        let json = OpenclawNotifier::extract_json_from_output(output);
+        assert!(json.is_none());
+    }
+
+    #[test]
+    fn test_extract_json_from_output_malformed() {
+        // 只有开括号没有闭括号
+        let output = "Some text { incomplete json";
+        let json = OpenclawNotifier::extract_json_from_output(output);
+        assert!(json.is_none());
+    }
+
+    #[test]
+    fn test_with_no_ai_flag() {
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+        assert!(notifier.no_ai);
+
+        // AI 提取应该返回 None
+        let result = notifier.extract_question_with_ai("Some terminal output");
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn test_format_notification_with_no_ai_fallback() {
+        // 测试当 AI 禁用时，回退到显示原始快照
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        let context = r#"{"notification_type": "idle_prompt", "message": ""}
+
+--- 终端快照 ---
+Some unrecognized prompt format that doesn't match any pattern
+Please provide your input here"#;
+
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        // 应该回退到显示原始快照内容
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
+        // 应该包含原始快照内容（因为 AI 被禁用）
+        assert!(message.contains("Please provide your input here") || message.contains("回复内容"));
+    }
+
+    #[test]
+    fn test_format_notification_ai_extraction_path() {
+        // 测试 AI 提取路径（不实际调用 AI，只验证代码路径）
+        let notifier = OpenclawNotifier::new().with_dry_run(true);
+
+        let context = r#"{"notification_type": "idle_prompt", "message": ""}
+
+--- 终端快照 ---
+Some complex terminal output
+That doesn't match standard patterns
+But contains a question somewhere"#;
+
+        // dry_run 模式下 AI 提取会跳过，回退到显示原始快照
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("等待输入"));
     }
 }
