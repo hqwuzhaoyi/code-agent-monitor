@@ -528,3 +528,135 @@ HIGH/MEDIUM urgency 事件发送结构化 JSON payload：
 | y / yes / 是 / 好 / 可以 | 发送 "y" 到等待中的 agent |
 | n / no / 否 / 不 / 取消 | 发送 "n" 到等待中的 agent |
 | 1 / 2 / 3 | 发送对应选项到等待中的 agent |
+
+## 通知链路调试指南
+
+本章节记录通知链路的完整架构和逐层调试方法，基于 2026-02 调查总结。
+
+### 1. 通知链路架构
+
+```
+Watcher Daemon → input_detector → notifier.send_event → openclaw system event → Gateway → Telegram
+```
+
+完整数据流：
+1. **Watcher Daemon** 轮询 tmux 会话，获取终端输出
+2. **input_detector** 分析终端内容，检测等待输入模式
+3. **notifier.send_event** 根据 urgency 决定是否发送
+4. **openclaw system event** 将结构化 payload 发送到 Gateway
+5. **Gateway** 路由到 OpenClaw Agent 进行 AI 处理
+6. **Telegram** 最终用户收到通知
+
+### 2. 每个环节的检查方法
+
+#### Step 1: Watcher 检测层
+
+```bash
+# 检查 watcher 是否运行
+ps aux | grep "cam watch-daemon" | grep -v grep
+
+# 检查 watcher PID 文件
+cat ~/.claude-monitor/watcher.pid
+
+# 检查 agent 是否在列表
+cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+
+# 检查特定 agent 状态
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agent_status","arguments":{"agent_id":"<AGENT_ID>"}}}' | ./target/release/cam serve 2>/dev/null | jq -r '.result.content[0].text'
+
+# 手动运行 watcher 查看详细输出
+./target/release/cam watch-daemon -i 2 2>&1
+```
+
+#### Step 2: Input Detector 层
+
+```bash
+# 直接查看 agent 终端输出（最近 15 行）
+command tmux capture-pane -t <AGENT_ID> -p -S -15
+
+# 检查是否包含等待输入模式
+command tmux capture-pane -t <AGENT_ID> -p -S -15 | grep -E '\[Y/n\]|\[Y\]es|❯|>'
+```
+
+#### Step 3: OpenClaw 发送层
+
+```bash
+# 使用 dry-run 测试通知（不实际发送）
+echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event WaitingForInput --agent-id <AGENT_ID> --dry-run
+
+# 检查 gateway 状态
+openclaw gateway status
+
+# 查看 gateway 日志
+tail -50 ~/.openclaw/logs/gateway.log
+
+# 手动测试 system event
+openclaw system event --text '{"type":"test"}' --mode now
+```
+
+#### Step 4: Telegram 接收层
+
+```bash
+# 检查 channel 配置
+cat ~/.openclaw/openclaw.json | jq '.channels'
+
+# 手动测试直接发送到 Telegram
+openclaw message send --channel telegram --target <CHAT_ID> --message "test"
+```
+
+### 3. 常见问题
+
+| 问题 | 症状 | 解决方案 |
+|------|------|---------|
+| Watcher 未运行 | 无检测日志，PID 文件不存在 | `./target/release/cam watch-daemon -i 3 &` |
+| Agent 不在列表 | agent_status 返回 null | 检查 `~/.claude-monitor/agents.json` 或重新启动 agent |
+| Gateway 异常 | system event 失败 | `openclaw gateway restart` |
+| 网络问题 | Telegram API 超时/失败 | 检查 VPN/网络连接 |
+| ❯ 提示符未检测 | is_waiting=false 但终端显示 ❯ | 确保 input_detector 支持 Unicode ❯ (U+276F) |
+| 检测行数不足 | 状态栏覆盖实际内容 | 增加 get_last_lines 参数到 15 行 |
+| 空闲检测延迟 | 3 秒等待与轮询冲突 | 使用 detect_immediate() 替代 detect() |
+
+### 4. 本次调查发现的问题（2026-02）
+
+1. **❯ 提示符检测**
+   - 问题：Claude Code 使用 Unicode ❯ (U+276F) 作为主提示符
+   - 位置：`src/input_detector.rs`
+   - 解决：在 `CLAUDE_PROMPT_PATTERNS` 中添加 `❯\s*$` 模式
+
+2. **检测行数不足**
+   - 问题：`get_last_lines(5)` 获取的行数被状态栏占用，实际内容被截断
+   - 位置：`src/agent_watcher.rs` 的 `check_agent_status()`
+   - 解决：增加到 `get_last_lines(15)` 确保捕获足够内容
+
+3. **空闲检测冲突**
+   - 问题：`detect()` 方法内置 3 秒等待，与 watcher 轮询间隔冲突
+   - 位置：`src/input_detector.rs`
+   - 解决：新增 `detect_immediate()` 方法，跳过等待直接检测
+
+4. **网络问题**
+   - 问题：Telegram API 请求在某些网络环境下失败
+   - 解决：检查 VPN 连接，或使用 `--dry-run` 先验证逻辑正确性
+
+### 5. 调试流程示例
+
+完整的端到端调试流程：
+
+```bash
+# 1. 确认 watcher 运行
+ps aux | grep "cam watch-daemon"
+
+# 2. 确认 agent 在列表中
+cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+
+# 3. 查看 agent 终端内容
+command tmux capture-pane -t cam-xxxxxxx -p -S -15
+
+# 4. 测试 dry-run 通知
+echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event WaitingForInput --agent-id cam-xxxxxxx --dry-run
+
+# 5. 如果 dry-run 成功，检查 gateway
+openclaw gateway status
+
+# 6. 如果 gateway 正常，检查网络
+openclaw message send --channel telegram --target <CHAT_ID> --message "debug test"
+```

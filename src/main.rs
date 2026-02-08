@@ -266,20 +266,32 @@ async fn main() -> Result<()> {
                     match &event {
                         WatchEvent::AgentExited { agent_id, project_path } => {
                             eprintln!("检测到 agent 退出: {}", agent_id);
-                            let _ = notifier.send_event(agent_id, "AgentExited", project_path, "");
+                            match notifier.send_event(agent_id, "AgentExited", project_path, "") {
+                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
+                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                            }
                         }
                         WatchEvent::Error { agent_id, message, .. } => {
                             eprintln!("检测到错误: {} - {}", agent_id, message);
-                            let _ = notifier.send_event(agent_id, "Error", "", message);
+                            match notifier.send_event(agent_id, "Error", "", message) {
+                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
+                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                            }
                         }
                         WatchEvent::WaitingForInput { agent_id, pattern_type, context } => {
                             eprintln!("检测到等待输入: {} ({})", agent_id, pattern_type);
-                            let _ = notifier.send_event(agent_id, "WaitingForInput", pattern_type, context);
+                            match notifier.send_event(agent_id, "WaitingForInput", pattern_type, context) {
+                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
+                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                            }
                         }
                         WatchEvent::ToolUse { agent_id, tool_name, tool_target, .. } => {
                             eprintln!("检测到工具调用: {} - {}", agent_id, tool_name);
                             let context = tool_target.as_deref().unwrap_or("");
-                            let _ = notifier.send_event(agent_id, "ToolUse", tool_name, context);
+                            match notifier.send_event(agent_id, "ToolUse", tool_name, context) {
+                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
+                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                            }
                         }
                         _ => {} // 忽略其他事件 (ToolUseBatch, AgentResumed)
                     }

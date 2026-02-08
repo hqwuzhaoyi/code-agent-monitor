@@ -545,20 +545,15 @@ impl OpenclawNotifier {
 
         match urgency {
             "HIGH" | "MEDIUM" => {
-                // 创建结构化 payload
-                let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
-
-                // 通过 gateway wake 发送
-                let result = self.send_via_gateway_wake_payload(&payload);
-
-                // 如果 gateway wake 失败且有 channel 配置，回退到直接发送
-                if result.is_err() && self.channel_config.is_some() {
-                    eprintln!("Gateway wake 失败，回退到直接发送");
+                // 直接发送到 Telegram（不经过 system event，因为 Agent 可能不处理 cam_notification）
+                if self.channel_config.is_some() {
                     let message = self.format_event(agent_id, event_type, pattern_or_path, context);
                     return self.send_direct(&message);
                 }
 
-                result
+                // 如果没有 channel 配置，尝试 system event
+                let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
+                self.send_via_gateway_wake_payload(&payload)
             }
             _ => {
                 // LOW urgency: 静默处理，不发送通知

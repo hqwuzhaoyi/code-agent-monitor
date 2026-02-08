@@ -106,6 +106,10 @@ impl AgentWatcher {
 
         // 获取所有活跃的 agent
         let agents = self.agent_manager.list_agents()?;
+        eprintln!("轮询 {} 个 agent", agents.len());
+        for agent in &agents {
+            eprintln!("  - {}", agent.agent_id);
+        }
 
         // 检查每个 agent
         for agent in &agents {
@@ -156,8 +160,13 @@ impl AgentWatcher {
 
             // 3. 检测输入等待状态
             if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 30) {
-                let wait_result = self.input_detector.detect(&agent.agent_id, &output);
+                let wait_result = self.input_detector.detect_immediate(&output);
+                eprintln!("  {} 检测结果: is_waiting={}, pattern={:?}",
+                    agent.agent_id,
+                    wait_result.is_waiting,
+                    wait_result.pattern_type);
                 let was_waiting = self.last_waiting_state.get(&agent.agent_id).copied().unwrap_or(false);
+                eprintln!("  {} was_waiting={}", agent.agent_id, was_waiting);
 
                 if wait_result.is_waiting && !was_waiting {
                     // 新进入等待状态
