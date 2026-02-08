@@ -442,8 +442,11 @@ impl OpenclawNotifier {
             "session_start" => {
                 format!("🚀 {} 已启动", project_name)
             }
-            "session_end" | "stop" => {
-                format!("✅ {} 已完成", project_name)
+            "session_end" => {
+                format!("🔚 {} 会话结束", project_name)
+            }
+            "stop" => {
+                format!("⏹️ {} 已停止", project_name)
             }
             "WaitingForInput" => {
                 self.format_waiting_for_input(&project_name, pattern_or_path, raw_context, &cleaned_snapshot)
