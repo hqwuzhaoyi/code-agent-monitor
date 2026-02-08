@@ -22,7 +22,13 @@ echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event session_start
 输出示例：
 ```
 [DRY-RUN] Would send to channel=telegram target=1440537501
-[DRY-RUN] Message: ✅ [CAM] cam-test 已停止
+[DRY-RUN] Message: ⏸️ myproject 等待选择
+
+1. 选项一
+2. 选项二
+
+回复数字选择
+[DRY-RUN] Agent ID tag: cam-test
 ```
 
 ### 查看 Hook 日志
@@ -56,6 +62,8 @@ echo '{}' | ./target/release/cam notify --event stop --agent-id test --dry-run 2
 | 发送失败 | 查看 stderr 输出，可能是网络问题或 API 限流 |
 | 路由错误 | 使用 `--dry-run` 确认 urgency 分类是否正确 |
 | Channel 检测失败 | 检查 `~/.openclaw/openclaw.json` 配置 |
+| 新格式未生效 | 重启 watcher daemon（见下方说明） |
+| 外部会话收到通知 | 检查 agent_id 是否为 ext- 前缀 |
 
 ### 手动测试通知发送
 
@@ -200,7 +208,13 @@ cat ~/.claude-monitor/watcher.pid
 
 # 手动停止 watcher
 kill $(cat ~/.claude-monitor/watcher.pid)
+
+# 重启 watcher（更新二进制后必须重启）
+kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
+# watcher 会在下次 agent 启动时自动启动
 ```
+
+**重要**：修改代码并重新构建后，必须重启 watcher daemon，否则运行中的进程仍使用旧代码。
 
 ### 测试自动通知场景
 
@@ -528,6 +542,65 @@ HIGH/MEDIUM urgency 事件发送结构化 JSON payload：
 | y / yes / 是 / 好 / 可以 | 发送 "y" 到等待中的 agent |
 | n / no / 否 / 不 / 取消 | 发送 "n" 到等待中的 agent |
 | 1 / 2 / 3 | 发送对应选项到等待中的 agent |
+
+### 通知格式（2026-02 更新）
+
+**新格式示例**：
+
+等待选择：
+```
+⏸️ myproject 等待选择
+
+1. 学习/练习项目
+2. 个人实用工具
+3. 演示/面试项目
+
+回复数字选择 `cam-1770529396`
+```
+
+请求确认：
+```
+⏸️ myproject 请求确认
+
+Write to /tmp/test.txt?
+
+回复 y/n `cam-1770529396`
+```
+
+权限请求：
+```
+🔐 myproject 请求权限
+
+执行: Bash
+rm -rf /tmp/test
+
+回复 y 允许 / n 拒绝 `cam-1770529396`
+```
+
+完成/退出（不显示 agent_id，因为不需要回复）：
+```
+✅ myproject 已完成
+```
+
+**格式改进**：
+- 用项目名替代 agent_id（如 `cam-1770529396` → `myproject`）
+- 过滤终端噪音（状态栏、进度条、分隔线）
+- 智能提取选项和问题内容
+- 使用 Telegram monospace 格式包裹 agent_id（方便点击复制）
+- 只有需要回复的事件才显示 agent_id 标记
+
+### 会话类型
+
+| 类型 | agent_id 格式 | 来源 | 通知 | 远程回复 |
+|------|--------------|------|------|---------|
+| CAM 管理 | `cam-xxxxxxxx` | 通过 CAM 启动 | ✅ 发送 | ✅ 支持 |
+| 外部会话 | `ext-xxxxxxxx` | 直接运行 `claude` | ❌ 过滤 | ❌ 不支持 |
+
+**外部会话说明**：
+- 用户直接在终端运行 `claude` 产生的会话
+- CAM 自动注册为 `ext-{session_id前8位}`
+- 不发送通知（因为无法远程回复，通知只会造成打扰）
+- 用户需要在终端直接操作
 
 ## 通知链路调试指南
 
