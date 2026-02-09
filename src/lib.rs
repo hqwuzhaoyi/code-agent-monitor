@@ -16,7 +16,11 @@ pub mod team_discovery;
 pub mod task_list;
 pub mod team_bridge;
 pub mod inbox_watcher;
-pub mod embedding;
+pub mod team_orchestrator;
+pub mod notification_summarizer;
+pub mod conversation_state;
+pub mod anthropic;
+pub mod notification;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
@@ -34,4 +38,7 @@ pub use team_discovery::{TeamConfig, TeamMember, discover_teams, get_team_member
 pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
 pub use team_bridge::{TeamBridge, InboxMessage, SpecialMessage, AgentId, TeamStatus, TeamMemberStatus};
 pub use inbox_watcher::{InboxWatcher, NotifyDecision, PendingPermissionRequest};
-pub use embedding::{EmbeddingClient, EmbeddingConfig, QuestionExtractor, extract_question_with_embedding};
+pub use team_orchestrator::{TeamOrchestrator, SpawnResult, TeamProgress, TeamCreationResult, TaskAssignmentResult, UserIntent};
+pub use notification_summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
+pub use conversation_state::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult};
+pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};
