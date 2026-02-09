@@ -299,6 +299,28 @@ impl OpenclawNotifier {
 
     /// 清洗终端上下文，移除噪音内容，只保留最近的问题和选项
     fn clean_terminal_context(raw: &str) -> String {
+        // 第一步：找到最后一个用户输入行的位置
+        // 用户输入行格式：❯ <content>（content 不为空）
+        // 这样可以跳过已回答的问题，只处理当前等待回答的内容
+        let raw_lines: Vec<&str> = raw.lines().collect();
+        let mut last_user_input_idx = None;
+
+        for (i, line) in raw_lines.iter().enumerate() {
+            let trimmed = line.trim();
+            // 匹配用户输入行：❯ 后跟非空内容（不是单独的 ❯）
+            if trimmed.starts_with('❯') && trimmed.len() > 2 {
+                let after_prompt = trimmed[3..].trim(); // 跳过 "❯ "
+                // 排除占位符提示（如 Try "fix lint errors"）
+                if !after_prompt.is_empty() && !after_prompt.starts_with("Try \"") {
+                    last_user_input_idx = Some(i);
+                }
+            }
+        }
+
+        // 从最后一个用户输入行之后开始处理
+        let start_idx = last_user_input_idx.map(|i| i + 1).unwrap_or(0);
+        let content_to_process = raw_lines[start_idx..].join("\n");
+
         // 需要过滤的模式
         let noise_patterns = [
             // 状态栏（包含 MCPs, hooks, %, ⏱️, context window）
@@ -315,8 +337,11 @@ impl OpenclawNotifier {
             r"(?m)^\s*$",
             // 📡 via direct 标记
             r"(?m)^.*📡\s*via\s*direct.*$",
-            // Claude Code 框架线
-            r"(?m)^[╭╮╰╯│├┤┬┴┼]+.*$",
+            // Claude Code 框架线（只匹配纯框架字符行，不匹配目录树）
+            // 目录树格式：│   ├── filename.txt（包含空格和文件名）
+            // 框架线格式：╭───────────────╮ 或 │ content │（两端都有框架字符）
+            r"(?m)^[╭╮╰╯][─━═\s]*[╭╮╰╯]?$",
+            r"(?m)^│[^├└│]*│$",
             // 工具调用状态和思考状态
             r"(?m)^.*[✓◐⏺✻✶✽].*$",
             // Claude Code 思考/生成状态
@@ -325,7 +350,7 @@ impl OpenclawNotifier {
             r"(?m)^.*Actioning.*$",
         ];
 
-        let mut result = raw.to_string();
+        let mut result = content_to_process;
         for pattern in &noise_patterns {
             if let Ok(re) = Regex::new(pattern) {
                 result = re.replace_all(&result, "").to_string();
@@ -336,6 +361,10 @@ impl OpenclawNotifier {
         let lines: Vec<&str> = result.lines()
             .filter(|line| !line.trim().is_empty())
             .collect();
+
+        if lines.is_empty() {
+            return String::new();
+        }
 
         // 查找最后一个问题/提示行
         // 问题行特征：包含 ? 或 ？，以 : 或 ： 结尾，或包含确认提示模式
@@ -428,22 +457,36 @@ impl OpenclawNotifier {
             .unwrap_or((None, None));
 
         // 查找与最后一组选项相关的问题行
-        // 只在最后一组选项之前查找，而不是整个文本
-        let relevant_question_idx = if let Some(first_opt) = first_option_idx {
-            // 从最后一组选项的第一行向前查找最近的问题行
-            let mut found_idx = None;
+        // 问题可能在选项之前或之后
+        let relevant_question_idx = if let (Some(first_opt), Some(last_opt)) = (first_option_idx, last_option_idx) {
+            // 先在选项之前查找
+            let mut before_idx = None;
             for i in (0..first_opt).rev() {
                 let trimmed = lines[i].trim();
-                // 使用 contains 而不是 ends_with，因为问题后可能有括号说明
                 if trimmed.contains('?') || trimmed.contains('？')
                     || trimmed.ends_with(':') || trimmed.ends_with('：')
                     || trimmed.contains("[Y]es") || trimmed.contains("[Y/n]")
                     || trimmed.contains("[y/N]") || trimmed.contains("[是/否]") {
-                    found_idx = Some(i);
+                    before_idx = Some(i);
                     break;
                 }
             }
-            found_idx
+
+            // 再在选项之后查找
+            let mut after_idx = None;
+            for i in (last_opt + 1)..lines.len() {
+                let trimmed = lines[i].trim();
+                if trimmed.contains('?') || trimmed.contains('？')
+                    || trimmed.ends_with(':') || trimmed.ends_with('：')
+                    || trimmed.contains("[Y]es") || trimmed.contains("[Y/n]")
+                    || trimmed.contains("[y/N]") || trimmed.contains("[是/否]") {
+                    after_idx = Some(i);
+                    break;
+                }
+            }
+
+            // 优先使用选项之后的问题（更接近当前状态）
+            after_idx.or(before_idx)
         } else {
             // 没有选项，使用最后一个问题行
             last_question_idx
@@ -466,9 +509,11 @@ impl OpenclawNotifier {
                     lines[first_opt..=q_idx.max(last_opt)].join("\n")
                 }
             }
-            // 只有问题，没有选项
+            // 只有问题，没有选项 - 需要保留问题前的上下文
             (Some(q_idx), None, None) => {
-                lines[q_idx..].join("\n")
+                // 向前查找上下文的起始位置
+                let context_start = Self::find_context_start(&lines, q_idx);
+                lines[context_start..].join("\n")
             }
             // 只有选项，没有问题
             (None, Some(first_opt), Some(last_opt)) => {
@@ -477,6 +522,49 @@ impl OpenclawNotifier {
             // 都没有，返回全部
             _ => lines.join("\n")
         }
+    }
+
+    /// 查找问题前上下文的起始位置
+    ///
+    /// 对于开放式问题（如"这部分结构看起来合适吗？"），需要保留问题前的相关上下文。
+    /// 上下文包括：代码块、目录结构、设计说明等。
+    ///
+    /// 策略：
+    /// 1. 从问题行向前查找，直到遇到分隔符（---）或用户输入（❯）
+    /// 2. 最多保留 15 行上下文（避免通知过长）
+    /// 3. 如果找到代码块/目录结构，保留完整块
+    fn find_context_start(lines: &[&str], question_idx: usize) -> usize {
+        const MAX_CONTEXT_LINES: usize = 15;
+
+        // 最早可能的起始位置
+        let earliest_start = question_idx.saturating_sub(MAX_CONTEXT_LINES);
+
+        // 从问题行向前查找
+        let mut context_start = question_idx;
+
+        for i in (earliest_start..question_idx).rev() {
+            let trimmed = lines[i].trim();
+
+            // 遇到分隔符，停止（不包含分隔符）
+            if trimmed == "---" || trimmed.starts_with("───") {
+                break;
+            }
+
+            // 遇到用户输入行（❯ 后跟内容），停止（不包含用户输入）
+            if trimmed.starts_with('❯') && trimmed.len() > 2 {
+                break;
+            }
+
+            // 遇到 agent 响应开始（⏺），停止（不包含）
+            if trimmed.starts_with('⏺') {
+                break;
+            }
+
+            // 更新起始位置
+            context_start = i;
+        }
+
+        context_start
     }
 
     /// 检测是否为编号选择题
@@ -2783,5 +2871,152 @@ But contains a question somewhere"#;
         assert!(!message.contains("styled-components"), "Should NOT contain first group options");
         // 应该有回复提示
         assert!(message.contains("回复数字选择"), "Should have reply hint");
+    }
+
+    #[test]
+    fn test_clean_terminal_context_open_question_with_context() {
+        // 测试开放式问题（无选项）保留前面的上下文
+        let context = r#"❯ 1
+
+⏺ 好的，保持最简单。
+
+我现在对需求有了清晰的理解，让我分段呈现设计方案。
+
+---
+设计方案 - 第一部分：项目结构
+
+react-todo/
+├── src/
+│   ├── components/
+│   │   ├── TodoInput.tsx
+│   │   ├── TodoItem.tsx
+│   │   └── TodoList.tsx
+│   ├── hooks/
+│   │   └── useTodos.ts
+│   └── App.tsx
+
+设计思路：
+- 组件职责单一
+- 状态集中管理
+
+这部分结构看起来合适吗？"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(context);
+
+        // 应该包含问题
+        assert!(cleaned.contains("这部分结构看起来合适吗"), "Should contain the question");
+        // 应该包含目录结构（上下文）
+        assert!(cleaned.contains("react-todo/"), "Should contain directory structure");
+        assert!(cleaned.contains("├── src/"), "Should contain tree structure");
+        assert!(cleaned.contains("TodoInput.tsx"), "Should contain file names");
+        // 应该包含设计说明
+        assert!(cleaned.contains("设计方案"), "Should contain section title");
+        // 不应该包含分隔符之前的内容
+        assert!(!cleaned.contains("好的，保持最简单"), "Should NOT contain content before separator");
+        assert!(!cleaned.contains("❯ 1"), "Should NOT contain user input");
+    }
+
+    #[test]
+    fn test_clean_terminal_context_open_question_with_code_block() {
+        // 测试开放式问题保留代码块上下文
+        let context = r#"⏺ 修改后的代码：
+
+fn main() {
+    let items = vec![1, 2, 3];
+    for item in items {
+        println!("{}", item);
+    }
+}
+
+这样修改可以吗？"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(context);
+
+        // 应该包含问题
+        assert!(cleaned.contains("这样修改可以吗"), "Should contain the question");
+        // 应该包含代码
+        assert!(cleaned.contains("fn main()"), "Should contain code");
+        assert!(cleaned.contains("println!"), "Should contain code content");
+        // 不应该包含 agent 响应标记
+        assert!(!cleaned.contains("⏺"), "Should NOT contain agent marker");
+    }
+
+    #[test]
+    fn test_clean_terminal_context_open_question_max_lines() {
+        // 测试上下文行数限制（最多 15 行）
+        // 实际场景：有分隔符的情况下，从分隔符后开始
+        let mut lines = Vec::new();
+        // 添加早期内容
+        for i in 1..=5 {
+            lines.push(format!("Early line {}", i));
+        }
+        // 添加分隔符
+        lines.push("---".to_string());
+        // 添加 20 行内容（超过 15 行限制）
+        for i in 1..=20 {
+            lines.push(format!("Content line {}", i));
+        }
+        lines.push("这个方案可以吗？".to_string());
+
+        let context = lines.join("\n");
+        let cleaned = OpenclawNotifier::clean_terminal_context(&context);
+
+        // 应该包含问题
+        assert!(cleaned.contains("这个方案可以吗"), "Should contain the question");
+        // 应该包含分隔符后的内容
+        assert!(cleaned.contains("Content line 20"), "Should contain recent content");
+        // 不应该包含分隔符之前的内容
+        assert!(!cleaned.contains("Early line"), "Should NOT contain content before separator");
+    }
+
+    #[test]
+    fn test_find_context_start_stops_at_separator() {
+        // 测试 find_context_start 在分隔符处停止
+        let lines = vec![
+            "早期内容",
+            "---",
+            "设计方案",
+            "代码结构",
+            "这个可以吗？",
+        ];
+
+        let start = OpenclawNotifier::find_context_start(&lines, 4);
+
+        // 应该从分隔符后开始（索引 2）
+        assert_eq!(start, 2, "Should start after separator");
+    }
+
+    #[test]
+    fn test_find_context_start_stops_at_user_input() {
+        // 测试 find_context_start 在用户输入处停止
+        let lines = vec![
+            "之前的问题",
+            "❯ 1",
+            "新的内容",
+            "代码结构",
+            "这个可以吗？",
+        ];
+
+        let start = OpenclawNotifier::find_context_start(&lines, 4);
+
+        // 应该从用户输入后开始（索引 2）
+        assert_eq!(start, 2, "Should start after user input");
+    }
+
+    #[test]
+    fn test_find_context_start_stops_at_agent_response() {
+        // 测试 find_context_start 在 agent 响应处停止
+        let lines = vec![
+            "之前的内容",
+            "⏺ 好的，我来处理",
+            "新的设计",
+            "代码结构",
+            "这个可以吗？",
+        ];
+
+        let start = OpenclawNotifier::find_context_start(&lines, 4);
+
+        // 应该从 agent 响应后开始（索引 2）
+        assert_eq!(start, 2, "Should start after agent response");
     }
 }
