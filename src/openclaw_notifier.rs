@@ -29,6 +29,7 @@ use std::process::Command;
 use std::fs;
 use chrono::Utc;
 use regex::Regex;
+use tracing::{info, error, debug};
 use crate::embedding::extract_question_with_embedding;
 use crate::notification_summarizer::NotificationSummarizer;
 
@@ -227,6 +228,29 @@ impl OpenclawNotifier {
         }
 
         "openclaw".to_string()
+    }
+
+    // ==================== 日志辅助函数 ====================
+
+    /// 记录耗时日志到 hook.log
+    fn log_timing(stage: &str, result: &str, duration: std::time::Duration) {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+
+        if let Some(home) = dirs::home_dir() {
+            let log_path = home.join(".claude-monitor/hook.log");
+            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
+                let _ = writeln!(
+                    file,
+                    "[{}] ⏱️ {} {} took {}ms",
+                    timestamp,
+                    stage,
+                    result,
+                    duration.as_millis()
+                );
+            }
+        }
     }
 
     // ==================== 通知格式化辅助函数 ====================
@@ -797,10 +821,14 @@ impl OpenclawNotifier {
             "idle_prompt" => {
                 // 空闲等待 - 显示终端快照中的问题
                 if let Some(snap) = snapshot {
+                    // 记录模式匹配开始时间
+                    let pattern_start = std::time::Instant::now();
+
                     if Self::is_numbered_choice(snap) {
                         let question = Self::extract_choice_question(snap);
                         let choices = Self::extract_choices(snap);
                         let choices_text = choices.join("\n");
+                        Self::log_timing("pattern_match", "numbered_choice", pattern_start.elapsed());
                         if let Some(q) = question {
                             format!(
                                 "⏸️ {} 等待选择\n\n{}\n\n{}\n\n回复数字选择",
@@ -814,42 +842,56 @@ impl OpenclawNotifier {
                         }
                     } else if Self::is_confirmation_prompt(snap) {
                         let question = Self::extract_confirmation_question(snap);
+                        Self::log_timing("pattern_match", "confirmation_prompt", pattern_start.elapsed());
                         format!(
                             "⏸️ {} 请求确认\n\n{}\n\n回复 y/n",
                             project_name, question
                         )
                     } else if Self::is_colon_prompt(snap) {
                         let question = Self::extract_colon_question(snap);
+                        Self::log_timing("pattern_match", "colon_prompt", pattern_start.elapsed());
                         format!(
                             "⏸️ {} 等待输入\n\n{}\n\n回复内容",
                             project_name, question
                         )
                     } else if !snap.trim().is_empty() {
                         // 有快照内容但不匹配特定模式
+                        Self::log_timing("pattern_match", "no_match", pattern_start.elapsed());
+
                         // 优先级：1. Embedding 提取 → 2. AI 提取 → 3. 显示原始快照
+                        let embedding_start = std::time::Instant::now();
                         if let Some(question) = extract_question_with_embedding(snap) {
+                            Self::log_timing("embedding_extract", "success", embedding_start.elapsed());
                             format!(
                                 "⏸️ {} 等待输入\n\n{}\n\n回复内容",
                                 project_name, question
                             )
-                        } else if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
-                            let emoji = match question_type.as_str() {
-                                "confirm" => "⏸️",
-                                "choice" => "⏸️",
-                                _ => "⏸️",
-                            };
-                            format!(
-                                "{} {} 等待输入\n\n{}\n\n{}",
-                                emoji, project_name, question, reply_hint
-                            )
                         } else {
-                            // AI 提取也失败，回退到显示原始快照
-                            format!(
-                                "⏸️ {} 等待输入\n\n{}\n\n回复内容",
-                                project_name, snap.trim()
-                            )
+                            Self::log_timing("embedding_extract", "failed", embedding_start.elapsed());
+
+                            let ai_start = std::time::Instant::now();
+                            if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
+                                Self::log_timing("ai_extract", "success", ai_start.elapsed());
+                                let emoji = match question_type.as_str() {
+                                    "confirm" => "⏸️",
+                                    "choice" => "⏸️",
+                                    _ => "⏸️",
+                                };
+                                format!(
+                                    "{} {} 等待输入\n\n{}\n\n{}",
+                                    emoji, project_name, question, reply_hint
+                                )
+                            } else {
+                                Self::log_timing("ai_extract", "failed_or_timeout", ai_start.elapsed());
+                                // AI 提取也失败，回退到显示原始快照
+                                format!(
+                                    "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                                    project_name, snap.trim()
+                                )
+                            }
                         }
                     } else {
+                        Self::log_timing("pattern_match", "empty_snapshot", pattern_start.elapsed());
                         format!("⏸️ {} 等待输入", project_name)
                     }
                 } else if !message.is_empty() {
@@ -1330,40 +1372,69 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<SendResult> {
+        let total_start = std::time::Instant::now();
+
         // 外部会话（ext-xxx）不发送通知
         // 原因：外部会话无法远程回复，通知只会造成打扰
         if agent_id.starts_with("ext-") {
             if self.dry_run {
                 eprintln!("[DRY-RUN] External session (cannot reply remotely), skipping: {} {}", agent_id, event_type);
             }
+            debug!(agent_id = %agent_id, event_type = %event_type, "Skipping external session notification");
             return Ok(SendResult::Skipped("external session".to_string()));
         }
 
         let urgency = Self::get_urgency(event_type, context);
 
+        debug!(
+            agent_id = %agent_id,
+            event_type = %event_type,
+            urgency = %urgency,
+            "Processing notification event"
+        );
+
         match urgency {
             "HIGH" | "MEDIUM" => {
                 // 直接发送到 Telegram（不经过 system event，因为 Agent 可能不处理 cam_notification）
                 if self.channel_config.is_some() {
+                    let format_start = std::time::Instant::now();
                     let message = self.format_event(agent_id, event_type, pattern_or_path, context);
+                    Self::log_timing("format_event", event_type, format_start.elapsed());
 
                     // 只有需要用户回复的事件才添加 agent_id 标记
                     let needs_reply = matches!(event_type,
                         "permission_request" | "WaitingForInput" | "Error" | "notification"
                     );
 
+                    let send_start = std::time::Instant::now();
                     if needs_reply {
                         self.send_direct(&message, agent_id)?;
                     } else {
                         // stop/session_end 等不需要回复的事件，不添加标记
                         self.send_direct_text(&message)?;
                     }
+                    Self::log_timing("send_direct", "telegram", send_start.elapsed());
+                    Self::log_timing("send_event_total", event_type, total_start.elapsed());
+
+                    info!(
+                        agent_id = %agent_id,
+                        event_type = %event_type,
+                        urgency = %urgency,
+                        "Notification sent via direct channel"
+                    );
                     return Ok(SendResult::Sent);
                 }
 
                 // 如果没有 channel 配置，尝试 system event
                 let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
                 self.send_via_gateway_wake_payload(&payload)?;
+                Self::log_timing("send_event_total", event_type, total_start.elapsed());
+                info!(
+                    agent_id = %agent_id,
+                    event_type = %event_type,
+                    urgency = %urgency,
+                    "Notification sent via system event"
+                );
                 Ok(SendResult::Sent)
             }
             _ => {
@@ -1372,6 +1443,11 @@ impl OpenclawNotifier {
                 if self.dry_run {
                     eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type, agent_id);
                 }
+                debug!(
+                    agent_id = %agent_id,
+                    event_type = %event_type,
+                    "Notification skipped (LOW urgency)"
+                );
                 Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type)))
             }
         }
@@ -1407,13 +1483,13 @@ impl OpenclawNotifier {
             Ok(output) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("OpenClaw 直接发送失败: {}", stderr);
+                    error!(channel = %config.channel, error = %stderr, "OpenClaw direct send failed");
                     return Err(anyhow::anyhow!("OpenClaw send failed: {}", stderr));
                 }
                 Ok(())
             }
             Err(e) => {
-                eprintln!("无法执行 OpenClaw message send: {}", e);
+                error!(error = %e, "Failed to execute OpenClaw message send");
                 Err(e.into())
             }
         }
@@ -1442,13 +1518,13 @@ impl OpenclawNotifier {
             Ok(output) => {
                 if !output.status.success() {
                     let stderr = String::from_utf8_lossy(&output.stderr);
-                    eprintln!("System event 发送失败: {}", stderr);
+                    error!(error = %stderr, "System event send failed");
                     return Err(anyhow::anyhow!("System event failed: {}", stderr));
                 }
                 Ok(())
             }
             Err(e) => {
-                eprintln!("无法执行 system event: {}", e);
+                error!(error = %e, "Failed to execute system event");
                 Err(e.into())
             }
         }
