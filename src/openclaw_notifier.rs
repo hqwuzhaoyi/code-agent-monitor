@@ -338,12 +338,14 @@ impl OpenclawNotifier {
             .collect();
 
         // 查找最后一个问题/提示行
-        // 问题行特征：以 ? 或 ？ 结尾，以 : 或 ： 结尾，或包含确认提示模式
+        // 问题行特征：包含 ? 或 ？，以 : 或 ： 结尾，或包含确认提示模式
         let mut last_question_idx = None;
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            // 检查是否是问题行（以 ? 或 ？ 结尾）
-            if trimmed.ends_with('?') || trimmed.ends_with('？') {
+            // 检查是否是问题行（包含 ? 或 ？）
+            // 注意：使用 contains 而不是 ends_with，因为问题后可能有括号说明
+            // 例如：需要哪些核心功能？（可多选）
+            if trimmed.contains('?') || trimmed.contains('？') {
                 last_question_idx = Some(i);
             }
             // 检查是否是提示行（以 : 或 ： 结尾）
@@ -358,22 +360,53 @@ impl OpenclawNotifier {
         }
 
         // 查找最后一组连续的选项块
-        // 关键改进：只提取最后一组连续的选项，而不是所有选项
-        // 这样可以正确处理多轮对话的情况（每轮都有自己的选项）
+        // 关键改进：
+        // 1. 只提取最后一组连续的选项
+        // 2. 检测选项编号重置（如 4 后面出现 1）来分割不同的选项组
         let mut option_groups: Vec<(usize, usize)> = Vec::new();
         let mut current_group_start: Option<usize> = None;
         let mut current_group_end: Option<usize> = None;
+        let mut last_option_num: Option<u32> = None;
 
         for (i, line) in lines.iter().enumerate() {
             let trimmed = line.trim();
-            let is_option = trimmed.chars().next().map(|c| c.is_ascii_digit()).unwrap_or(false)
-                && trimmed.contains('.');
-
-            if is_option {
-                if current_group_start.is_none() {
-                    current_group_start = Some(i);
+            // 检查是否是选项行，并提取选项编号
+            let option_num = if let Some(first_char) = trimmed.chars().next() {
+                if first_char.is_ascii_digit() && trimmed.contains('.') {
+                    // 提取选项编号
+                    trimmed.chars()
+                        .take_while(|c| c.is_ascii_digit())
+                        .collect::<String>()
+                        .parse::<u32>()
+                        .ok()
+                } else {
+                    None
                 }
-                current_group_end = Some(i);
+            } else {
+                None
+            };
+
+            if let Some(num) = option_num {
+                // 检测选项编号重置（新组开始）
+                // 如果当前编号小于等于上一个编号，说明是新的一组
+                let is_new_group = last_option_num.map(|last| num <= last).unwrap_or(false);
+
+                if is_new_group && current_group_start.is_some() {
+                    // 保存当前组，开始新组
+                    if let (Some(start), Some(end)) = (current_group_start, current_group_end) {
+                        option_groups.push((start, end));
+                    }
+                    current_group_start = Some(i);
+                    current_group_end = Some(i);
+                } else if current_group_start.is_none() {
+                    // 第一个选项
+                    current_group_start = Some(i);
+                    current_group_end = Some(i);
+                } else {
+                    // 继续当前组
+                    current_group_end = Some(i);
+                }
+                last_option_num = Some(num);
             } else if current_group_start.is_some() {
                 // 非选项行，结束当前组
                 if let (Some(start), Some(end)) = (current_group_start, current_group_end) {
@@ -381,6 +414,7 @@ impl OpenclawNotifier {
                 }
                 current_group_start = None;
                 current_group_end = None;
+                last_option_num = None;
             }
         }
         // 处理最后一组（如果存在）
@@ -393,8 +427,30 @@ impl OpenclawNotifier {
             .map(|(s, e)| (Some(*s), Some(*e)))
             .unwrap_or((None, None));
 
+        // 查找与最后一组选项相关的问题行
+        // 只在最后一组选项之前查找，而不是整个文本
+        let relevant_question_idx = if let Some(first_opt) = first_option_idx {
+            // 从最后一组选项的第一行向前查找最近的问题行
+            let mut found_idx = None;
+            for i in (0..first_opt).rev() {
+                let trimmed = lines[i].trim();
+                // 使用 contains 而不是 ends_with，因为问题后可能有括号说明
+                if trimmed.contains('?') || trimmed.contains('？')
+                    || trimmed.ends_with(':') || trimmed.ends_with('：')
+                    || trimmed.contains("[Y]es") || trimmed.contains("[Y/n]")
+                    || trimmed.contains("[y/N]") || trimmed.contains("[是/否]") {
+                    found_idx = Some(i);
+                    break;
+                }
+            }
+            found_idx
+        } else {
+            // 没有选项，使用最后一个问题行
+            last_question_idx
+        };
+
         // 根据问题和选项的位置关系决定返回内容
-        match (last_question_idx, first_option_idx, last_option_idx) {
+        match (relevant_question_idx, first_option_idx, last_option_idx) {
             // 有问题和选项
             (Some(q_idx), Some(first_opt), Some(last_opt)) => {
                 if q_idx < first_opt {
@@ -466,7 +522,8 @@ impl OpenclawNotifier {
         if let Some(idx) = last_choice_idx {
             for i in (idx + 1)..lines.len() {
                 let line = lines[i].trim();
-                if !line.is_empty() && (line.ends_with('?') || line.ends_with('？')
+                // 使用 contains 而不是 ends_with，因为问题后可能有括号说明
+                if !line.is_empty() && (line.contains('?') || line.contains('？')
                     || line.ends_with(':') || line.ends_with('：')) {
                     return Some(line.to_string());
                 }
@@ -479,7 +536,8 @@ impl OpenclawNotifier {
                 let line = lines[i].trim();
                 if !line.is_empty() && !line.chars().all(|c| c == '─' || c == '━' || c == '=' || c == '-') {
                     // 检查是否是问题/提示行
-                    if line.ends_with('?') || line.ends_with('？')
+                    // 使用 contains 而不是 ends_with，因为问题后可能有括号说明
+                    if line.contains('?') || line.contains('？')
                         || line.ends_with(':') || line.ends_with('：') {
                         return Some(line.to_string());
                     }
@@ -2588,5 +2646,142 @@ But contains a question somewhere"#;
         // 关键：应该包含问题内容
         assert!(message.contains("这个结构看起来合适吗？"), "Should contain the question");
         assert!(message.contains("回复内容"));
+    }
+
+    // ==================== 多轮对话选项提取测试 ====================
+
+    #[test]
+    fn test_clean_terminal_context_multi_round_same_numbers() {
+        // 测试多轮对话，每轮选项编号都是 1-4
+        let raw = r#"样式方案偏好？
+1. Tailwind CSS
+2. CSS Modules
+3. styled-components
+4. 纯 CSS
+需要哪些核心功能？（可多选）
+1. 基础功能
+2. 基础 + 编辑
+3. 基础 + 筛选
+4. 全部"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(raw);
+
+        // 应该只包含最后一组选项和对应的问题
+        assert!(cleaned.contains("需要哪些核心功能？"), "Should contain the last question");
+        assert!(cleaned.contains("1. 基础功能"), "Should contain last group option 1");
+        assert!(cleaned.contains("4. 全部"), "Should contain last group option 4");
+        // 不应该包含第一组的选项
+        assert!(!cleaned.contains("Tailwind"), "Should NOT contain first group options");
+        assert!(!cleaned.contains("styled-components"), "Should NOT contain first group options");
+    }
+
+    #[test]
+    fn test_clean_terminal_context_multi_round_different_numbers() {
+        // 测试多轮对话，选项编号不同（1-4, 1-3）
+        let raw = r#"使用场景？
+1. 个人任务管理
+2. 项目任务跟踪
+3. 团队协作
+4. 学习演示
+技术栈偏好？
+1. Vite + React + TypeScript
+2. Vite + React + JavaScript
+3. Next.js"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(raw);
+
+        // 应该只包含最后一组选项
+        assert!(cleaned.contains("技术栈偏好？"), "Should contain the last question");
+        assert!(cleaned.contains("1. Vite + React + TypeScript"), "Should contain last group option 1");
+        assert!(cleaned.contains("3. Next.js"), "Should contain last group option 3");
+        // 不应该包含第一组的选项
+        assert!(!cleaned.contains("个人任务管理"), "Should NOT contain first group options");
+        assert!(!cleaned.contains("学习演示"), "Should NOT contain first group options");
+    }
+
+    #[test]
+    fn test_clean_terminal_context_question_with_parentheses() {
+        // 测试问题后有括号说明的情况
+        let raw = r#"需要哪些核心功能？（可多选）
+1. 基础功能
+2. 基础 + 编辑
+3. 全部"#;
+
+        let cleaned = OpenclawNotifier::clean_terminal_context(raw);
+
+        // 应该包含带括号的问题
+        assert!(cleaned.contains("需要哪些核心功能？（可多选）"), "Should contain question with parentheses");
+        assert!(cleaned.contains("1. 基础功能"), "Should contain option 1");
+    }
+
+    #[test]
+    fn test_extract_choice_question_with_parentheses() {
+        // 测试 extract_choice_question 能正确提取带括号的问题
+        let context = r#"需要哪些核心功能？（可多选）
+1. 基础功能
+2. 基础 + 编辑
+3. 全部"#;
+
+        let question = OpenclawNotifier::extract_choice_question(context);
+
+        assert!(question.is_some(), "Should find the question");
+        assert!(question.unwrap().contains("需要哪些核心功能？"), "Should contain the question text");
+    }
+
+    #[test]
+    fn test_extract_choices_only_last_group() {
+        // 测试 extract_choices 在清洗后的内容上只提取最后一组
+        // 注意：extract_choices 是在 clean_terminal_context 清洗后的内容上调用的
+        let cleaned = r#"技术栈偏好？
+1. Vite + React + TypeScript
+2. Vite + React + JavaScript
+3. Next.js"#;
+
+        let choices = OpenclawNotifier::extract_choices(cleaned);
+
+        assert_eq!(choices.len(), 3, "Should have 3 choices");
+        assert!(choices[0].contains("Vite + React + TypeScript"));
+        assert!(choices[2].contains("Next.js"));
+    }
+
+    #[test]
+    fn test_format_notification_multi_round() {
+        // 端到端测试：多轮对话的通知格式化
+        let notifier = OpenclawNotifier::new().with_no_ai(true);
+
+        let context = r#"{"notification_type": "idle_prompt", "cwd": "/workspace"}
+
+--- 终端快照 ---
+样式方案偏好？
+
+1. Tailwind CSS
+2. CSS Modules
+3. styled-components
+4. 纯 CSS
+
+❯ 1
+
+⏺ 好的，Tailwind CSS。
+
+需要哪些核心功能？（可多选）
+
+1. 基础功能
+2. 基础 + 编辑
+3. 基础 + 筛选
+4. 全部
+
+❯"#;
+
+        let message = notifier.format_event("cam-123", "notification", "", context);
+
+        // 应该只显示最后一组选项
+        assert!(message.contains("需要哪些核心功能"), "Should contain the last question");
+        assert!(message.contains("1. 基础功能"), "Should contain last group option 1");
+        assert!(message.contains("4. 全部"), "Should contain last group option 4");
+        // 不应该包含第一组的选项
+        assert!(!message.contains("Tailwind"), "Should NOT contain first group options");
+        assert!(!message.contains("styled-components"), "Should NOT contain first group options");
+        // 应该有回复提示
+        assert!(message.contains("回复数字选择"), "Should have reply hint");
     }
 }
