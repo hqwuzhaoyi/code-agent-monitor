@@ -3,10 +3,12 @@
 use crate::tmux::TmuxManager;
 use crate::watcher_daemon::WatcherDaemon;
 use anyhow::{anyhow, Result};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tracing::{info, warn, debug};
 
 /// Agent 类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -81,6 +83,12 @@ pub struct StartAgentRequest {
     pub resume_session: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub initial_prompt: Option<String>,
+    /// 可选：指定 agent_id，用于外部系统（如 OpenClaw）传入自定义 ID
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    /// 可选：指定 tmux session 名称，用于外部系统传入已存在的 session
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tmux_session: Option<String>,
 }
 
 /// 启动 Agent 响应
@@ -133,8 +141,13 @@ impl AgentManager {
         self.data_dir.join("agents.json")
     }
 
-    /// 读取 agents.json
-    fn read_agents_file(&self) -> Result<AgentsFile> {
+    /// 获取锁文件路径
+    fn lock_file_path(&self) -> PathBuf {
+        self.data_dir.join("agents.json.lock")
+    }
+
+    /// 读取 agents.json（内部使用，不加锁）
+    fn read_agents_file_internal(&self) -> Result<AgentsFile> {
         let path = self.agents_file_path();
         if path.exists() {
             let content = fs::read_to_string(&path)?;
@@ -144,12 +157,71 @@ impl AgentManager {
         }
     }
 
-    /// 写入 agents.json
-    fn write_agents_file(&self, file: &AgentsFile) -> Result<()> {
+    /// 写入 agents.json（内部使用，不加锁）
+    fn write_agents_file_internal(&self, file: &AgentsFile) -> Result<()> {
         let path = self.agents_file_path();
         let content = serde_json::to_string_pretty(file)?;
         fs::write(path, content)?;
         Ok(())
+    }
+
+    /// 在文件锁保护下执行 agents.json 的读-改-写操作
+    /// 使用阻塞锁，如果其他进程持有锁，会等待直到锁释放
+    fn with_locked_agents_file<F, T>(&self, operation: F) -> Result<T>
+    where
+        F: FnOnce(&mut AgentsFile) -> Result<T>,
+    {
+        // 确保锁文件存在
+        let lock_path = self.lock_file_path();
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lock_path)?;
+
+        // 获取排他锁（阻塞等待）
+        lock_file.lock_exclusive()?;
+
+        // 读取、修改、写入
+        let result = (|| {
+            let mut file = self.read_agents_file_internal()?;
+            let result = operation(&mut file)?;
+            self.write_agents_file_internal(&file)?;
+            Ok(result)
+        })();
+
+        // 释放锁（drop 时自动释放，但显式解锁更清晰）
+        let _ = lock_file.unlock();
+
+        result
+    }
+
+    /// 在文件锁保护下只读 agents.json
+    fn with_locked_agents_file_read<F, T>(&self, operation: F) -> Result<T>
+    where
+        F: FnOnce(&AgentsFile) -> Result<T>,
+    {
+        let lock_path = self.lock_file_path();
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .open(&lock_path)?;
+
+        // 获取共享锁（允许多个读者）
+        lock_file.lock_shared()?;
+
+        let result = (|| {
+            let file = self.read_agents_file_internal()?;
+            operation(&file)
+        })();
+
+        let _ = lock_file.unlock();
+
+        result
+    }
+
+    /// 读取 agents.json（公开接口，加锁）
+    fn read_agents_file(&self) -> Result<AgentsFile> {
+        self.with_locked_agents_file_read(|file| Ok(file.clone()))
     }
 
     /// 生成 agent_id
@@ -184,13 +256,35 @@ impl AgentManager {
             .unwrap_or("claude")
             .parse()?;
 
-        let agent_id = self.generate_agent_id();
-        let tmux_session = agent_id.clone();
+        // 使用传入的 agent_id，或生成新的
+        let agent_id = request.agent_id
+            .clone()
+            .unwrap_or_else(|| self.generate_agent_id());
+
+        // 使用传入的 tmux_session，或使用 agent_id
+        let tmux_session = request.tmux_session
+            .clone()
+            .unwrap_or_else(|| agent_id.clone());
+
+        info!(
+            agent_id = %agent_id,
+            agent_type = %agent_type,
+            project_path = %request.project_path,
+            tmux_session = %tmux_session,
+            "Starting agent"
+        );
 
         let command = self.get_agent_command(&agent_type, request.resume_session.as_deref());
 
-        // 创建 tmux session
-        self.tmux.create_session(&tmux_session, &request.project_path, &command)?;
+        // 检查 tmux session 是否已存在
+        let session_exists = self.tmux.session_exists(&tmux_session);
+
+        if !session_exists {
+            // 创建 tmux session
+            self.tmux.create_session(&tmux_session, &request.project_path, &command)?;
+        } else {
+            info!(tmux_session = %tmux_session, "Tmux session already exists, reusing");
+        }
 
         // 立即保存到 agents.json（先于 Claude Code hook 触发）
         // 这样 session_start hook 触发时能正确匹配到 agent
@@ -207,9 +301,10 @@ impl AgentManager {
             status: AgentStatus::Running,
         };
 
-        let mut file = self.read_agents_file()?;
-        file.agents.push(record);
-        self.write_agents_file(&file)?;
+        self.with_locked_agents_file(|file| {
+            file.agents.push(record);
+            Ok(())
+        })?;
 
         // 如果有初始 prompt，等待 Claude Code 就绪后发送
         if let Some(prompt) = &request.initial_prompt {
@@ -231,8 +326,9 @@ impl AgentManager {
             }
             if ready {
                 self.tmux.send_keys(&tmux_session, prompt)?;
+                debug!(agent_id = %agent_id, "Initial prompt sent");
             } else {
-                eprintln!("警告: Claude Code 未能在 30 秒内就绪，初始 prompt 未发送");
+                warn!(agent_id = %agent_id, "Claude Code not ready within 30s, initial prompt not sent");
             }
         }
 
@@ -240,9 +336,11 @@ impl AgentManager {
         let daemon = WatcherDaemon::new();
         if let Ok(started) = daemon.ensure_started() {
             if started {
-                eprintln!("已启动 watcher daemon");
+                info!("Watcher daemon started");
             }
         }
+
+        info!(agent_id = %agent_id, tmux_session = %tmux_session, "Agent started successfully");
 
         Ok(StartAgentResponse {
             agent_id,
@@ -272,9 +370,10 @@ impl AgentManager {
             status: AgentStatus::Running,
         };
 
-        let mut file = self.read_agents_file()?;
-        file.agents.push(record);
-        self.write_agents_file(&file)?;
+        self.with_locked_agents_file(|file| {
+            file.agents.push(record);
+            Ok(())
+        })?;
 
         Ok(StartAgentResponse {
             agent_id,
@@ -284,20 +383,24 @@ impl AgentManager {
 
     /// 停止 Agent
     pub fn stop_agent(&self, agent_id: &str) -> Result<()> {
-        let mut file = self.read_agents_file()?;
+        info!(agent_id = %agent_id, "Stopping agent");
 
-        // 找到 agent
-        let agent = file.agents.iter()
-            .find(|a| a.agent_id == agent_id)
-            .ok_or_else(|| anyhow!("Agent not found: {}", agent_id))?
-            .clone();
+        // 在锁保护下查找 agent 并获取 tmux_session
+        let tmux_session = self.with_locked_agents_file(|file| {
+            let agent = file.agents.iter()
+                .find(|a| a.agent_id == agent_id)
+                .ok_or_else(|| anyhow!("Agent not found: {}", agent_id))?;
+            let session = agent.tmux_session.clone();
 
-        // 终止 tmux session
-        let _ = self.tmux.kill_session(&agent.tmux_session);
+            // 从记录中删除
+            file.agents.retain(|a| a.agent_id != agent_id);
+            Ok(session)
+        })?;
 
-        // 从记录中删除
-        file.agents.retain(|a| a.agent_id != agent_id);
-        self.write_agents_file(&file)?;
+        // 终止 tmux session（在锁外执行，避免长时间持有锁）
+        let _ = self.tmux.kill_session(&tmux_session);
+
+        info!(agent_id = %agent_id, "Agent stopped successfully");
 
         Ok(())
     }
@@ -328,28 +431,17 @@ impl AgentManager {
 
     /// 列出所有 Agent（过滤已死亡的）
     pub fn list_agents(&self) -> Result<Vec<AgentRecord>> {
-        let mut file = self.read_agents_file()?;
-        let mut changed = false;
+        self.with_locked_agents_file(|file| {
+            // 过滤已死亡的 session
+            let live_agents: Vec<AgentRecord> = file.agents.iter()
+                .filter(|a| self.tmux.session_exists(&a.tmux_session))
+                .cloned()
+                .collect();
 
-        // 过滤已死亡的 session
-        let live_agents: Vec<AgentRecord> = file.agents.iter()
-            .filter(|a| {
-                let alive = self.tmux.session_exists(&a.tmux_session);
-                if !alive {
-                    changed = true;
-                }
-                alive
-            })
-            .cloned()
-            .collect();
-
-        // 如果有变化，更新文件
-        if changed {
+            // 更新文件（只保留存活的）
             file.agents = live_agents.clone();
-            self.write_agents_file(&file)?;
-        }
-
-        Ok(live_agents)
+            Ok(live_agents)
+        })
     }
 
     /// 获取单个 Agent
@@ -367,35 +459,31 @@ impl AgentManager {
     /// 通过 cwd 更新 Agent 的 session_id
     /// 用于在 SessionStart hook 触发时建立 session_id 与 agent_id 的映射
     pub fn update_session_id_by_cwd(&self, cwd: &str, session_id: &str) -> Result<bool> {
-        let mut file = self.read_agents_file()?;
-        let mut updated = false;
-
-        // 使用规范化路径进行比较（解析符号链接）
         let cwd_canonical = canonicalize_path(cwd);
+        let session_id_owned = session_id.to_string();
 
-        // 检查是否有多个匹配的 agent（潜在的歧义）
-        let matching_agents: Vec<_> = file.agents.iter()
-            .filter(|a| canonicalize_path(&a.project_path) == cwd_canonical && a.session_id.is_none())
-            .collect();
+        self.with_locked_agents_file(|file| {
+            // 检查是否有多个匹配的 agent（潜在的歧义）
+            let matching_count = file.agents.iter()
+                .filter(|a| canonicalize_path(&a.project_path) == cwd_canonical && a.session_id.is_none())
+                .count();
 
-        if matching_agents.len() > 1 {
-            eprintln!("警告: 发现 {} 个 agent 匹配路径 {}，将使用第一个匹配", matching_agents.len(), cwd);
-        }
-
-        for agent in &mut file.agents {
-            let agent_path_canonical = canonicalize_path(&agent.project_path);
-            if agent_path_canonical == cwd_canonical && agent.session_id.is_none() {
-                agent.session_id = Some(session_id.to_string());
-                updated = true;
-                break;
+            if matching_count > 1 {
+                eprintln!("警告: 发现 {} 个 agent 匹配路径 {}，将使用第一个匹配", matching_count, cwd);
             }
-        }
 
-        if updated {
-            self.write_agents_file(&file)?;
-        }
+            let mut updated = false;
+            for agent in &mut file.agents {
+                let agent_path_canonical = canonicalize_path(&agent.project_path);
+                if agent_path_canonical == cwd_canonical && agent.session_id.is_none() {
+                    agent.session_id = Some(session_id_owned.clone());
+                    updated = true;
+                    break;
+                }
+            }
 
-        Ok(updated)
+            Ok(updated)
+        })
     }
 
     /// 通过 cwd 查找 Agent
@@ -411,12 +499,7 @@ impl AgentManager {
         // 生成 agent_id: ext-{session_id前8位}
         let short_id = &session_id[..8.min(session_id.len())];
         let agent_id = format!("ext-{}", short_id);
-
-        // 检查是否已存在
-        let file = self.read_agents_file()?;
-        if file.agents.iter().any(|a| a.agent_id == agent_id) {
-            return Ok(agent_id);
-        }
+        let agent_id_clone = agent_id.clone();
 
         let record = AgentRecord {
             agent_id: agent_id.clone(),
@@ -431,21 +514,26 @@ impl AgentManager {
             status: AgentStatus::Running,
         };
 
-        // 保存到 agents.json
-        let mut file = self.read_agents_file()?;
-        file.agents.push(record);
-        self.write_agents_file(&file)?;
+        self.with_locked_agents_file(|file| {
+            // 检查是否已存在
+            if file.agents.iter().any(|a| a.agent_id == agent_id) {
+                return Ok(());
+            }
+            file.agents.push(record);
+            Ok(())
+        })?;
 
-        Ok(agent_id)
+        Ok(agent_id_clone)
     }
 
     /// 移除 Agent 记录（不终止 tmux session）
     /// 用于清理外部会话记录
     pub fn remove_agent(&self, agent_id: &str) -> Result<()> {
-        let mut file = self.read_agents_file()?;
-        file.agents.retain(|a| a.agent_id != agent_id);
-        self.write_agents_file(&file)?;
-        Ok(())
+        let agent_id_owned = agent_id.to_string();
+        self.with_locked_agents_file(|file| {
+            file.agents.retain(|a| a.agent_id != agent_id_owned);
+            Ok(())
+        })
     }
 }
 
@@ -503,6 +591,8 @@ mod tests {
             agent_type: Some("mock".to_string()),
             resume_session: None,
             initial_prompt: None,
+            agent_id: None,
+            tmux_session: None,
         });
 
         // Then: 返回 agent_id，tmux session 存在
@@ -527,6 +617,8 @@ mod tests {
             agent_type: Some("mock".to_string()),
             resume_session: None,
             initial_prompt: None,
+            agent_id: None,
+            tmux_session: None,
         }).unwrap();
 
         // Then: agents.json 包含该记录
@@ -548,6 +640,8 @@ mod tests {
             agent_type: Some("mock".to_string()),
             resume_session: None,
             initial_prompt: None,
+            agent_id: None,
+            tmux_session: None,
         }).unwrap();
 
         // When: 停止 agent
@@ -598,6 +692,8 @@ mod tests {
             agent_type: Some("mock".to_string()),
             resume_session: None,
             initial_prompt: None,
+            agent_id: None,
+            tmux_session: None,
         }).unwrap();
 
         // 手动 kill tmux (模拟意外退出)

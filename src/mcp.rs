@@ -8,6 +8,11 @@ use crate::jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use};
 use crate::input_detector::InputWaitDetector;
 use crate::team_discovery;
 use crate::task_list;
+use crate::team_bridge::{TeamBridge, InboxMessage};
+use crate::inbox_watcher::InboxWatcher;
+use crate::openclaw_notifier::OpenclawNotifier;
+use crate::team_orchestrator::TeamOrchestrator;
+use crate::conversation_state::{ConversationStateManager, ReplyResult};
 
 /// MCP 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,8 +76,6 @@ impl McpServer {
         let mut reader = BufReader::new(stdin);
         let mut line = String::new();
 
-        eprintln!("Code Agent Monitor MCP Server 已启动 (stdio 模式)");
-
         loop {
             line.clear();
             let bytes_read = reader.read_line(&mut line).await?;
@@ -119,6 +122,13 @@ impl McpServer {
             // Team discovery methods
             "team/list" => self.handle_team_list(),
             "team/members" => self.handle_team_members(request.params),
+            // Team bridge methods
+            "team/create" => self.handle_team_create(request.params),
+            "team/delete" => self.handle_team_delete(request.params),
+            "team/status" => self.handle_team_status(request.params),
+            "inbox/read" => self.handle_inbox_read(request.params),
+            "inbox/send" => self.handle_inbox_send(request.params),
+            "team/pending_requests" => self.handle_team_pending_requests(request.params),
             _ => Err(anyhow::anyhow!("Method not found: {}", request.method)),
         };
 
@@ -153,6 +163,8 @@ impl McpServer {
             agent_type: params["agent_type"].as_str().map(|s| s.to_string()),
             resume_session: params["resume_session"].as_str().map(|s| s.to_string()),
             initial_prompt: params["initial_prompt"].as_str().map(|s| s.to_string()),
+            agent_id: params["agent_id"].as_str().map(|s| s.to_string()),
+            tmux_session: params["tmux_session"].as_str().map(|s| s.to_string()),
         };
 
         let response = self.agent_manager.start_agent(request)?;
@@ -341,6 +353,161 @@ impl McpServer {
             }
             None => Err(anyhow::anyhow!("Team not found: {}", team_name)),
         }
+    }
+
+    /// 处理 team/create - 创建新 Team
+    fn handle_team_create(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+        let description = params["description"]
+            .as_str()
+            .unwrap_or("Created by CAM");
+        let project_path = params["project_path"]
+            .as_str()
+            .unwrap_or(".");
+
+        let bridge = TeamBridge::new();
+        bridge.create_team(name, description, project_path)?;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "team_name": name
+        }))
+    }
+
+    /// 处理 team/delete - 删除 Team
+    fn handle_team_delete(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+
+        let bridge = TeamBridge::new();
+        bridge.delete_team(name)?;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "team_name": name
+        }))
+    }
+
+    /// 处理 team/status - 获取 Team 状态
+    fn handle_team_status(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
+
+        let bridge = TeamBridge::new();
+        let status = bridge.get_team_status(name)?;
+
+        Ok(serde_json::to_value(status)?)
+    }
+
+    /// 处理 inbox/read - 读取成员 inbox
+    fn handle_inbox_read(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let team = params["team"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing team"))?;
+        let member = params["member"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing member"))?;
+        let unread_only = params["unread_only"].as_bool().unwrap_or(false);
+
+        let bridge = TeamBridge::new();
+        let messages = bridge.read_inbox(team, member)?;
+
+        let filtered: Vec<_> = if unread_only {
+            messages.into_iter().filter(|m| !m.read).collect()
+        } else {
+            messages
+        };
+
+        Ok(serde_json::json!({
+            "team": team,
+            "member": member,
+            "messages": filtered
+        }))
+    }
+
+    /// 处理 inbox/send - 发送消息到成员 inbox
+    fn handle_inbox_send(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
+
+        let team = params["team"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing team"))?;
+        let member = params["member"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing member"))?;
+        let from = params["from"]
+            .as_str()
+            .unwrap_or("cam");
+        let text = params["text"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("Missing text"))?;
+        let summary = params["summary"].as_str().map(String::from);
+
+        let bridge = TeamBridge::new();
+        let message = InboxMessage {
+            from: from.to_string(),
+            text: text.to_string(),
+            summary,
+            timestamp: chrono::Utc::now(),
+            color: None,
+            read: false,
+        };
+        bridge.send_to_inbox(team, member, message)?;
+
+        Ok(serde_json::json!({
+            "success": true,
+            "team": team,
+            "member": member
+        }))
+    }
+
+    /// 处理 team/pending_requests - 获取等待中的请求
+    fn handle_team_pending_requests(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+        let bridge = TeamBridge::new();
+
+        // 如果指定了 team，只获取该 team 的请求
+        if let Some(params) = params {
+            if let Some(team) = params["team"].as_str() {
+                let status = bridge.get_team_status(team)?;
+                return Ok(serde_json::json!({
+                    "team": team,
+                    "pending_tasks": status.pending_tasks,
+                    "unread_messages": status.unread_messages
+                }));
+            }
+        }
+
+        // 否则获取所有 teams 的请求
+        let teams = bridge.list_teams();
+        let mut all_pending = Vec::new();
+
+        for team in teams {
+            if let Ok(status) = bridge.get_team_status(&team) {
+                if status.pending_tasks > 0 || status.unread_messages > 0 {
+                    all_pending.push(serde_json::json!({
+                        "team": team,
+                        "pending_tasks": status.pending_tasks,
+                        "unread_messages": status.unread_messages
+                    }));
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "pending_requests": all_pending
+        }))
     }
 
     /// 处理 initialize
@@ -664,6 +831,257 @@ impl McpServer {
                     "required": ["team_name", "task_id", "status"]
                 }),
             },
+            // Team Bridge tools (新增)
+            McpTool {
+                name: "team_create".to_string(),
+                description: "创建新的 Agent Team".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "description": {
+                            "type": "string",
+                            "description": "Team 描述"
+                        },
+                        "project_path": {
+                            "type": "string",
+                            "description": "项目路径"
+                        }
+                    },
+                    "required": ["name", "description", "project_path"]
+                }),
+            },
+            McpTool {
+                name: "team_delete".to_string(),
+                description: "删除 Agent Team 及其资源".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["name"]
+                }),
+            },
+            McpTool {
+                name: "team_status".to_string(),
+                description: "获取 Team 完整状态（成员、任务、消息）".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["name"]
+                }),
+            },
+            McpTool {
+                name: "inbox_read".to_string(),
+                description: "读取成员 inbox 消息".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "member": {
+                            "type": "string",
+                            "description": "成员名称"
+                        }
+                    },
+                    "required": ["team", "member"]
+                }),
+            },
+            McpTool {
+                name: "inbox_send".to_string(),
+                description: "发送消息到成员 inbox".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "member": {
+                            "type": "string",
+                            "description": "成员名称"
+                        },
+                        "message": {
+                            "type": "string",
+                            "description": "消息内容"
+                        },
+                        "from": {
+                            "type": "string",
+                            "description": "发送者名称（可选，默认 'user'）"
+                        }
+                    },
+                    "required": ["team", "member", "message"]
+                }),
+            },
+            McpTool {
+                name: "team_pending_requests".to_string(),
+                description: "获取等待中的权限请求".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称（可选，不指定则返回所有 Team 的请求）"
+                        }
+                    },
+                    "required": []
+                }),
+            },
+            // Team Orchestrator tools
+            McpTool {
+                name: "team_spawn_agent".to_string(),
+                description: "在 Team 中启动新的 Agent".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "name": {
+                            "type": "string",
+                            "description": "成员名称"
+                        },
+                        "agent_type": {
+                            "type": "string",
+                            "description": "Agent 类型（如 general-purpose, Bash 等）"
+                        },
+                        "initial_prompt": {
+                            "type": "string",
+                            "description": "可选，启动后立即发送的消息"
+                        }
+                    },
+                    "required": ["team", "name", "agent_type"]
+                }),
+            },
+            McpTool {
+                name: "team_progress".to_string(),
+                description: "获取 Team 聚合进度（成员数、任务数、等待输入的成员）".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["team"]
+                }),
+            },
+            McpTool {
+                name: "team_shutdown".to_string(),
+                description: "优雅关闭 Team（停止所有 agents）".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        }
+                    },
+                    "required": ["team"]
+                }),
+            },
+            // Conversation State tools
+            McpTool {
+                name: "get_pending_confirmations".to_string(),
+                description: "获取所有待处理的确认请求".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
+            McpTool {
+                name: "reply_pending".to_string(),
+                description: "回复待处理的确认请求（支持快捷回复：y/n/1/2/3）".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "reply": {
+                            "type": "string",
+                            "description": "回复内容（y/n/1/2/3 或自定义文本）"
+                        },
+                        "target": {
+                            "type": "string",
+                            "description": "目标 agent_id 或 confirmation_id（可选，单个待处理时自动选择）"
+                        }
+                    },
+                    "required": ["reply"]
+                }),
+            },
+            // Remote Lead Mode tools
+            McpTool {
+                name: "team_orchestrate".to_string(),
+                description: "根据自然语言任务描述创建 Team 并启动 agents".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "task_desc": {
+                            "type": "string",
+                            "description": "任务描述"
+                        },
+                        "project": {
+                            "type": "string",
+                            "description": "项目路径"
+                        }
+                    },
+                    "required": ["task_desc", "project"]
+                }),
+            },
+            McpTool {
+                name: "team_assign_task".to_string(),
+                description: "分配任务给 Team 成员".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "team": {
+                            "type": "string",
+                            "description": "Team 名称"
+                        },
+                        "member": {
+                            "type": "string",
+                            "description": "成员名称"
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "任务描述"
+                        }
+                    },
+                    "required": ["team", "member", "task"]
+                }),
+            },
+            McpTool {
+                name: "handle_user_reply".to_string(),
+                description: "处理用户自然语言回复（自动解析意图并执行）".to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "reply": {
+                            "type": "string",
+                            "description": "用户回复内容"
+                        },
+                        "context": {
+                            "type": "string",
+                            "description": "上下文信息（如当前 team 名称）"
+                        }
+                    },
+                    "required": ["reply"]
+                }),
+            },
         ];
 
         Ok(serde_json::json!({ "tools": tools }))
@@ -743,6 +1161,8 @@ impl McpServer {
                     agent_type: Some("claude".to_string()),
                     resume_session: Some(session_id.to_string()),
                     initial_prompt: None,
+                    agent_id: None,
+                    tmux_session: None,
                 })?;
 
                 Ok(serde_json::json!({
@@ -943,6 +1363,318 @@ impl McpServer {
                     "content": [{
                         "type": "text",
                         "text": format!("任务 {} 状态已更新为 {}", task_id, status_str)
+                    }]
+                }))
+            }
+            // Team Bridge tools (新增)
+            "team_create" => {
+                let name = arguments.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
+                let description = arguments.get("description")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 description 参数"))?;
+                let project_path = arguments.get("project_path")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 project_path 参数"))?;
+
+                let bridge = TeamBridge::new();
+                bridge.create_team(name, description, project_path)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Team '{}' 创建成功", name)
+                    }]
+                }))
+            }
+            "team_delete" => {
+                let name = arguments.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
+
+                let bridge = TeamBridge::new();
+                bridge.delete_team(name)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Team '{}' 已删除", name)
+                    }]
+                }))
+            }
+            "team_status" => {
+                let name = arguments.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
+
+                let bridge = TeamBridge::new();
+                let status = bridge.get_team_status(name)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&status)?
+                    }]
+                }))
+            }
+            "inbox_read" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+                let member = arguments.get("member")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
+
+                let bridge = TeamBridge::new();
+                let messages = bridge.read_inbox(team, member)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&messages)?
+                    }]
+                }))
+            }
+            "inbox_send" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+                let member = arguments.get("member")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
+                let message_text = arguments.get("message")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 message 参数"))?;
+                let from = arguments.get("from")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("user");
+
+                let bridge = TeamBridge::new();
+                let message = InboxMessage {
+                    from: from.to_string(),
+                    text: message_text.to_string(),
+                    summary: None,
+                    timestamp: chrono::Utc::now(),
+                    color: None,
+                    read: false,
+                };
+                bridge.send_to_inbox(team, member, message)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("消息已发送到 {}@{}", member, team)
+                    }]
+                }))
+            }
+            "team_pending_requests" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str());
+
+                let notifier = OpenclawNotifier::new();
+                let watcher = InboxWatcher::new(notifier);
+
+                let requests = if let Some(team_name) = team {
+                    watcher.get_pending_permission_requests(team_name)?
+                } else {
+                    // 获取所有 team 的请求
+                    let bridge = TeamBridge::new();
+                    let mut all_requests = Vec::new();
+                    for team_name in bridge.list_teams() {
+                        if let Ok(reqs) = watcher.get_pending_permission_requests(&team_name) {
+                            all_requests.extend(reqs);
+                        }
+                    }
+                    all_requests
+                };
+
+                let result: Vec<serde_json::Value> = requests.iter().map(|r| {
+                    serde_json::json!({
+                        "team": r.team,
+                        "member": r.member,
+                        "tool": r.tool,
+                        "input": r.input,
+                        "timestamp": r.timestamp.to_rfc3339()
+                    })
+                }).collect();
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            // Team Orchestrator tools
+            "team_spawn_agent" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+                let name = arguments.get("name")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
+                let agent_type = arguments.get("agent_type")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 agent_type 参数"))?;
+                let initial_prompt = arguments.get("initial_prompt")
+                    .and_then(|v| v.as_str());
+
+                let orchestrator = TeamOrchestrator::new();
+                let result = orchestrator.spawn_agent(team, name, agent_type, initial_prompt)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "team_progress" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+
+                let orchestrator = TeamOrchestrator::new();
+                let progress = orchestrator.get_team_progress(team)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&progress)?
+                    }]
+                }))
+            }
+            "team_shutdown" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+
+                let orchestrator = TeamOrchestrator::new();
+                orchestrator.shutdown_team(team)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": format!("Team '{}' 已关闭", team)
+                    }]
+                }))
+            }
+            // Conversation State tools
+            "get_pending_confirmations" => {
+                let state_manager = ConversationStateManager::new();
+                let pending = state_manager.get_pending_confirmations()?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&pending)?
+                    }]
+                }))
+            }
+            "reply_pending" => {
+                let reply = arguments.get("reply")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 reply 参数"))?;
+                let target = arguments.get("target")
+                    .and_then(|v| v.as_str());
+
+                let state_manager = ConversationStateManager::new();
+                let result = state_manager.handle_reply(reply, target)?;
+
+                let response = match result {
+                    ReplyResult::Sent { agent_id, reply } => {
+                        serde_json::json!({
+                            "status": "sent",
+                            "agent_id": agent_id,
+                            "reply": reply
+                        })
+                    }
+                    ReplyResult::NeedSelection { options } => {
+                        serde_json::json!({
+                            "status": "need_selection",
+                            "options": options.iter().map(|o| serde_json::json!({
+                                "id": o.id,
+                                "agent_id": o.agent_id,
+                                "context": o.context
+                            })).collect::<Vec<_>>()
+                        })
+                    }
+                    ReplyResult::NoPending => {
+                        serde_json::json!({
+                            "status": "no_pending",
+                            "message": "没有待处理的确认请求"
+                        })
+                    }
+                    ReplyResult::InvalidSelection(msg) => {
+                        serde_json::json!({
+                            "status": "invalid_selection",
+                            "message": msg
+                        })
+                    }
+                };
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&response)?
+                    }]
+                }))
+            }
+            // Remote Lead Mode tools
+            "team_orchestrate" => {
+                let task_desc = arguments.get("task_desc")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 task_desc 参数"))?;
+                let project = arguments.get("project")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 project 参数"))?;
+
+                let orchestrator = TeamOrchestrator::new();
+                let result = orchestrator.create_team_for_task(task_desc, project)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "team_assign_task" => {
+                let team = arguments.get("team")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
+                let member = arguments.get("member")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
+                let task = arguments.get("task")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 task 参数"))?;
+
+                let orchestrator = TeamOrchestrator::new();
+                let result = orchestrator.assign_task(team, member, task)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": serde_json::to_string_pretty(&result)?
+                    }]
+                }))
+            }
+            "handle_user_reply" => {
+                let reply = arguments.get("reply")
+                    .and_then(|v| v.as_str())
+                    .ok_or_else(|| anyhow::anyhow!("缺少 reply 参数"))?;
+                let context = arguments.get("context")
+                    .and_then(|v| v.as_str());
+
+                let orchestrator = TeamOrchestrator::new();
+                let result = orchestrator.handle_user_reply(reply, context)?;
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": result
                     }]
                 }))
             }

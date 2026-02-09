@@ -237,6 +237,7 @@ async fn main() -> Result<()> {
         .unwrap_or_else(|_| EnvFilter::new("code_agent_monitor=info,cam=info"));
 
     fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(filter)
         .with_target(false)
         .with_thread_ids(false)
@@ -310,6 +311,8 @@ async fn main() -> Result<()> {
                 agent_type: Some("claude".to_string()),
                 resume_session: Some(session_id.clone()),
                 initial_prompt: None,
+                agent_id: None,
+                tmux_session: None,
             })?;
 
             // 如果用户指定了自定义名称，重命名 tmux session
@@ -334,7 +337,6 @@ async fn main() -> Result<()> {
             println!("已终止进程: {}", pid);
         }
         Commands::Serve { port } => {
-            eprintln!("启动 MCP Server 在端口 {}...", port);
             let server = McpServer::new(port);
             server.run().await?;
         }
@@ -591,15 +593,15 @@ async fn main() -> Result<()> {
             // 获取终端快照
             let terminal_snapshot = if needs_snapshot {
                 // 优先通过 resolved_agent_id 直接获取
-                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 15) {
+                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 30) {
                     Some(logs)
                 } else if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
                     // 尝试通过 session_id 查找 agent
-                    agent_manager.get_logs(&agent.agent_id, 15).ok()
+                    agent_manager.get_logs(&agent.agent_id, 30).ok()
                 } else if let Some(ref cwd_path) = cwd {
                     // 通过 cwd 查找
                     if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
-                        agent_manager.get_logs(&agent.agent_id, 15).ok()
+                        agent_manager.get_logs(&agent.agent_id, 30).ok()
                     } else {
                         None
                     }
