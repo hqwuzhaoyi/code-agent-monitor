@@ -1001,41 +1001,13 @@ impl OpenclawNotifier {
                             project_name, question
                         )
                     } else if !snap.trim().is_empty() {
-                        // 有快照内容但不匹配特定模式
-                        Self::log_timing("pattern_match", "no_match", pattern_start.elapsed());
-
-                        // 优先级：1. Embedding 提取 → 2. AI 提取 → 3. 显示原始快照
-                        let embedding_start = std::time::Instant::now();
-                        if let Some(question) = extract_question_with_embedding(snap) {
-                            Self::log_timing("embedding_extract", "success", embedding_start.elapsed());
-                            format!(
-                                "⏸️ {} 等待输入\n\n{}\n\n回复内容",
-                                project_name, question
-                            )
-                        } else {
-                            Self::log_timing("embedding_extract", "failed", embedding_start.elapsed());
-
-                            let ai_start = std::time::Instant::now();
-                            if let Some((question_type, question, reply_hint)) = self.extract_question_with_ai(snap) {
-                                Self::log_timing("ai_extract", "success", ai_start.elapsed());
-                                let emoji = match question_type.as_str() {
-                                    "confirm" => "⏸️",
-                                    "choice" => "⏸️",
-                                    _ => "⏸️",
-                                };
-                                format!(
-                                    "{} {} 等待输入\n\n{}\n\n{}",
-                                    emoji, project_name, question, reply_hint
-                                )
-                            } else {
-                                Self::log_timing("ai_extract", "failed_or_timeout", ai_start.elapsed());
-                                // AI 提取也失败，回退到显示原始快照
-                                format!(
-                                    "⏸️ {} 等待输入\n\n{}\n\n回复内容",
-                                    project_name, snap.trim()
-                                )
-                            }
-                        }
+                        // 有快照内容但不匹配特定模式（如开放式问题）
+                        // 直接显示清洗后的快照内容，保留上下文
+                        Self::log_timing("pattern_match", "open_question", pattern_start.elapsed());
+                        format!(
+                            "⏸️ {} 等待输入\n\n{}\n\n回复内容",
+                            project_name, snap.trim()
+                        )
                     } else {
                         Self::log_timing("pattern_match", "empty_snapshot", pattern_start.elapsed());
                         format!("⏸️ {} 等待输入", project_name)
