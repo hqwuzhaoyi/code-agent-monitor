@@ -3,6 +3,8 @@
 //! 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)
 
 use clap::{Parser, Subcommand};
+use tracing::{info, warn, error, debug};
+use tracing_subscriber::{fmt, EnvFilter};
 use code_agent_monitor::{
     ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
     AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult,
@@ -228,6 +230,18 @@ enum Commands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // 初始化 tracing 日志系统
+    // 通过 RUST_LOG 环境变量控制日志级别，默认为 info
+    // 例如: RUST_LOG=debug cam watch-daemon
+    let filter = EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| EnvFilter::new("code_agent_monitor=info,cam=info"));
+
+    fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .with_thread_ids(false)
+        .init();
+
     let cli = Cli::parse();
 
     match cli.command {
@@ -380,7 +394,7 @@ async fn main() -> Result<()> {
                 };
 
                 if agents.is_empty() {
-                    eprintln!("所有 agent 已退出，watcher 停止");
+                    info!("All agents exited, watcher stopping");
                     daemon.remove_pid()?;
                     break;
                 }
@@ -393,9 +407,14 @@ async fn main() -> Result<()> {
                     }
                     Err(e) => {
                         consecutive_errors += 1;
-                        eprintln!("❌ 轮询失败 ({}/{}): {}", consecutive_errors, MAX_CONSECUTIVE_ERRORS, e);
+                        error!(
+                            error = %e,
+                            consecutive = consecutive_errors,
+                            max = MAX_CONSECUTIVE_ERRORS,
+                            "Poll failed"
+                        );
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
-                            eprintln!("❌ 连续错误次数过多，watcher 停止");
+                            error!("Too many consecutive errors, watcher stopping");
                             daemon.remove_pid()?;
                             break;
                         }
@@ -408,32 +427,37 @@ async fn main() -> Result<()> {
                 for event in events {
                     match &event {
                         WatchEvent::AgentExited { agent_id, project_path } => {
-                            eprintln!("检测到 agent 退出: {}", agent_id);
+                            info!(agent_id = %agent_id, "Agent exited, sending notification");
                             match notifier.send_event(agent_id, "AgentExited", project_path, "") {
-                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
-                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
+                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
                         WatchEvent::Error { agent_id, message, .. } => {
-                            eprintln!("检测到错误: {} - {}", agent_id, message);
+                            info!(agent_id = %agent_id, message = %message, "Error detected, sending notification");
                             match notifier.send_event(agent_id, "Error", "", message) {
-                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
-                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
+                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
                         WatchEvent::WaitingForInput { agent_id, pattern_type, context } => {
-                            eprintln!("检测到等待输入: {} ({})", agent_id, pattern_type);
+                            info!(
+                                agent_id = %agent_id,
+                                pattern_type = %pattern_type,
+                                context_len = context.len(),
+                                "Waiting for input detected, sending notification"
+                            );
                             match notifier.send_event(agent_id, "WaitingForInput", pattern_type, context) {
-                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
-                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
+                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
                         WatchEvent::ToolUse { agent_id, tool_name, tool_target, .. } => {
-                            eprintln!("检测到工具调用: {} - {}", agent_id, tool_name);
+                            debug!(agent_id = %agent_id, tool_name = %tool_name, "Tool use detected");
                             let context = tool_target.as_deref().unwrap_or("");
                             match notifier.send_event(agent_id, "ToolUse", tool_name, context) {
-                                Ok(_) => eprintln!("✅ 通知发送成功: {}", agent_id),
-                                Err(e) => eprintln!("❌ 通知发送失败: {} - {}", agent_id, e),
+                                Ok(result) => debug!(agent_id = %agent_id, result = ?result, "Notification result"),
+                                Err(e) => warn!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
                         _ => {} // 忽略其他事件 (ToolUseBatch, AgentResumed)
@@ -587,10 +611,15 @@ async fn main() -> Result<()> {
             };
 
             // 构建 enriched context
-            let enriched_context = if let Some(snapshot) = terminal_snapshot {
+            let enriched_context = if let Some(ref snapshot) = terminal_snapshot {
+                // 记录终端快照到日志（用于调试）
+                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                    let _ = writeln!(file, "[{}] Terminal snapshot ({} chars):\n{}", timestamp, snapshot.len(), snapshot);
+                }
+
                 let mut enriched = context.clone();
                 enriched.push_str("\n\n--- 终端快照 ---\n");
-                enriched.push_str(&snapshot);
+                enriched.push_str(snapshot);
                 enriched
             } else {
                 context.clone()
@@ -599,10 +628,11 @@ async fn main() -> Result<()> {
             let notifier = OpenclawNotifier::new().with_dry_run(dry_run).with_no_ai(no_ai);
             match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
                 Ok(result) => {
+                    let end_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                     match &result {
                         SendResult::Sent => {
                             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ✅ Notification sent: {} {}", timestamp, event, resolved_agent_id);
+                                let _ = writeln!(file, "[{}] ✅ Notification sent: {} {}", end_timestamp, event, resolved_agent_id);
                             }
                             if dry_run {
                                 eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
@@ -612,7 +642,7 @@ async fn main() -> Result<()> {
                         }
                         SendResult::Skipped(reason) => {
                             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ⏭️ Notification skipped: {} {} ({})", timestamp, event, resolved_agent_id, reason);
+                                let _ = writeln!(file, "[{}] ⏭️ Notification skipped: {} {} ({})", end_timestamp, event, resolved_agent_id, reason);
                             }
                             if dry_run {
                                 eprintln!("[DRY-RUN] 通知已跳过: {} - {} ({})", resolved_agent_id, event, reason);
@@ -622,18 +652,20 @@ async fn main() -> Result<()> {
 
                     // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
                     if (event == "session_end" || event == "stop") && resolved_agent_id.starts_with("ext-") {
+                        let cleanup_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                         if let Err(e) = agent_manager.remove_agent(&resolved_agent_id) {
                             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ⚠️ Failed to cleanup external session {}: {}", timestamp, resolved_agent_id, e);
+                                let _ = writeln!(file, "[{}] ⚠️ Failed to cleanup external session {}: {}", cleanup_timestamp, resolved_agent_id, e);
                             }
                         } else if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                            let _ = writeln!(file, "[{}] ✅ Cleaned up external session {}", timestamp, resolved_agent_id);
+                            let _ = writeln!(file, "[{}] ✅ Cleaned up external session {}", cleanup_timestamp, resolved_agent_id);
                         }
                     }
                 }
                 Err(e) => {
+                    let err_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                        let _ = writeln!(file, "[{}] ❌ Notification failed: {}", timestamp, e);
+                        let _ = writeln!(file, "[{}] ❌ Notification failed: {}", err_timestamp, e);
                     }
                     eprintln!("通知发送失败: {}", e);
                     return Err(e);

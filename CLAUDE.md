@@ -75,6 +75,41 @@ openclaw message send --channel telegram --target <chat_id> --message "test"
 openclaw agent --session-id main --message "test"
 ```
 
+### 端到端测试通知流程（通过 Hook 触发）
+
+完整测试从 Claude Code Hook 到 Telegram 的通知流程：
+
+```bash
+# 1. 确保有运行中的 CAM agent
+cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+
+# 2. 查看 agent 当前终端状态
+command tmux capture-pane -t <agent_id> -p -S -30
+
+# 3. 手动触发 idle_prompt hook（模拟 Claude Code 空闲）
+echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
+  ./target/release/cam notify --event notification --agent-id <agent_id>
+
+# 4. 查看完整日志（包含终端快照）
+tail -100 ~/.claude-monitor/hook.log
+
+# 5. 使用 dry-run 预览通知内容（不实际发送）
+echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
+  ./target/release/cam notify --event notification --agent-id <agent_id> --dry-run
+```
+
+日志格式说明：
+```
+[时间] Hook triggered: event=notification, agent_id=cam-xxx, session_id=None
+[时间] Context: {"notification_type": "idle_prompt", "cwd": "..."}
+[时间] Terminal snapshot (1234 chars):
+  ... 终端内容 ...
+[时间] ⏱️ pattern_match open_question took 0ms
+[时间] ⏱️ format_event notification took 4ms
+[时间] ⏱️ send_direct telegram took 8645ms
+[时间] ✅ Notification sent: notification cam-xxx
+```
+
 ## Testing
 
 ### 使用 openclaw agent 直接测试
@@ -461,7 +496,7 @@ openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送�
 
 ```
 src/
-├── main.rs              # CLI 入口，处理 notify/watch 等命令
+├── main.rs              # CLI 入口，处理 notify/watch/team 等命令
 ├── openclaw_notifier.rs # 通知系统核心（urgency 分类、payload 生成、路由）
 ├── agent.rs             # Agent 管理（启动、停止、列表）
 ├── tmux.rs              # Tmux 会话操作
@@ -469,6 +504,11 @@ src/
 ├── session.rs           # Claude Code 会话管理
 ├── team_discovery.rs    # Agent Teams 发现（读取 ~/.claude/teams/）
 ├── task_list.rs         # Task List 集成（读取 ~/.claude/tasks/）
+├── team_bridge.rs       # Agent Teams 桥接（inbox 读写、team 管理）
+├── inbox_watcher.rs     # Inbox 监控（轮询检测、通知路由）
+├── team_orchestrator.rs # Team 编排（启动 Agent、进度聚合、任务分配）
+├── conversation_state.rs # 对话状态管理（快捷回复、pending confirmation）
+├── notification_summarizer.rs # 智能通知汇总（风险评估、自然语言描述）
 └── mcp.rs               # MCP Server 实现
 ```
 
@@ -483,6 +523,19 @@ cam team-members <team> [--json]
 
 # 列出 team 任务
 cam tasks <team> [--json]
+
+# Team 管理（新增）
+cam team-create <team-name> [--description <desc>]
+cam team-delete <team-name>
+cam team-status <team-name> [--json]
+
+# Inbox 操作（新增）
+cam inbox <team> <member> [--json] [--unread-only]
+cam inbox-send <team> <member> --message <text> [--from <sender>]
+
+# Team 监控（新增）
+cam team-watch <team>
+cam team-watch --all
 ```
 
 ### 运行测试
@@ -777,3 +830,307 @@ openclaw gateway status
 # 6. 如果 gateway 正常，检查网络
 openclaw message send --channel telegram --target <CHAT_ID> --message "debug test"
 ```
+
+## Agent Teams 集成（2026-02）
+
+CAM 支持与 Claude Code Agent Teams 原生集成，允许远程管理 Team 协作。
+
+### 概念
+
+- **Agent Teams**: Claude Code 的原生多 Agent 协作功能
+- **Team Bridge**: CAM 与 Agent Teams 的桥接模块
+- **Inbox Watcher**: 监控 Team inbox 并路由通知
+
+### 文件结构
+
+Agent Teams 使用文件系统存储状态：
+
+```
+~/.claude/teams/{team-name}/
+├── config.json           # Team 配置（成员列表）
+├── inboxes/
+│   ├── {member-name}.json  # 每个成员的收件箱
+│   └── ...
+└── ...
+
+~/.claude/tasks/{team-name}/
+├── {task-id}.json        # 任务详情
+└── ...
+```
+
+### CLI 命令
+
+#### Team 管理
+
+```bash
+# 创建新 Team
+cam team-create <team-name> [--description <desc>]
+
+# 删除 Team
+cam team-delete <team-name>
+
+# 查看 Team 状态（成员、任务、待处理请求）
+cam team-status <team-name> [--json]
+```
+
+#### Inbox 操作
+
+```bash
+# 读取成员收件箱
+cam inbox <team> <member> [--json] [--unread-only]
+
+# 发送消息到成员收件箱
+cam inbox-send <team> <member> --message <text> [--from <sender>]
+```
+
+#### Team 监控
+
+```bash
+# 监控 Team 的所有 inbox（阻塞式）
+cam team-watch <team>
+
+# 监控所有 Teams
+cam team-watch --all
+```
+
+### MCP 工具
+
+CAM MCP Server 提供以下 Team 相关工具：
+
+| 工具 | 描述 |
+|------|------|
+| `team_create` | 创建新 Team |
+| `team_delete` | 删除 Team |
+| `team_status` | 获取 Team 状态（成员、任务、待处理请求） |
+| `inbox_read` | 读取成员收件箱 |
+| `inbox_send` | 发送消息到成员收件箱 |
+| `team_pending_requests` | 获取待处理的权限请求 |
+
+### 通知路由
+
+Inbox Watcher 根据消息类型决定通知策略：
+
+| 消息类型 | Urgency | 通知行为 |
+|----------|---------|---------|
+| `permission_request` | HIGH | 立即通知用户 |
+| `task_assignment` | MEDIUM | 通知用户 |
+| `idle_notification` | - | 静默 |
+| `shutdown_approved` | - | 静默 |
+| 包含 "error/错误/失败" | HIGH | 立即通知用户 |
+| 包含 "完成/completed/done" | MEDIUM | 通知用户 |
+| 有 summary 字段 | LOW | 通知用户 |
+| 其他普通消息 | - | 静默 |
+
+### 使用示例
+
+#### 远程管理 Team
+
+```bash
+# 1. 查看当前 Team 状态
+cam team-status my-project
+
+# 2. 查看待处理的权限请求
+cam team-status my-project --json | jq '.pending_requests'
+
+# 3. 读取特定成员的消息
+cam inbox my-project developer --unread-only
+
+# 4. 回复成员
+cam inbox-send my-project developer --message "已批准，请继续" --from team-lead
+```
+
+#### 启动 Team 监控
+
+```bash
+# 在后台监控 Team（会自动发送通知到 Telegram）
+cam team-watch my-project &
+
+# 或监控所有 Teams
+cam team-watch --all &
+```
+
+### Agent ID 格式
+
+Team 成员使用 `{name}@{team}` 格式标识：
+
+```
+developer@my-project
+tester@my-project
+```
+
+### 模块说明
+
+#### TeamBridge (`src/team_bridge.rs`)
+
+提供与 Agent Teams 文件系统的交互：
+
+- `create_team()` / `delete_team()` - Team 生命周期管理
+- `read_inbox()` / `send_message()` - Inbox 读写
+- `list_teams()` / `get_team_status()` - 状态查询
+
+#### InboxWatcher (`src/inbox_watcher.rs`)
+
+监控 inbox 目录变化并触发通知：
+
+- 轮询检测新消息
+- 根据消息类型判断 urgency
+- 通过 OpenclawNotifier 发送通知
+
+### 测试
+
+```bash
+# 运行 Team Bridge 测试
+cargo test --lib team_bridge
+
+# 运行 Inbox Watcher 测试
+cargo test --lib inbox_watcher
+```
+
+## Agent Teams 编排（2026-02 新增）
+
+CAM 支持完整的 Agent Teams 编排功能，包括在 Team 中启动 Agent、对话状态管理、智能通知汇总。
+
+### 新增模块
+
+| 模块 | 文件 | 说明 |
+|------|------|------|
+| TeamOrchestrator | `src/team_orchestrator.rs` | Team 编排核心（启动 Agent、进度聚合、任务分配） |
+| ConversationStateManager | `src/conversation_state.rs` | 对话状态管理（快捷回复、pending confirmation 追踪） |
+| NotificationSummarizer | `src/notification_summarizer.rs` | 智能通知汇总（风险评估、自然语言描述） |
+
+### 新增 CLI 命令
+
+```bash
+# 在 Team 中启动 Agent
+cam team-spawn <team> <name> [--type <agent_type>] [--prompt <initial_prompt>] [--json]
+
+# 获取 Team 聚合进度
+cam team-progress <team> [--json]
+
+# 优雅关闭 Team
+cam team-shutdown <team>
+
+# 查看待处理确认
+cam pending-confirmations [--json]
+
+# 快捷回复
+cam reply <reply> [--target <agent_id>]
+```
+
+### 新增 MCP 工具
+
+| 工具 | 描述 | 参数 |
+|------|------|------|
+| `team_spawn_agent` | 在 Team 中启动 Agent | `team`, `name`, `agent_type`, `initial_prompt` |
+| `team_progress` | 获取 Team 聚合进度 | `team` |
+| `team_shutdown` | 优雅关闭 Team | `team` |
+| `get_pending_confirmations` | 获取待处理确认 | - |
+| `reply_pending` | 回复待处理确认 | `reply`, `target` (可选) |
+| `team_orchestrate` | 根据任务描述创建 Team | `task_desc`, `project` |
+| `team_assign_task` | 分配任务给成员 | `team`, `member`, `task` |
+| `handle_user_reply` | 处理自然语言回复 | `reply`, `context` (可选) |
+
+### 快捷回复支持
+
+用户可以用简单的 y/n/1/2/3 回复，系统自动路由到正确的 Agent：
+
+| 用户输入 | 标准化为 | 说明 |
+|----------|----------|------|
+| y / yes / 是 / 好 / 可以 / 批准 | "y" | 批准操作 |
+| n / no / 否 / 不 / 取消 / 拒绝 | "n" | 拒绝操作 |
+| 1 / 2 / 3 / 4 | "1" / "2" / "3" / "4" | 选择选项 |
+
+### 风险评估
+
+NotificationSummarizer 自动评估权限请求的风险等级：
+
+| 风险 | 示例 | 显示 |
+|------|------|------|
+| ✅ 低 | `ls`, `cat`, `/tmp` 文件 | 安全操作 |
+| ⚠️ 中 | `npm install`, 项目文件 | 请确认 |
+| 🔴 高 | `rm -rf`, `sudo`, 系统文件 | 高风险警告 |
+
+**Bash 命令风险评估规则**：
+- 高风险：`rm -rf`, `sudo`, `chmod 777`, `curl | sh`, `> /dev/`
+- 中风险：`npm install`, `cargo build`, `git push`, `docker`
+- 低风险：`ls`, `cat`, `echo`, `pwd`, `cd`
+
+**文件路径风险评估规则**：
+- 高风险：`/etc/`, `/usr/`, `~/.ssh/`, `~/.aws/`, 系统配置
+- 中风险：项目目录内的文件
+- 低风险：`/tmp/`, `/var/tmp/`, 缓存目录
+
+### 对话状态存储
+
+对话状态存储在 `~/.claude-monitor/conversation_state.json`：
+
+```json
+{
+  "current_team": "my-project",
+  "current_agent": {
+    "agent_id": "cam-xxx",
+    "team": "my-project",
+    "name": "developer"
+  },
+  "pending_confirmations": [
+    {
+      "id": "conf-xxx",
+      "agent_id": "cam-xxx",
+      "team": "my-project",
+      "confirmation_type": {
+        "PermissionRequest": {
+          "tool": "Bash",
+          "input": {"command": "npm install"}
+        }
+      },
+      "context": "安装依赖",
+      "created_at": "2026-02-08T00:00:00Z"
+    }
+  ]
+}
+```
+
+### 测试新功能
+
+```bash
+# 测试 Team 编排
+cargo test --lib team_orchestrator
+
+# 测试对话状态管理
+cargo test --lib conversation_state
+
+# 测试通知汇总
+cargo test --lib notification_summarizer
+
+# 端到端测试
+# 1. 创建 Team
+cam team-create test-team --description "测试团队"
+
+# 2. 在 Team 中启动 Agent
+cam team-spawn test-team developer --prompt "你好"
+
+# 3. 查看进度
+cam team-progress test-team
+
+# 4. 查看待处理确认
+cam pending-confirmations
+
+# 5. 快捷回复
+cam reply y
+
+# 6. 关闭 Team
+cam team-shutdown test-team
+```
+
+### 自然语言意图识别
+
+TeamOrchestrator 支持自然语言意图识别：
+
+| 用户输入 | 识别意图 | 操作 |
+|----------|----------|------|
+| "启动一个团队做 xxx" | CreateTeam | `team_orchestrate` |
+| "看看团队进度" | CheckProgress | `team_progress` |
+| "给 developer 分配任务" | AssignTask | `team_assign_task` |
+| "y" / "批准" | Approve | `reply_pending("y")` |
+| "n" / "拒绝" | Reject | `reply_pending("n")` |
+| "停掉团队" | Shutdown | `team_shutdown` |
