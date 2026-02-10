@@ -15,7 +15,7 @@
 use std::fs;
 
 use super::event::{NotificationEvent, NotificationEventType};
-use crate::anthropic::extract_question_with_haiku;
+use crate::anthropic::{extract_question_with_haiku, ExtractedQuestion};
 use crate::notification_summarizer::NotificationSummarizer;
 
 /// Notification message constants (Chinese)
@@ -114,6 +114,28 @@ impl MessageFormatter {
         } else {
             agent_id.to_string()
         }
+    }
+
+    /// 格式化提取的问题（包含选项）
+    fn format_extracted_question(
+        project_name: &str,
+        extracted: &ExtractedQuestion,
+    ) -> String {
+        let mut result = format!(
+            "⏸️ {} {}\n\n{}",
+            project_name, msg::WAITING_INPUT, extracted.question
+        );
+
+        // 如果有选项，添加选项列表
+        if !extracted.options.is_empty() {
+            result.push_str("\n");
+            for option in &extracted.options {
+                result.push_str(&format!("\n{}", option));
+            }
+        }
+
+        result.push_str(&format!("\n\n{}", extracted.reply_hint));
+        result
     }
 
     /// 格式化事件消息（新设计：简洁、可操作、专业）
@@ -278,11 +300,8 @@ impl MessageFormatter {
 
                     // 尝试使用 Haiku 提取问题
                     if !self.no_ai {
-                        if let Some((_, question, reply_hint)) = extract_question_with_haiku(snap) {
-                            return format!(
-                                "⏸️ {} {}\n\n{}\n\n{}",
-                                project_name, msg::WAITING_INPUT, question, reply_hint
-                            );
+                        if let Some(extracted) = extract_question_with_haiku(snap) {
+                            return Self::format_extracted_question(&project_name, &extracted);
                         }
                     }
 
@@ -351,8 +370,8 @@ impl MessageFormatter {
 
         // 使用 Haiku 提取问题
         if !self.no_ai {
-            if let Some((_, question, reply_hint)) = extract_question_with_haiku(context) {
-                return format!("⏸️ {} {}\n\n{}\n\n{}", project_name, msg::WAITING_INPUT, question, reply_hint);
+            if let Some(extracted) = extract_question_with_haiku(context) {
+                return Self::format_extracted_question(project_name, &extracted);
             }
         }
 
@@ -443,11 +462,8 @@ impl MessageFormatter {
 
             // 尝试使用 Haiku 提取问题
             if !self.no_ai {
-                if let Some((_, question, reply_hint)) = extract_question_with_haiku(snap) {
-                    return format!(
-                        "⏸️ {} {}\n\n{}\n\n{}",
-                        project_name, msg::WAITING_INPUT, question, reply_hint
-                    );
+                if let Some(extracted) = extract_question_with_haiku(snap) {
+                    return Self::format_extracted_question(project_name, &extracted);
                 }
             }
 
@@ -520,11 +536,8 @@ impl MessageFormatter {
 
                     // 尝试使用 Haiku 提取问题
                     if !self.no_ai {
-                        if let Some((_, question, reply_hint)) = extract_question_with_haiku(snap) {
-                            return format!(
-                                "⏸️ {} {}\n\n{}\n\n{}",
-                                project_name, msg::WAITING_INPUT, question, reply_hint
-                            );
+                        if let Some(extracted) = extract_question_with_haiku(snap) {
+                            return Self::format_extracted_question(&project_name, &extracted);
                         }
                     }
 

@@ -555,11 +555,24 @@ pub fn extract_notification_content_or_default(terminal_snapshot: &str) -> Notif
     }
 }
 
+/// 从 Haiku 提取的问题结果
+#[derive(Debug, Clone)]
+pub struct ExtractedQuestion {
+    /// 问题类型: "open", "choice", "confirm"
+    pub question_type: String,
+    /// 核心问题内容
+    pub question: String,
+    /// 选项列表（仅 choice 类型有值）
+    pub options: Vec<String>,
+    /// 回复提示
+    pub reply_hint: String,
+}
+
 /// 从终端快照中提取问题（使用 Haiku）
 ///
 /// 这是一个便捷函数，用于替代 `extract_question_with_ai`。
 /// 使用 Haiku 模型，延迟约 1-2 秒，比 Opus 快 10 倍。
-pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, String, String)> {
+pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<ExtractedQuestion> {
     let client = match AnthropicClient::from_config() {
         Ok(c) => c,
         Err(e) => {
@@ -582,6 +595,7 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 请用 JSON 格式回复，包含以下字段：
 - question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题）
 - question: 核心问题内容（简洁，不超过 100 字）
+- options: 选项列表（仅当 question_type 为 "choice" 时提取，格式如 ["1. 选项A", "2. 选项B"]，否则为空数组 []）
 - reply_hint: 回复提示（如"回复 y/n"、"回复数字选择"、"回复内容"）
 
 重要：只分析终端输出中最后出现的问题或提示，忽略之前的历史会话内容。
@@ -612,7 +626,23 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
     let question = parsed.get("question")?.as_str()?.to_string();
     let reply_hint = parsed.get("reply_hint")?.as_str()?.to_string();
 
-    Some((question_type.to_string(), question, reply_hint))
+    // 提取选项列表
+    let options = parsed
+        .get("options")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    Some(ExtractedQuestion {
+        question_type: question_type.to_string(),
+        question,
+        options,
+        reply_hint,
+    })
 }
 
 /// Agent 状态
@@ -685,7 +715,12 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
 
 判断规则：
 - 只判断终端最后的状态，忽略历史输出
-- PROCESSING: 如果看到处理中的指示器（如 Thinking…、Brewing…、Hatching…、Running…、Executing…、Loading…、Working… 等带省略号的状态，或旋转动画字符 ✢✻✶✽◐）
+- PROCESSING: 如果看到以下任一指示器：
+  * 带省略号的状态词（如 Thinking…、Brewing…、Hatching…、Grooving…、Running…、Executing…、Loading…、Working…、Streaming… 等）
+  * 任何 "动词ing…" 或 "动词ing..." 格式的状态提示
+  * 括号内的运行提示（如 (running stop hook)、(executing)、(loading) 等）
+  * 旋转动画字符（✢✻✶✽◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
+  * 进度条或百分比指示器
 - WAITING: 如果看到空闲提示符（如 >、❯、$）或问题/选项等待用户输入
 
 只回答一个词：PROCESSING 或 WAITING"#
