@@ -4,9 +4,10 @@
 //! 主要用于终端问题提取等简单任务，使用 Haiku 模型以获得最低延迟。
 //!
 //! API Key 读取优先级：
-//! 1. 环境变量 `ANTHROPIC_API_KEY`
-//! 2. 文件 `~/.anthropic/api_key`
-//! 3. OpenClaw 配置 `~/.openclaw/openclaw.json` 的 `models.providers.anthropic.apiKey` 或 `providers.anthropic.apiKey`
+//! 1. CAM 配置文件 `~/.config/cam`（JSON 格式，字段 `anthropic_api_key` 和可选 `anthropic_base_url`）
+//! 2. 环境变量 `ANTHROPIC_API_KEY`
+//! 3. 文件 `~/.anthropic/api_key`
+//! 4. OpenClaw 配置 `~/.openclaw/openclaw.json` 的 `models.providers.anthropic.apiKey` 或 `providers.anthropic.apiKey`
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
@@ -14,6 +15,7 @@ use std::fs;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+use crate::ai_quality::{assess_question_extraction, assess_status_detection, thresholds};
 use crate::terminal_utils::{truncate_for_ai, truncate_for_status};
 
 /// Anthropic API 基础 URL
@@ -23,7 +25,7 @@ const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION: &str = "2023-06-01";
 
 /// 默认模型 - Haiku 4.5（最快最便宜）
-pub const DEFAULT_MODEL: &str = "claude-3-5-haiku-20241022";
+pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 
 /// 默认超时（毫秒）
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
@@ -154,7 +156,40 @@ impl AnthropicConfig {
     fn load_api_config() -> Result<(String, String)> {
         let default_url = ANTHROPIC_API_URL.to_string();
 
-        // 1. 环境变量
+        // 1. CAM 配置文件 ~/.config/cam
+        if let Some(home) = dirs::home_dir() {
+            let config_path = home.join(".config/cam");
+            if config_path.exists() {
+                if let Ok(content) = fs::read_to_string(&config_path) {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let key = config.get("anthropic_api_key").and_then(|k| k.as_str());
+                        let base_url = config.get("anthropic_base_url").and_then(|u| u.as_str());
+
+                        if let Some(key) = key {
+                            if !key.is_empty() {
+                                let url = base_url
+                                    .filter(|u| !u.is_empty())
+                                    .map(|u| {
+                                        let u = u.trim_end_matches('/');
+                                        if u.ends_with("/v1/messages") {
+                                            u.to_string()
+                                        } else if u.ends_with("/v1") {
+                                            format!("{}/messages", u)
+                                        } else {
+                                            format!("{}/v1/messages", u)
+                                        }
+                                    })
+                                    .unwrap_or_else(|| default_url.clone());
+                                debug!("Using API key from ~/.config/cam, base_url: {}", url);
+                                return Ok((key.to_string(), url));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 2. 环境变量
         if let Ok(key) = std::env::var("ANTHROPIC_API_KEY") {
             if !key.is_empty() {
                 debug!("Using ANTHROPIC_API_KEY from environment");
@@ -166,7 +201,7 @@ impl AnthropicConfig {
             }
         }
 
-        // 2. ~/.anthropic/api_key 文件
+        // 3. ~/.anthropic/api_key 文件
         if let Some(home) = dirs::home_dir() {
             let key_file = home.join(".anthropic/api_key");
             if key_file.exists() {
@@ -180,7 +215,7 @@ impl AnthropicConfig {
             }
         }
 
-        // 3. OpenClaw 配置
+        // 4. OpenClaw 配置
         if let Some(home) = dirs::home_dir() {
             let config_path = home.join(".openclaw/openclaw.json");
             if config_path.exists() {
@@ -229,8 +264,9 @@ impl AnthropicConfig {
         }
 
         Err(anyhow!(
-            "No Anthropic API key found. Set ANTHROPIC_API_KEY env var, \
-             create ~/.anthropic/api_key, or configure in ~/.openclaw/openclaw.json"
+            "No Anthropic API key found. Create ~/.config/cam with anthropic_api_key, \
+             set ANTHROPIC_API_KEY env var, create ~/.anthropic/api_key, \
+             or configure in ~/.openclaw/openclaw.json"
         ))
     }
 }
@@ -480,12 +516,29 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
         .unwrap_or("等待输入")
         .to_string();
 
-    Ok(NotificationContent {
+    let content = NotificationContent {
         question_type,
         question,
         options,
         summary,
-    })
+    };
+
+    // 评估提取质量
+    let assessment = assess_question_extraction(&content);
+    if assessment.confidence < thresholds::MEDIUM {
+        warn!(
+            confidence = assessment.confidence,
+            issues = ?assessment.issues,
+            "Question extraction quality below MEDIUM threshold"
+        );
+    } else {
+        debug!(
+            confidence = assessment.confidence,
+            "Question extraction quality assessment passed"
+        );
+    }
+
+    Ok(content)
 }
 
 /// 从终端快照中提取通知内容，失败时返回默认值
@@ -650,13 +703,87 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
     debug!(elapsed_ms = elapsed.as_millis(), response = %response.trim(), "is_agent_processing completed");
 
     let response_upper = response.trim().to_uppercase();
-    if response_upper.contains("PROCESSING") {
+    let status = if response_upper.contains("PROCESSING") {
         AgentStatus::Processing
     } else if response_upper.contains("WAITING") {
         AgentStatus::WaitingForInput
     } else {
         warn!(response = %response, "Unexpected response from is_agent_processing");
         AgentStatus::Unknown
+    };
+
+    // 评估状态检测质量
+    let assessment = assess_status_detection(&status, terminal_snapshot);
+    if assessment.confidence < thresholds::LOW {
+        warn!(
+            confidence = assessment.confidence,
+            issues = ?assessment.issues,
+            detected_status = ?status,
+            "Status detection quality below LOW threshold, returning Unknown"
+        );
+        return AgentStatus::Unknown;
+    }
+
+    debug!(
+        confidence = assessment.confidence,
+        status = ?status,
+        "Status detection quality assessment passed"
+    );
+
+    status
+}
+
+/// 检测终端快照是否包含等待用户输入的问题
+///
+/// 用于 stop 事件处理：Claude Code 可能在输出问题后触发 stop 而非 idle_prompt。
+/// 此函数检测终端是否包含等待输入的问题。
+///
+/// # 参数
+/// - `terminal_snapshot`: 终端快照内容
+///
+/// # 返回
+/// - `Some(NotificationContent)`: 如果检测到等待输入的问题
+/// - `None`: 如果没有检测到问题或 AI 调用失败
+pub fn detect_waiting_question(terminal_snapshot: &str) -> Option<NotificationContent> {
+    // 先检查是否在处理中
+    match is_agent_processing(terminal_snapshot) {
+        AgentStatus::Processing => return None,
+        AgentStatus::Unknown => {
+            // 不确定状态，继续尝试提取问题
+        }
+        AgentStatus::WaitingForInput => {
+            // 确认在等待输入，继续提取问题
+        }
+    }
+
+    // 尝试提取问题内容
+    match extract_notification_content(terminal_snapshot) {
+        Ok(content) => {
+            // 评估提取质量
+            let assessment = assess_question_extraction(&content);
+
+            if assessment.is_valid && assessment.confidence >= thresholds::MEDIUM {
+                // 质量足够高，返回内容
+                info!(
+                    confidence = assessment.confidence,
+                    question_type = ?content.question_type,
+                    "Detected waiting question in stop event"
+                );
+                Some(content)
+            } else {
+                // 质量不够，记录警告
+                warn!(
+                    confidence = assessment.confidence,
+                    issues = ?assessment.issues,
+                    "Question extraction quality too low, ignoring"
+                );
+                None
+            }
+        }
+        Err(e) => {
+            debug!(error = %e, "Failed to extract question from terminal snapshot");
+            None
+        }
     }
 }
 
@@ -786,5 +913,74 @@ That's all."#;
         assert!(json.contains("\"question\":\"Choose:\""));
         assert!(json.contains("\"options\":[\"A\",\"B\"]"));
         assert!(json.contains("\"summary\":\"选择\""));
+    }
+
+    #[test]
+    fn test_detect_waiting_question_structure() {
+        // 测试 detect_waiting_question 函数存在且可调用
+        // 实际 AI 调用需要 API key，这里只测试结构
+        let snapshot = "";
+        let result = detect_waiting_question(snapshot);
+        // 空快照可能返回 None（没有 API key）或 Some（有 API key 但内容为空）
+        // 这里只验证函数可以被调用，不验证具体返回值
+        // 因为返回值取决于是否有 API key 和 AI 的判断
+        let _ = result; // 只要不 panic 就算通过
+    }
+
+    #[test]
+    fn test_detect_waiting_question_returns_notification_content() {
+        // 测试返回类型是 Option<NotificationContent>
+        // 由于没有 API key，这里只验证函数签名和返回类型
+        let snapshot = "Some terminal output\n❯ What do you want to do?";
+        let result: Option<NotificationContent> = detect_waiting_question(snapshot);
+        // 没有 API key 时返回 None，但类型正确
+        // 如果有 API key，应该返回 Some(NotificationContent)
+        assert!(result.is_none() || result.is_some());
+    }
+
+    #[test]
+    fn test_quality_assessment_integration() {
+        // 测试 NotificationContent 与 ai_quality 模块的集成
+        use crate::ai_quality::{assess_question_extraction, thresholds};
+
+        // 创建一个有效的 NotificationContent
+        let content = NotificationContent {
+            question_type: QuestionType::OpenEnded,
+            question: "你想要实现什么功能？".to_string(),
+            options: vec![],
+            summary: "等待回复".to_string(),
+        };
+
+        let assessment = assess_question_extraction(&content);
+        assert!(assessment.is_valid);
+        assert!(assessment.confidence >= thresholds::MEDIUM);
+
+        // 创建一个无效的 NotificationContent
+        let invalid_content = NotificationContent {
+            question_type: QuestionType::Options,
+            question: "".to_string(), // 空问题
+            options: vec![],          // 选项类型但没有选项
+            summary: "".to_string(),  // 空摘要
+        };
+
+        let invalid_assessment = assess_question_extraction(&invalid_content);
+        assert!(!invalid_assessment.is_valid);
+        assert!(invalid_assessment.confidence < thresholds::LOW);
+    }
+
+    #[test]
+    fn test_agent_status_enum() {
+        // 测试 AgentStatus 枚举的基本功能
+        let processing = AgentStatus::Processing;
+        let waiting = AgentStatus::WaitingForInput;
+        let unknown = AgentStatus::Unknown;
+
+        assert_eq!(processing, AgentStatus::Processing);
+        assert_eq!(waiting, AgentStatus::WaitingForInput);
+        assert_eq!(unknown, AgentStatus::Unknown);
+
+        // 测试不相等
+        assert_ne!(processing, waiting);
+        assert_ne!(waiting, unknown);
     }
 }

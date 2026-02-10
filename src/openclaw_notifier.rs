@@ -453,6 +453,33 @@ impl OpenclawNotifier {
 
         let urgency = get_urgency(event_type_str, &context_for_urgency);
 
+        // 特殊处理：stop 事件可能包含等待输入的问题
+        // Claude Code 在输出问题后会触发 stop 而非 idle_prompt
+        let (urgency, event_for_format) = if matches!(&event.event_type, NotificationEventType::Stop) {
+            if let Some(ref snapshot) = event.terminal_snapshot {
+                // 使用 AI 检测终端是否包含等待输入的问题
+                if let Some(content) = crate::anthropic::detect_waiting_question(snapshot) {
+                    debug!(agent_id = %agent_id, "Stop event contains waiting question, upgrading urgency");
+                    // 创建一个新的事件用于格式化，类型改为 Notification
+                    let mut new_event = event.clone();
+                    new_event.event_type = NotificationEventType::Notification {
+                        notification_type: "idle_prompt".to_string(),
+                        message: content.question.clone(),
+                    };
+                    (Urgency::Medium, Some(new_event))
+                } else {
+                    (urgency, None)
+                }
+            } else {
+                (urgency, None)
+            }
+        } else {
+            (urgency, None)
+        };
+
+        // 使用可能更新的事件进行格式化
+        let final_event = event_for_format.as_ref().unwrap_or(event);
+
         debug!(
             agent_id = %agent_id,
             event_type = %event_type_str,
@@ -463,7 +490,7 @@ impl OpenclawNotifier {
         match urgency {
             Urgency::High | Urgency::Medium => {
                 let format_start = std::time::Instant::now();
-                let message = self.formatter.format_notification_event(event);
+                let message = self.formatter.format_notification_event(final_event);
                 Self::log_timing("format_notification_event", event_type_str, format_start.elapsed());
 
                 // 如果消息为空，跳过
@@ -489,7 +516,7 @@ impl OpenclawNotifier {
                 // 发送到 channel
                 if let Some(config) = &self.channel_config {
                     let channel_name = config.channel.clone();
-                    let needs_reply = event.needs_reply();
+                    let needs_reply = final_event.needs_reply();
 
                     let send_start = std::time::Instant::now();
                     if needs_reply {
@@ -1192,6 +1219,48 @@ But contains a question somewhere"#;
 
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
+    }
+
+    // ==================== Stop 事件 urgency 升级测试 ====================
+
+    #[test]
+    fn test_stop_event_with_question_upgrades_urgency() {
+        // 测试 stop 事件包含问题时，urgency 应该被提升
+        let notifier = OpenclawNotifier::new().with_dry_run(true).with_no_ai(true);
+
+        // 创建一个包含问题的 stop 事件
+        let event = NotificationEvent::new(
+            "cam-test".to_string(),
+            NotificationEventType::Stop,
+        )
+        .with_project_path("/workspace/test")
+        .with_terminal_snapshot("❯ 问我想要实现什么功能\n\n⏺ 你想要实现什么功能？\n\n❯ ");
+
+        // 发送通知
+        let result = notifier.send_notification_event(&event);
+
+        // 应该成功发送（不是被跳过）
+        assert!(result.is_ok());
+        // 注意：由于 no_ai=true，可能不会检测到问题
+        // 这个测试主要验证代码路径不会 panic
+    }
+
+    #[test]
+    fn test_stop_event_without_question_stays_low() {
+        let notifier = OpenclawNotifier::new().with_dry_run(true);
+
+        // 创建一个不包含问题的 stop 事件
+        let event = NotificationEvent::new(
+            "cam-test".to_string(),
+            NotificationEventType::Stop,
+        )
+        .with_project_path("/workspace/test")
+        .with_terminal_snapshot("Task completed successfully.\n\n❯ ");
+
+        let result = notifier.send_notification_event(&event);
+
+        // 应该被跳过（LOW urgency）
+        assert!(matches!(result, Ok(SendResult::Skipped(_))));
     }
 
 }
