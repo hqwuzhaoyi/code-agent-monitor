@@ -26,6 +26,8 @@ pub mod urgency;
 pub mod payload;
 pub mod terminal_cleaner;
 pub mod formatter;
+pub mod deduplicator;
+pub mod event;
 
 pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
 pub use dispatcher::NotificationDispatcher;
@@ -34,3 +36,5 @@ pub use urgency::{Urgency, get_urgency};
 pub use payload::PayloadBuilder;
 pub use terminal_cleaner::{clean_terminal_context, is_question_line, find_context_start, NOISE_PATTERNS};
 pub use formatter::{MessageFormatter, msg};
+pub use deduplicator::NotificationDeduplicator;
+pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};

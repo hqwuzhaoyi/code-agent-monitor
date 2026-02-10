@@ -14,6 +14,7 @@
 use std::fs;
 
 use super::terminal_cleaner::clean_terminal_context;
+use super::event::{NotificationEvent, NotificationEventType};
 use crate::anthropic::extract_question_with_haiku;
 use crate::notification_summarizer::NotificationSummarizer;
 
@@ -389,6 +390,208 @@ impl MessageFormatter {
             project_name, msg::ERROR_OCCURRED, summary
         )
     }
+
+    /// 格式化统一的 NotificationEvent（新 API）
+    ///
+    /// 这是新的统一入口，使用 NotificationEvent 结构体替代多个参数。
+    /// 优势：
+    /// 1. 项目名从 event.project_path 获取，不再依赖 pattern_or_path
+    /// 2. 终端快照从 event.terminal_snapshot 获取，数据来源清晰
+    /// 3. 类型安全，避免参数混淆
+    pub fn format_notification_event(&self, event: &NotificationEvent) -> String {
+        let project_name = event.project_name().to_string();
+        let snapshot = event.terminal_snapshot.as_ref()
+            .map(|s| clean_terminal_context(s))
+            .filter(|s| !s.is_empty());
+
+        match &event.event_type {
+            NotificationEventType::WaitingForInput { pattern_type } => {
+                self.format_waiting_for_input_event(&project_name, pattern_type, &snapshot)
+            }
+            NotificationEventType::PermissionRequest { tool_name, tool_input } => {
+                self.format_permission_request_event(&project_name, tool_name, tool_input)
+            }
+            NotificationEventType::Notification { notification_type, message } => {
+                self.format_notification_type_event(&project_name, notification_type, message, &snapshot)
+            }
+            NotificationEventType::AgentExited => {
+                format!("✅ {} {}", project_name, msg::COMPLETED)
+            }
+            NotificationEventType::Error { message } => {
+                self.format_error_event(&project_name, message)
+            }
+            NotificationEventType::Stop => {
+                format!("⏹️ {} {}", project_name, msg::STOPPED)
+            }
+            NotificationEventType::SessionStart => {
+                format!("🚀 {} 已启动", project_name)
+            }
+            NotificationEventType::SessionEnd => {
+                format!("🔚 {} {}", project_name, msg::SESSION_ENDED)
+            }
+        }
+    }
+
+    /// 格式化等待输入事件（新 API 内部方法）
+    fn format_waiting_for_input_event(
+        &self,
+        project_name: &str,
+        _pattern_type: &str,
+        snapshot: &Option<String>,
+    ) -> String {
+        if let Some(snap) = snapshot {
+            if snap.trim().is_empty() {
+                return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
+            }
+
+            // 尝试使用 Haiku 提取问题
+            if !self.no_ai {
+                if let Some((_, question, reply_hint)) = extract_question_with_haiku(snap) {
+                    return format!(
+                        "⏸️ {} {}\n\n{}\n\n{}",
+                        project_name, msg::WAITING_INPUT, question, reply_hint
+                    );
+                }
+            }
+
+            // 回退到显示清洗后的内容
+            format!(
+                "⏸️ {} {}\n\n{}\n\n{}",
+                project_name, msg::WAITING_INPUT, snap.trim(), msg::REPLY_CONTENT
+            )
+        } else {
+            format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+        }
+    }
+
+    /// 格式化权限请求事件（新 API 内部方法）
+    fn format_permission_request_event(
+        &self,
+        project_name: &str,
+        tool_name: &str,
+        tool_input: &serde_json::Value,
+    ) -> String {
+        // 使用 NotificationSummarizer 进行风险评估
+        let summarizer = NotificationSummarizer::new();
+        let summary = summarizer.summarize_permission(tool_name, tool_input);
+
+        // 提取关键参数用于显示
+        let key_param = match tool_name {
+            "Bash" => tool_input.get("command").and_then(|v| v.as_str()),
+            "Write" | "Edit" | "Read" => tool_input.get("file_path").and_then(|v| v.as_str()),
+            _ => tool_input.get("file_path")
+                .or_else(|| tool_input.get("path"))
+                .or_else(|| tool_input.get("command"))
+                .and_then(|v| v.as_str())
+        };
+
+        let param_line = key_param
+            .map(|p| {
+                if p.len() > 60 {
+                    format!("{}...", &p[..57])
+                } else {
+                    p.to_string()
+                }
+            })
+            .map(|p| format!("\n{}", p))
+            .unwrap_or_default();
+
+        let risk_emoji = summary.risk_level.emoji();
+
+        format!(
+            "{} {} {}\n\n{}\n{}: {}{}\n\n{}",
+            risk_emoji, project_name, msg::REQUEST_PERMISSION,
+            summary.recommendation, msg::EXECUTE, tool_name, param_line,
+            msg::REPLY_YN
+        )
+    }
+
+    /// 格式化通知类型事件（新 API 内部方法）
+    fn format_notification_type_event(
+        &self,
+        project_name: &str,
+        notification_type: &str,
+        message: &str,
+        snapshot: &Option<String>,
+    ) -> String {
+        match notification_type {
+            "idle_prompt" => {
+                if let Some(snap) = snapshot {
+                    if snap.trim().is_empty() {
+                        return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
+                    }
+
+                    // 尝试使用 Haiku 提取问题
+                    if !self.no_ai {
+                        if let Some((_, question, reply_hint)) = extract_question_with_haiku(snap) {
+                            return format!(
+                                "⏸️ {} {}\n\n{}\n\n{}",
+                                project_name, msg::WAITING_INPUT, question, reply_hint
+                            );
+                        }
+                    }
+
+                    format!(
+                        "⏸️ {} {}\n\n{}\n\n{}",
+                        project_name, msg::WAITING_INPUT, snap.trim(), msg::REPLY_CONTENT
+                    )
+                } else if !message.is_empty() {
+                    format!("⏸️ {} {}\n\n{}", project_name, msg::WAITING_INPUT, message)
+                } else {
+                    format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+                }
+            }
+            "permission_prompt" => {
+                let content = snapshot.as_ref()
+                    .filter(|s| !s.trim().is_empty())
+                    .map(|s| s.trim().to_string())
+                    .or_else(|| if !message.is_empty() { Some(message.to_string()) } else { None });
+
+                if let Some(c) = content {
+                    format!(
+                        "🔐 {} {}\n\n{}\n\n{}",
+                        project_name, msg::NEED_CONFIRM, c, msg::REPLY_YN
+                    )
+                } else {
+                    format!(
+                        "🔐 {} {}\n\n{}",
+                        project_name, msg::NEED_CONFIRM, msg::REPLY_YN
+                    )
+                }
+            }
+            _ => {
+                if !message.is_empty() {
+                    format!("📢 {} {}", project_name, message)
+                } else {
+                    format!("📢 {} 通知", project_name)
+                }
+            }
+        }
+    }
+
+    /// 格式化错误事件（新 API 内部方法）
+    fn format_error_event(&self, project_name: &str, error_message: &str) -> String {
+        let summary = error_message.lines().next()
+            .map(|line| {
+                if line.len() > 100 {
+                    format!("{}...", &line[..97])
+                } else {
+                    line.to_string()
+                }
+            })
+            .unwrap_or_else(|| {
+                if error_message.len() > 100 {
+                    format!("{}...", &error_message[..97])
+                } else {
+                    error_message.to_string()
+                }
+            });
+
+        format!(
+            "❌ {} {}\n\n{}",
+            project_name, msg::ERROR_OCCURRED, summary
+        )
+    }
 }
 
 impl Default for MessageFormatter {
@@ -691,5 +894,156 @@ But contains a question somewhere"#;
 
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
+    }
+
+    // ========== 新 API (format_notification_event) 测试 ==========
+
+    #[test]
+    fn test_format_notification_event_waiting_for_input() {
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::waiting_for_input("cam-123", "ClaudePrompt")
+            .with_project_path("/Users/admin/workspace/myproject")
+            .with_terminal_snapshot("Do you want to continue? [Y/n]");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("myproject")); // 使用项目名而非 agent_id
+        assert!(message.contains("等待输入"));
+        assert!(message.contains("Do you want to continue?"));
+    }
+
+    #[test]
+    fn test_format_notification_event_permission_request() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::permission_request(
+            "cam-456",
+            "Bash",
+            serde_json::json!({"command": "npm install"}),
+        ).with_project_path("/workspace/frontend");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("frontend")); // 使用项目名
+        assert!(message.contains("请求权限"));
+        assert!(message.contains("Bash"));
+        assert!(message.contains("npm install"));
+    }
+
+    #[test]
+    fn test_format_notification_event_idle_prompt() {
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::notification("cam-789", "idle_prompt", "")
+            .with_project_path("/workspace/backend")
+            .with_terminal_snapshot("What would you like me to do next?");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("⏸️"));
+        assert!(message.contains("backend"));
+        assert!(message.contains("等待输入"));
+        assert!(message.contains("What would you like me to do next?"));
+    }
+
+    #[test]
+    fn test_format_notification_event_agent_exited() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::agent_exited("cam-abc")
+            .with_project_path("/workspace/api-server");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("✅"));
+        assert!(message.contains("api-server"));
+        assert!(message.contains("已完成"));
+    }
+
+    #[test]
+    fn test_format_notification_event_error() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::error("cam-def", "Connection timeout: API server unreachable")
+            .with_project_path("/workspace/client");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("❌"));
+        assert!(message.contains("client"));
+        assert!(message.contains("错误"));
+        assert!(message.contains("Connection timeout"));
+    }
+
+    #[test]
+    fn test_format_notification_event_stop() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::stop("cam-ghi")
+            .with_project_path("/workspace/service");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("⏹️"));
+        assert!(message.contains("service"));
+        assert!(message.contains("已停止"));
+    }
+
+    #[test]
+    fn test_format_notification_event_session_start() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::session_start("cam-jkl")
+            .with_project_path("/workspace/new-project");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("🚀"));
+        assert!(message.contains("new-project"));
+        assert!(message.contains("已启动"));
+    }
+
+    #[test]
+    fn test_format_notification_event_session_end() {
+        let formatter = MessageFormatter::new();
+
+        let event = NotificationEvent::session_end("cam-mno")
+            .with_project_path("/workspace/finished-project");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("🔚"));
+        assert!(message.contains("finished-project"));
+        assert!(message.contains("会话结束") || message.contains("会话已结束"));
+    }
+
+    #[test]
+    fn test_format_notification_event_uses_agent_id_as_fallback() {
+        let formatter = MessageFormatter::new();
+
+        // 没有设置 project_path，应该使用 agent_id 作为项目名
+        let event = NotificationEvent::agent_exited("cam-xyz");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("✅"));
+        assert!(message.contains("cam-xyz")); // 回退到 agent_id
+    }
+
+    #[test]
+    fn test_format_notification_event_permission_prompt() {
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::notification("cam-pqr", "permission_prompt", "Allow file write?")
+            .with_project_path("/workspace/editor");
+
+        let message = formatter.format_notification_event(&event);
+
+        assert!(message.contains("🔐"));
+        assert!(message.contains("editor"));
+        assert!(message.contains("确认") || message.contains("需要"));
+        assert!(message.contains("Allow file write?"));
     }
 }

@@ -17,6 +17,9 @@ use tracing::{info, error, debug, warn};
 use crate::notification::urgency::{Urgency, get_urgency};
 use crate::notification::formatter::MessageFormatter;
 use crate::notification::payload::PayloadBuilder;
+use crate::notification::event::{NotificationEvent, NotificationEventType};
+use crate::notification::deduplicator::NotificationDeduplicator;
+use std::sync::Mutex;
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -50,6 +53,8 @@ pub struct OpenclawNotifier {
     formatter: MessageFormatter,
     /// Payload 构建器
     payload_builder: PayloadBuilder,
+    /// 通知去重器
+    deduplicator: Mutex<NotificationDeduplicator>,
 }
 
 impl OpenclawNotifier {
@@ -63,6 +68,7 @@ impl OpenclawNotifier {
             no_ai: false,
             formatter: MessageFormatter::new(),
             payload_builder: PayloadBuilder::new(),
+            deduplicator: Mutex::new(NotificationDeduplicator::new()),
         }
     }
 
@@ -376,6 +382,129 @@ impl OpenclawNotifier {
                     "Notification skipped (LOW urgency)"
                 );
                 Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type)))
+            }
+        }
+    }
+
+    /// 发送统一的 NotificationEvent（新 API）
+    ///
+    /// 这是新的统一入口，使用 NotificationEvent 结构体替代多个参数。
+    /// 优势：
+    /// 1. 项目名从 event.project_path 获取，不再依赖 pattern_or_path
+    /// 2. 终端快照从 event.terminal_snapshot 获取，数据来源清晰
+    /// 3. 类型安全，避免参数混淆
+    /// 4. 内置去重机制，防止重复通知
+    pub fn send_notification_event(&self, event: &NotificationEvent) -> Result<SendResult> {
+        let total_start = std::time::Instant::now();
+        let agent_id = &event.agent_id;
+
+        // 外部会话（ext-xxx）不发送通知
+        if agent_id.starts_with("ext-") {
+            if self.dry_run {
+                eprintln!("[DRY-RUN] External session (cannot reply remotely), skipping: {}", agent_id);
+            }
+            debug!(agent_id = %agent_id, "Skipping external session notification");
+            return Ok(SendResult::Skipped("external session".to_string()));
+        }
+
+        // 获取事件类型字符串用于 urgency 判断
+        let event_type_str = match &event.event_type {
+            NotificationEventType::WaitingForInput { .. } => "WaitingForInput",
+            NotificationEventType::PermissionRequest { .. } => "permission_request",
+            NotificationEventType::Notification { notification_type, .. } => {
+                if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
+                    "notification"
+                } else {
+                    "notification"
+                }
+            }
+            NotificationEventType::AgentExited => "AgentExited",
+            NotificationEventType::Error { .. } => "Error",
+            NotificationEventType::Stop => "stop",
+            NotificationEventType::SessionStart => "session_start",
+            NotificationEventType::SessionEnd => "session_end",
+        };
+
+        // 构建 context 用于 urgency 判断（兼容旧逻辑）
+        let context_for_urgency = match &event.event_type {
+            NotificationEventType::Notification { notification_type, message } => {
+                serde_json::json!({
+                    "notification_type": notification_type,
+                    "message": message
+                }).to_string()
+            }
+            _ => String::new(),
+        };
+
+        let urgency = get_urgency(event_type_str, &context_for_urgency);
+
+        debug!(
+            agent_id = %agent_id,
+            event_type = %event_type_str,
+            urgency = urgency.as_str(),
+            "Processing notification event (new API)"
+        );
+
+        match urgency {
+            Urgency::High | Urgency::Medium => {
+                let format_start = std::time::Instant::now();
+                let message = self.formatter.format_notification_event(event);
+                Self::log_timing("format_notification_event", event_type_str, format_start.elapsed());
+
+                // 如果消息为空，跳过
+                if message.is_empty() {
+                    if self.dry_run {
+                        eprintln!("[DRY-RUN] Empty message, skipping: {}", agent_id);
+                    }
+                    return Ok(SendResult::Skipped("empty message".to_string()));
+                }
+
+                // 去重检查
+                {
+                    let mut dedup = self.deduplicator.lock().unwrap();
+                    if !dedup.should_send(agent_id, &message) {
+                        if self.dry_run {
+                            eprintln!("[DRY-RUN] Duplicate notification, skipping: {}", agent_id);
+                        }
+                        debug!(agent_id = %agent_id, "Notification deduplicated");
+                        return Ok(SendResult::Skipped("duplicate".to_string()));
+                    }
+                }
+
+                // 发送到 channel
+                if let Some(config) = &self.channel_config {
+                    let channel_name = config.channel.clone();
+                    let needs_reply = event.needs_reply();
+
+                    let send_start = std::time::Instant::now();
+                    if needs_reply {
+                        self.send_direct(&message, agent_id)?;
+                    } else {
+                        self.send_direct_text(&message)?;
+                    }
+                    Self::log_timing("send_direct", &channel_name, send_start.elapsed());
+                }
+
+                Self::log_timing("send_notification_event_total", event_type_str, total_start.elapsed());
+
+                info!(
+                    agent_id = %agent_id,
+                    event_type = %event_type_str,
+                    urgency = urgency.as_str(),
+                    "Notification sent (new API)"
+                );
+                Ok(SendResult::Sent)
+            }
+            Urgency::Low => {
+                if self.dry_run {
+                    eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type_str, agent_id);
+                }
+                debug!(
+                    agent_id = %agent_id,
+                    event_type = %event_type_str,
+                    "Notification skipped (LOW urgency)"
+                );
+                Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type_str)))
             }
         }
     }

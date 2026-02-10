@@ -42,3 +42,5 @@ pub use team_orchestrator::{TeamOrchestrator, SpawnResult, TeamProgress, TeamCre
 pub use notification_summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
 pub use conversation_state::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult};
 pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};
+pub use notification::event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
+pub use notification::deduplicator::NotificationDeduplicator;

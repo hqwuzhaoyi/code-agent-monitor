@@ -11,7 +11,8 @@ use code_agent_monitor::{
     discover_teams, get_team_members,
     list_tasks, list_team_names,
     TeamBridge, InboxMessage, TeamOrchestrator,
-    ConversationStateManager, ReplyResult
+    ConversationStateManager, ReplyResult,
+    NotificationEvent, NotificationEventType,
 };
 use anyhow::Result;
 
@@ -430,14 +431,17 @@ async fn main() -> Result<()> {
                     match &event {
                         WatchEvent::AgentExited { agent_id, project_path } => {
                             info!(agent_id = %agent_id, "Agent exited, sending notification");
-                            match notifier.send_event(agent_id, "AgentExited", project_path, "") {
+                            let notification_event = NotificationEvent::agent_exited(agent_id)
+                                .with_project_path(project_path.clone());
+                            match notifier.send_notification_event(&notification_event) {
                                 Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
                         WatchEvent::Error { agent_id, message, .. } => {
                             info!(agent_id = %agent_id, message = %message, "Error detected, sending notification");
-                            match notifier.send_event(agent_id, "Error", "", message) {
+                            let notification_event = NotificationEvent::error(agent_id, message);
+                            match notifier.send_notification_event(&notification_event) {
                                 Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
@@ -449,7 +453,17 @@ async fn main() -> Result<()> {
                                 context_len = context.len(),
                                 "Waiting for input detected, sending notification"
                             );
-                            match notifier.send_event(agent_id, "WaitingForInput", pattern_type, context) {
+                            // 从 agent_manager 获取项目路径
+                            let project_path = watcher.agent_manager()
+                                .get_agent(agent_id)
+                                .ok()
+                                .flatten()
+                                .map(|a| a.project_path)
+                                .unwrap_or_default();
+                            let notification_event = NotificationEvent::waiting_for_input(agent_id, pattern_type)
+                                .with_project_path(project_path)
+                                .with_terminal_snapshot(context.clone());
+                            match notifier.send_notification_event(&notification_event) {
                                 Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
@@ -593,15 +607,15 @@ async fn main() -> Result<()> {
             // 获取终端快照
             let terminal_snapshot = if needs_snapshot {
                 // 优先通过 resolved_agent_id 直接获取
-                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 30) {
+                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 50) {
                     Some(logs)
                 } else if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
                     // 尝试通过 session_id 查找 agent
-                    agent_manager.get_logs(&agent.agent_id, 30).ok()
+                    agent_manager.get_logs(&agent.agent_id, 50).ok()
                 } else if let Some(ref cwd_path) = cwd {
                     // 通过 cwd 查找
                     if let Ok(Some(agent)) = agent_manager.find_agent_by_cwd(cwd_path) {
-                        agent_manager.get_logs(&agent.agent_id, 30).ok()
+                        agent_manager.get_logs(&agent.agent_id, 50).ok()
                     } else {
                         None
                     }
@@ -612,23 +626,73 @@ async fn main() -> Result<()> {
                 None
             };
 
-            // 构建 enriched context
-            let enriched_context = if let Some(ref snapshot) = terminal_snapshot {
-                // 记录终端快照到日志（用于调试）
+            // 记录终端快照到日志（用于调试）
+            if let Some(ref snapshot) = terminal_snapshot {
                 if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                     let _ = writeln!(file, "[{}] Terminal snapshot ({} chars):\n{}", timestamp, snapshot.len(), snapshot);
                 }
+            }
 
-                let mut enriched = context.clone();
-                enriched.push_str("\n\n--- 终端快照 ---\n");
-                enriched.push_str(snapshot);
-                enriched
-            } else {
-                context.clone()
+            // 构建统一的 NotificationEvent
+            let notification_event = {
+                // 解析事件类型
+                let event_type = match event.as_str() {
+                    "WaitingForInput" => NotificationEventType::WaitingForInput {
+                        pattern_type: "unknown".to_string(),
+                    },
+                    "permission_request" => {
+                        let tool_name = json.as_ref()
+                            .and_then(|j| j.get("tool_name"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("unknown")
+                            .to_string();
+                        let tool_input = json.as_ref()
+                            .and_then(|j| j.get("tool_input"))
+                            .cloned()
+                            .unwrap_or(serde_json::json!({}));
+                        NotificationEventType::PermissionRequest { tool_name, tool_input }
+                    }
+                    "notification" => {
+                        let notification_type = json.as_ref()
+                            .and_then(|j| j.get("notification_type"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        let message = json.as_ref()
+                            .and_then(|j| j.get("message"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("")
+                            .to_string();
+                        NotificationEventType::Notification { notification_type, message }
+                    }
+                    "AgentExited" => NotificationEventType::AgentExited,
+                    "Error" => NotificationEventType::Error {
+                        message: context.clone(),
+                    },
+                    "stop" => NotificationEventType::Stop,
+                    "session_start" => NotificationEventType::SessionStart,
+                    "session_end" => NotificationEventType::SessionEnd,
+                    _ => NotificationEventType::Notification {
+                        notification_type: event.clone(),
+                        message: String::new(),
+                    },
+                };
+
+                let mut evt = NotificationEvent::new(resolved_agent_id.clone(), event_type);
+                // 设置项目路径（从 cwd 获取）
+                if let Some(ref cwd_path) = cwd {
+                    evt = evt.with_project_path(cwd_path.clone());
+                }
+                // 设置终端快照
+                if let Some(ref snapshot) = terminal_snapshot {
+                    evt = evt.with_terminal_snapshot(snapshot.clone());
+                }
+                evt
             };
 
             let notifier = OpenclawNotifier::new().with_dry_run(dry_run).with_no_ai(no_ai);
-            match notifier.send_event(&resolved_agent_id, &event, "", &enriched_context) {
+            // 使用新的统一 API
+            match notifier.send_notification_event(&notification_event) {
                 Ok(result) => {
                     let end_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                     match &result {
