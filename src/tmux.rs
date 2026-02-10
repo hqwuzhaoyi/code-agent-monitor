@@ -146,78 +146,68 @@ impl Default for TmuxManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
 
-    fn cleanup_test_sessions() {
-        let manager = TmuxManager::new();
-        // Clean up any leftover test sessions
-        for prefix in ["cam-test-", "cam-test-list-"] {
-            if let Ok(sessions) = manager.list_cam_sessions() {
-                for session in sessions {
-                    if session.starts_with(prefix) {
-                        let _ = manager.kill_session(&session);
-                    }
-                }
-            }
-        }
+    /// 全局计数器，确保测试 session 名称唯一
+    static TEST_SESSION_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+    /// 生成唯一的测试 session 名称
+    fn unique_session_name(prefix: &str) -> String {
+        let counter = TEST_SESSION_COUNTER.fetch_add(1, Ordering::SeqCst);
+        format!("{}-{}-{}", prefix, std::process::id(), counter)
     }
 
     #[test]
     fn test_create_session() {
-        cleanup_test_sessions();
-
         // Given: 一个不存在的 session 名
         let manager = TmuxManager::new();
-        let session_name = "cam-test-001";
+        let session_name = unique_session_name("cam-test");
 
         // When: 创建 session 运行 echo 命令
-        let result = manager.create_session(session_name, "/tmp", "sleep 60");
+        let result = manager.create_session(&session_name, "/tmp", "sleep 60");
 
         // Then: 返回成功，session 存在
         assert!(result.is_ok());
-        assert!(manager.session_exists(session_name));
+        assert!(manager.session_exists(&session_name));
 
         // Cleanup
-        manager.kill_session(session_name).unwrap();
+        manager.kill_session(&session_name).unwrap();
     }
 
     #[test]
     fn test_send_keys() {
-        cleanup_test_sessions();
-
         // Given: 一个运行中的 session
         let manager = TmuxManager::new();
-        let session_name = "cam-test-002";
-        manager.create_session(session_name, "/tmp", "cat").unwrap();
+        let session_name = unique_session_name("cam-test");
+        manager.create_session(&session_name, "/tmp", "cat").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         // When: 发送输入
-        let result = manager.send_keys(session_name, "hello");
+        let result = manager.send_keys(&session_name, "hello");
 
         // Then: 返回成功
         assert!(result.is_ok());
 
         // Cleanup
-        manager.kill_session(session_name).unwrap();
+        manager.kill_session(&session_name).unwrap();
     }
 
     #[test]
     fn test_capture_pane() {
-        cleanup_test_sessions();
-
         // Given: 一个有输出的 session
         let manager = TmuxManager::new();
-        let session_name = "cam-test-003";
-        manager.create_session(session_name, "/tmp", "echo 'test output'; sleep 60").unwrap();
+        let session_name = unique_session_name("cam-test");
+        manager.create_session(&session_name, "/tmp", "echo 'test output'; sleep 60").unwrap();
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // When: 捕获输出
-        let output = manager.capture_pane(session_name, 50).unwrap();
+        let output = manager.capture_pane(&session_name, 50).unwrap();
 
         // Then: 包含预期内容
         assert!(output.contains("test output"));
 
         // Cleanup
-        manager.kill_session(session_name).unwrap();
+        manager.kill_session(&session_name).unwrap();
     }
 
     #[test]
@@ -231,22 +221,22 @@ mod tests {
 
     #[test]
     fn test_list_sessions() {
-        cleanup_test_sessions();
-
         // Given: 创建两个 session
         let manager = TmuxManager::new();
-        manager.create_session("cam-test-list-1", "/tmp", "sleep 60").unwrap();
-        manager.create_session("cam-test-list-2", "/tmp", "sleep 60").unwrap();
+        let session1 = unique_session_name("cam-test-list");
+        let session2 = unique_session_name("cam-test-list");
+        manager.create_session(&session1, "/tmp", "sleep 60").unwrap();
+        manager.create_session(&session2, "/tmp", "sleep 60").unwrap();
 
         // When: 列出 cam- 前缀的 session
         let sessions = manager.list_cam_sessions().unwrap();
 
         // Then: 包含这两个
-        assert!(sessions.contains(&"cam-test-list-1".to_string()));
-        assert!(sessions.contains(&"cam-test-list-2".to_string()));
+        assert!(sessions.contains(&session1));
+        assert!(sessions.contains(&session2));
 
         // Cleanup
-        manager.kill_session("cam-test-list-1").unwrap();
-        manager.kill_session("cam-test-list-2").unwrap();
+        manager.kill_session(&session1).unwrap();
+        manager.kill_session(&session2).unwrap();
     }
 }

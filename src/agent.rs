@@ -7,8 +7,12 @@ use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tracing::{info, warn, debug};
+
+/// 全局计数器，确保 agent_id 唯一性（即使在同一毫秒内）
+static AGENT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 /// Agent 类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -125,9 +129,10 @@ impl AgentManager {
         }
     }
 
-    /// 创建用于测试的 AgentManager
+    /// 创建用于测试的 AgentManager（每次调用创建独立的数据目录）
     pub fn new_for_test() -> Self {
-        let data_dir = std::env::temp_dir().join(format!("cam-test-{}", std::process::id()));
+        let counter = AGENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        let data_dir = std::env::temp_dir().join(format!("cam-test-{}-{}", std::process::id(), counter));
         let _ = fs::create_dir_all(&data_dir);
 
         Self {
@@ -231,8 +236,9 @@ impl AgentManager {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        format!("cam-{}", timestamp)
+            .as_millis();
+        let counter = AGENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
+        format!("cam-{}-{}", timestamp, counter)
     }
 
     /// 获取 agent 启动命令
