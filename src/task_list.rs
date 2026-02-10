@@ -71,9 +71,9 @@ pub fn list_tasks(team_name: &str) -> Vec<Task> {
     if let Ok(entries) = std::fs::read_dir(&tasks_dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |e| e == "json") {
+            if path.is_file() && path.extension().is_some_and(|e| e == "json") {
                 // 跳过 .lock 文件
-                if path.file_name().map_or(false, |n| n.to_str().map_or(false, |s| s.starts_with('.'))) {
+                if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
                     continue;
                 }
                 if let Ok(content) = std::fs::read_to_string(&path) {

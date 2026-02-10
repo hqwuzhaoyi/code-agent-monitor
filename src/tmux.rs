@@ -2,6 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use std::process::Command;
+use tracing::{info, error, debug};
 
 /// tmux 管理器
 pub struct TmuxManager;
@@ -13,6 +14,8 @@ impl TmuxManager {
 
     /// 创建新的 tmux session 并运行命令
     pub fn create_session(&self, session_name: &str, working_dir: &str, command: &str) -> Result<()> {
+        debug!(session = %session_name, working_dir = %working_dir, "Creating tmux session");
+
         let status = Command::new("tmux")
             .args([
                 "new-session",
@@ -24,8 +27,10 @@ impl TmuxManager {
             .status()?;
 
         if status.success() {
+            info!(session = %session_name, "Tmux session created");
             Ok(())
         } else {
+            error!(session = %session_name, "Failed to create tmux session");
             Err(anyhow!("Failed to create tmux session: {}", session_name))
         }
     }
@@ -97,13 +102,17 @@ impl TmuxManager {
 
     /// 终止 session
     pub fn kill_session(&self, session_name: &str) -> Result<()> {
+        debug!(session = %session_name, "Killing tmux session");
+
         let status = Command::new("tmux")
             .args(["kill-session", "-t", session_name])
             .status()?;
 
         if status.success() {
+            info!(session = %session_name, "Tmux session killed");
             Ok(())
         } else {
+            error!(session = %session_name, "Failed to kill tmux session");
             Err(anyhow!("Failed to kill session: {}", session_name))
         }
     }

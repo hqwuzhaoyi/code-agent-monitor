@@ -4,6 +4,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+use tracing::{info, error, debug};
 
 /// Watcher Daemon 管理器
 pub struct WatcherDaemon {
@@ -91,12 +92,15 @@ impl WatcherDaemon {
     /// 启动 watcher（如果未运行）
     pub fn ensure_started(&self) -> Result<bool> {
         if self.is_running() {
+            debug!("Watcher daemon already running");
             return Ok(false); // 已经在运行
         }
 
         // 查找 cam 可执行文件
         let cam_path = std::env::current_exe()?;
         let cam_path_str = cam_path.to_string_lossy();
+
+        debug!(cam_path = %cam_path_str, "Starting watcher daemon");
 
         // 使用 nohup 实现 daemon 模式（macOS 兼容）
         // 通过 & 后台运行，nohup 确保父进程退出后子进程继续运行
@@ -118,8 +122,10 @@ impl WatcherDaemon {
         let pid_str = String::from_utf8_lossy(&child.stdout);
         if let Ok(pid) = pid_str.trim().parse::<u32>() {
             self.write_pid(pid)?;
+            info!(pid = pid, "Watcher daemon started");
             Ok(true) // 新启动
         } else {
+            error!("Failed to get watcher PID from output");
             Err(anyhow::anyhow!("Failed to get watcher PID"))
         }
     }
@@ -127,14 +133,18 @@ impl WatcherDaemon {
     /// 停止 watcher
     pub fn stop(&self) -> Result<bool> {
         if let Some(pid) = self.read_pid()? {
+            debug!(pid = pid, "Stopping watcher daemon");
+
             // 发送 SIGTERM
             let _ = Command::new("kill")
                 .args(["-TERM", &pid.to_string()])
                 .output();
 
             self.remove_pid()?;
+            info!(pid = pid, "Watcher daemon stopped");
             Ok(true)
         } else {
+            debug!("No watcher daemon PID found");
             Ok(false)
         }
     }

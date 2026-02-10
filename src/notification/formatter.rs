@@ -3,17 +3,17 @@
 //! 主要功能：
 //! - 格式化各类事件为简洁的通知消息
 //! - 智能提取项目名和问题内容
-//! - 支持 AI 辅助提取（可选）
+//! - 使用 AI 辅助提取（Haiku）
 //!
 //! 设计原则：
 //! 1. 简洁 - 一眼看懂，核心内容不超过 5 行
 //! 2. 可操作 - 明确告诉用户怎么做
 //! 3. 专业 - 现代机器人风格，无冗余信息
 //! 4. 友好 ID - 用项目名替代 cam-xxxxxxxxxx
+//! 5. 无硬编码 - 使用 AI 判断，兼容多种 AI 编码工具
 
 use std::fs;
 
-use super::terminal_cleaner::clean_terminal_context;
 use super::event::{NotificationEvent, NotificationEventType};
 use crate::anthropic::extract_question_with_haiku;
 use crate::notification_summarizer::NotificationSummarizer;
@@ -60,6 +60,13 @@ pub mod msg {
 pub struct MessageFormatter {
     /// 是否禁用 AI 提取
     no_ai: bool,
+}
+
+/// 获取终端快照的最后 N 行（作为 AI 提取失败时的回退）
+fn get_last_lines(content: &str, n: usize) -> String {
+    let lines: Vec<&str> = content.lines().collect();
+    let start = lines.len().saturating_sub(n);
+    lines[start..].join("\n")
 }
 
 impl MessageFormatter {
@@ -155,17 +162,17 @@ impl MessageFormatter {
                 }
             });
 
-        // 清洗终端快照
-        let cleaned_snapshot = terminal_snapshot
-            .map(clean_terminal_context)
+        // 终端快照（保留原始内容，AI 提取时使用）
+        let snapshot = terminal_snapshot
+            .map(|s| s.to_string())
             .filter(|s| !s.is_empty());
 
         match event_type {
             "permission_request" => {
-                self.format_permission_request(&project_name, &json, &cleaned_snapshot)
+                self.format_permission_request(&project_name, &json, &snapshot)
             }
             "notification" => {
-                self.format_notification(&project_name, &json, &cleaned_snapshot)
+                self.format_notification(&project_name, &json, &snapshot)
             }
             "session_start" => {
                 format!("🚀 {} 已启动", project_name)
@@ -177,10 +184,10 @@ impl MessageFormatter {
                 format!("⏹️ {} {}", project_name, msg::STOPPED)
             }
             "WaitingForInput" => {
-                self.format_waiting_for_input(&project_name, pattern_or_path, raw_context, &cleaned_snapshot)
+                self.format_waiting_for_input(&project_name, pattern_or_path, raw_context, &snapshot)
             }
             "Error" => {
-                self.format_error(&project_name, raw_context, &cleaned_snapshot)
+                self.format_error(&project_name, raw_context, &snapshot)
             }
             "AgentExited" => {
                 format!("✅ {} {}", project_name, msg::COMPLETED)
@@ -344,21 +351,21 @@ impl MessageFormatter {
         snapshot: &Option<String>,
     ) -> String {
         let context = snapshot.as_deref().unwrap_or(raw_context);
-        let cleaned = clean_terminal_context(context);
 
-        if cleaned.trim().is_empty() {
+        if context.trim().is_empty() {
             return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
         }
 
-        // 尝试使用 Haiku 提取问题
+        // 使用 Haiku 提取问题
         if !self.no_ai {
-            if let Some((_, question, reply_hint)) = extract_question_with_haiku(&cleaned) {
+            if let Some((_, question, reply_hint)) = extract_question_with_haiku(context) {
                 return format!("⏸️ {} {}\n\n{}\n\n{}", project_name, msg::WAITING_INPUT, question, reply_hint);
             }
         }
 
-        // 回退到显示清洗后的内容
-        format!("⏸️ {} {}\n\n{}\n\n{}", project_name, msg::WAITING_INPUT, cleaned.trim(), msg::REPLY_CONTENT)
+        // 回退到显示最后 10 行
+        let last_lines = get_last_lines(context, 10);
+        format!("⏸️ {} {}\n\n{}\n\n{}", project_name, msg::WAITING_INPUT, last_lines.trim(), msg::REPLY_CONTENT)
     }
 
     /// 格式化错误通知
@@ -400,9 +407,7 @@ impl MessageFormatter {
     /// 3. 类型安全，避免参数混淆
     pub fn format_notification_event(&self, event: &NotificationEvent) -> String {
         let project_name = event.project_name().to_string();
-        let snapshot = event.terminal_snapshot.as_ref()
-            .map(|s| clean_terminal_context(s))
-            .filter(|s| !s.is_empty());
+        let snapshot = event.terminal_snapshot.clone();
 
         match &event.event_type {
             NotificationEventType::WaitingForInput { pattern_type } => {

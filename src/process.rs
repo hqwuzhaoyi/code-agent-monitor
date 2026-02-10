@@ -3,7 +3,6 @@
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Process, Pid};
 use anyhow::Result;
-use std::collections::HashMap;
 
 /// 代理类型
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

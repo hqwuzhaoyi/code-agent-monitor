@@ -91,7 +91,7 @@ impl NotifyThrottle {
             ThrottledEvent::ToolUse { agent_id, tool, target } => {
                 self.pending_tools
                     .entry(agent_id)
-                    .or_insert_with(Vec::new)
+                    .or_default()
                     .push((tool, target, time));
             }
             ThrottledEvent::Error { agent_id, message } => {

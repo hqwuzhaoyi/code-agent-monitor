@@ -64,6 +64,7 @@ struct JsonlMessage {
 
 #[derive(Debug, Clone, Deserialize)]
 struct JsonlMessageContent {
+    #[allow(dead_code)]
     role: Option<String>,
     content: Option<serde_json::Value>,
 }

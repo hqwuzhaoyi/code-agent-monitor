@@ -276,7 +276,7 @@ impl McpServer {
 
         // 格式化工具调用
         let tools_formatted: Vec<String> = recent_tools.iter()
-            .filter_map(|e| format_tool_use(e))
+            .filter_map(format_tool_use)
             .collect();
 
         // 格式化错误

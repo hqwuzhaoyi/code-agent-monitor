@@ -18,6 +18,8 @@ fn test_full_workflow() {
         agent_type: Some("mock".to_string()),
         resume_session: None,
         initial_prompt: None,
+        agent_id: None,
+        tmux_session: None,
     }).unwrap();
 
     assert!(response.agent_id.starts_with("cam-"));

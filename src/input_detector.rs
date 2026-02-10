@@ -137,7 +137,7 @@ impl InputWaitDetector {
         }
 
         // 获取最后几行作为上下文
-        let context = Self::get_last_lines(output, 15);
+        let context = Self::get_last_lines(output, 30);
 
         // 检测等待模式
         for (pattern, pattern_type) in &self.patterns {
@@ -160,7 +160,7 @@ impl InputWaitDetector {
 
     /// 立即检测（不考虑空闲时间）
     pub fn detect_immediate(&self, output: &str) -> InputWaitResult {
-        let context = Self::get_last_lines(output, 15);
+        let context = Self::get_last_lines(output, 30);
 
         for (pattern, pattern_type) in &self.patterns {
             if pattern.is_match(&context) {

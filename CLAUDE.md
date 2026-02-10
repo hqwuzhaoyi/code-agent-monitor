@@ -4,1133 +4,125 @@
 
 Skills location: `~/clawd/skills/code-agent-monitor/SKILL.md`
 
-## 调试通知系统
+## 快速参考
 
-### 使用 --dry-run 预览通知
-
-```bash
-# 预览 HIGH urgency 通知（直接发送到 channel）
-echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event permission_request --agent-id cam-test --dry-run
-
-# 预览 MEDIUM urgency 通知（直接发送到 channel）
-echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event stop --agent-id cam-test --dry-run
-
-# 预览 LOW urgency 通知（发给 Agent）
-echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event session_start --agent-id cam-test --dry-run
-```
-
-输出示例：
-```
-[DRY-RUN] Would send to channel=telegram target=1440537501
-[DRY-RUN] Message: ⏸️ myproject 等待选择
-
-1. 选项一
-2. 选项二
-
-回复数字选择
-[DRY-RUN] Agent ID tag: cam-test
-```
-
-### 查看 Hook 日志
+### 常用命令
 
 ```bash
-# 查看最近的 hook 触发记录
-tail -50 ~/.claude-monitor/hook.log
+# Agent 管理
+cam list                          # 列出所有代理进程
+cam sessions                      # 列出历史会话
+cam resume <session_id>           # 恢复会话
 
-# 实时监控 hook 日志
+# 通知调试
+echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id test --dry-run
 tail -f ~/.claude-monitor/hook.log
 
-# 查看特定 agent 的日志
-grep "cam-xxxxxxx" ~/.claude-monitor/hook.log
+# Team 管理
+cam team-create <name>            # 创建 Team
+cam team-spawn <team> <name>      # 启动 Agent
+cam team-progress <team>          # 查看进度
+cam team-shutdown <team>          # 关闭 Team
+
+# 快捷回复
+cam pending-confirmations         # 查看待处理
+cam reply y                       # 批准
 ```
 
-### 验证 Channel 检测
-
-```bash
-# 检查 OpenClaw channel 配置
-cat ~/.openclaw/openclaw.json | jq '.channels'
-
-# 测试 channel 检测是否正常（应显示 telegram/whatsapp 等）
-echo '{}' | ./target/release/cam notify --event stop --agent-id test --dry-run 2>&1 | grep "channel="
-```
-
-### 常见问题排查
-
-| 问题 | 排查方法 |
-|------|---------|
-| 通知没有发送 | 检查 `~/.claude-monitor/hook.log` 是否有记录 |
-| 发送失败 | 查看 stderr 输出，可能是网络问题或 API 限流 |
-| 路由错误 | 使用 `--dry-run` 确认 urgency 分类是否正确 |
-| Channel 检测失败 | 检查 `~/.openclaw/openclaw.json` 配置 |
-| 新格式未生效 | 重启 watcher daemon（见下方说明） |
-| 外部会话收到通知 | 检查 agent_id 是否为 ext- 前缀 |
-
-### 手动测试通知发送
-
-```bash
-# 测试直接发送到 Telegram（绕过 CAM）
-openclaw message send --channel telegram --target <chat_id> --message "test"
-
-# 测试发送给 Agent
-openclaw agent --session-id main --message "test"
-```
-
-### 端到端测试通知流程（通过 Hook 触发）
-
-完整测试从 Claude Code Hook 到 Telegram 的通知流程：
-
-```bash
-# 1. 确保有运行中的 CAM agent
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
-
-# 2. 查看 agent 当前终端状态
-command tmux capture-pane -t <agent_id> -p -S -30
-
-# 3. 手动触发 idle_prompt hook（模拟 Claude Code 空闲）
-echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
-  ./target/release/cam notify --event notification --agent-id <agent_id>
-
-# 4. 查看完整日志（包含终端快照）
-tail -100 ~/.claude-monitor/hook.log
-
-# 5. 使用 dry-run 预览通知内容（不实际发送）
-echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
-  ./target/release/cam notify --event notification --agent-id <agent_id> --dry-run
-```
-
-日志格式说明：
-```
-[时间] Hook triggered: event=notification, agent_id=cam-xxx, session_id=None
-[时间] Context: {"notification_type": "idle_prompt", "cwd": "..."}
-[时间] Terminal snapshot (1234 chars):
-  ... 终端内容 ...
-[时间] ⏱️ pattern_match open_question took 0ms
-[时间] ⏱️ format_event notification took 4ms
-[时间] ⏱️ send_direct telegram took 8645ms
-[时间] ✅ Notification sent: notification cam-xxx
-```
-
-## Testing
-
-### 使用 openclaw agent 直接测试
-
-```bash
-# 发送简单消息
-openclaw agent --agent main --message "你好"
-
-# 指定 session-id 创建独立会话
-openclaw agent --agent main --session-id test-session --message "你好"
-
-# 使用 tui 查看会话历史和状态
-openclaw tui --session main --history-limit 10
-
-# 重启 gateway（如果遇到连接问题）
-openclaw gateway restart
-```
-
-### 使用 CAM plugin 测试 Claude Code 会话
-
-CAM plugin 位置: `plugins/cam/`
-
-```bash
-# 安装 plugin（首次）
-openclaw plugins install --link /Users/admin/workspace/code-agent-monitor/plugins/cam
-openclaw gateway restart
-
-# 通过 openclaw agent 调用 CAM 工具
-openclaw agent --agent main --message "使用 cam_agent_start 在 /Users/admin/workspace 启动 Claude Code"
-openclaw agent --agent main --message "使用 cam_agent_logs 查看 cam-xxx 的输出"
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：你好"
-openclaw agent --agent main --message "使用 cam_agent_list 列出所有运行中的 agent"
-```
-
-### CAM Plugin 提供的工具
-
-| 工具 | 描述 |
-|------|------|
-| `cam_agent_start` | 启动新的 Claude Code agent |
-| `cam_agent_stop` | 停止运行中的 agent |
-| `cam_agent_list` | 列出 CAM 管理的 agent |
-| `cam_agent_send` | 向 agent 发送消息 |
-| `cam_agent_status` | 获取 agent 状态 |
-| `cam_agent_logs` | 获取 agent 终端输出（注意：显示的百分比如 23% 是 context window 占用率，不是任务进度） |
-| `cam_list_sessions` | 列出历史会话 |
-| `cam_resume_session` | 恢复历史会话 |
-
-### 手动操作 tmux 会话
-
-当需要直接操作 CAM 管理的 tmux 会话时：
-
-```bash
-# 列出所有 tmux 会话
-command tmux list-sessions
-
-# 查看会话终端输出（最近 50 行）
-command tmux capture-pane -t cam-xxxxxxx -p -S -50
-
-# 发送消息到会话（重要：文本和 Enter 必须分开发送）
-command tmux send-keys -t cam-xxxxxxx "你的消息"
-command tmux send-keys -t cam-xxxxxxx Enter
-
-# 发送 Ctrl+C 中断当前操作
-command tmux send-keys -t cam-xxxxxxx C-c
-```
-
-**注意**：`tmux send-keys` 发送文本和回车键时，必须分成两条命令。如果写成 `send-keys "message" Enter` 在一条命令中，Enter 可能被解释为换行符而不是回车键。
-
-### 配置 Claude Code Hooks
-
-为了让 Claude Code 在空闲时自动通知 CAM，需要配置 hooks。
-
-**自动配置**：
-
-```bash
-# 获取 CAM plugin 安装路径
-CAM_BIN=$(openclaw plugins list --json | jq -r '.[] | select(.name == "cam") | .path')/bin/cam
-
-# 添加 hooks 到 Claude Code 配置（保留现有配置）
-jq --arg cam "$CAM_BIN" '.hooks.Notification = [{
-  "matcher": "idle_prompt",
-  "hooks": [{"type": "command", "command": ($cam + " notify --event idle_prompt --agent-id $SESSION_ID")}]
-}]' ~/.claude/settings.json > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
-```
-
-**手动配置**：在 `~/.claude/settings.json` 的 `hooks` 字段添加：
-
-```json
-"hooks": {
-  "Notification": [{
-    "matcher": "idle_prompt",
-    "hooks": [{
-      "type": "command",
-      "command": "<CAM_PLUGIN_PATH>/bin/cam notify --event idle_prompt --agent-id $SESSION_ID"
-    }]
-  }]
-}
-```
-
-### 自动状态通知
-
-CAM 支持自动推送 Agent 状态变化到 clawdbot：
-
-**自动启动**：当第一个 agent 启动时，watcher daemon 自动启动。
-
-**关键事件通知**：
-- Agent 退出/完成
-- 错误发生
-- 等待用户输入（支持中英文模式检测）
-
-**通知路由策略**：
-
-| Urgency | 事件类型 | 发送方式 |
-|---------|---------|---------|
-| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | system event → AI 处理 → channel |
-| **MEDIUM** | AgentExited, ToolUse, notification(idle_prompt) | system event → AI 处理 → channel |
-| **LOW** | stop, session_end, session_start, 其他 notification | 静默（不发送） |
-
-**注意**：`stop` 和 `session_end` 是用户自己触发的（按 Ctrl+C 或关闭会话），用户已知道，无需通知。`AgentExited` 是 Watcher 检测到进程异常退出，用户需要知道。
-
-Channel 自动从 `~/.openclaw/openclaw.json` 检测，按优先级：telegram > whatsapp > discord > slack > signal
-
-**通知流程**（2026-02 更新）：
-1. Watcher/Hook 检测到事件
-2. 通过 `openclaw system event --text <payload> --mode now` 发送结构化 JSON payload
-3. OpenClaw Agent 收到 payload，AI 智能处理（风险评估、自然语言描述）
-4. 用户收到简洁的通知，可用 y/n 快捷回复
-
-**手动控制 watcher**：
-```bash
-# 查看 watcher 状态
-cat ~/.claude-monitor/watcher.pid
-
-# 手动停止 watcher
-kill $(cat ~/.claude-monitor/watcher.pid)
-
-# 重启 watcher（更新二进制后必须重启）
-kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
-# watcher 会在下次 agent 启动时自动启动
-```
-
-**重要**：修改代码并重新构建后，必须重启 watcher daemon，否则运行中的进程仍使用旧代码。
-
-### 测试自动通知场景
-
-以下场景用于测试 watcher daemon 是否能正确检测事件并推送通知。
-
-#### 场景 1: 测试等待输入检测（确认提示）
-
-```bash
-# 1. 启动一个会产生确认提示的 agent
-openclaw agent --agent main --message "使用 cam_agent_start 在 /tmp 启动 Claude Code，初始 prompt 为：请帮我删除 /tmp/test-file.txt 文件"
-
-# 2. 等待 agent 运行，Claude Code 会询问是否确认删除
-# 预期：watcher 检测到 [Y/n] 提示后，clawdbot 应收到通知
-
-# 3. 查看 watcher 是否在运行
-cat ~/.claude-monitor/watcher.pid && echo "Watcher PID: $(cat ~/.claude-monitor/watcher.pid)"
-```
-
-#### 场景 2: 测试中文等待输入检测
-
-```bash
-# 1. 创建一个模拟中文确认提示的测试脚本
-echo '#!/bin/bash
-echo "正在准备..."
-sleep 2
-read -p "是否继续？[是/否] " choice
-echo "你选择了: $choice"
-' > /tmp/test-chinese-prompt.sh
-chmod +x /tmp/test-chinese-prompt.sh
-
-# 2. 使用 CAM 启动这个脚本（使用 mock agent 类型或直接 tmux）
-# 通过 cam CLI 直接测试
-./target/release/cam watch-daemon -i 2 &
-
-# 3. 在另一个终端运行脚本，观察是否检测到中文提示
-```
-
-#### 场景 3: 测试 Agent 退出通知
-
-```bash
-# 1. 启动一个简单任务的 agent
-openclaw agent --agent main --message "使用 cam_agent_start 在 /tmp 启动 Claude Code，初始 prompt 为：echo hello 然后退出"
-
-# 2. 等待 agent 完成任务并退出
-# 预期：agent 退出后，clawdbot 应收到 ✅ Agent 已退出 通知
-
-# 3. 验证 watcher 在所有 agent 退出后自动停止
-sleep 10
-cat ~/.claude-monitor/watcher.pid 2>/dev/null || echo "Watcher 已停止（PID 文件不存在）"
-```
-
-#### 场景 4: 测试错误通知
-
-```bash
-# 1. 模拟一个会产生错误的操作
-openclaw agent --agent main --message "使用 cam_agent_start 在 /nonexistent/path 启动 Claude Code"
-
-# 预期：由于路径不存在，应该收到错误通知
-```
-
-#### 场景 5: 手动触发 notify 命令测试
-
-```bash
-# 直接测试 notify 子命令是否能发送通知到 clawdbot
-echo "测试错误信息" | ./target/release/cam notify --event Error --agent-id cam-test-123
-
-# 测试等待输入事件
-echo "Continue? [Y/n]" | ./target/release/cam notify --event WaitingForInput --agent-id cam-test-456
-```
-
-#### 场景 6: 完整流程测试
-
-```bash
-# 1. 确保没有残留的 watcher
-kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
-
-# 2. 启动 agent（应自动启动 watcher）
-openclaw agent --agent main --message "使用 cam_agent_start 在 /Users/admin/workspace 启动 Claude Code"
-
-# 3. 验证 watcher 已启动
-sleep 2
-ps aux | grep "cam watch-daemon" | grep -v grep
-
-# 4. 查看 agent 列表
-openclaw agent --agent main --message "使用 cam_agent_list 列出所有 agent"
-
-# 5. 给 agent 发送一个会触发确认的任务
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：请创建一个新文件 /tmp/test.txt"
-
-# 6. 等待并观察 clawdbot 是否收到等待输入通知
-# 7. 停止 agent
-openclaw agent --agent main --message "使用 cam_agent_stop 停止 cam-xxx"
-
-# 8. 验证 watcher 自动停止（所有 agent 退出后）
-sleep 5
-cat ~/.claude-monitor/watcher.pid 2>/dev/null || echo "Watcher 已自动停止"
-```
-
-### 真实 Claude Code 确认场景
-
-以下是 Claude Code 实际会产生的确认提示场景，可用于端到端测试：
-
-#### 场景 A: 文件写入确认
-
-```bash
-# Claude Code 在写入新文件时会询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：创建文件 /tmp/new-component.tsx，内容为一个简单的 React 组件"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Write to /tmp/new-component.tsx?         │
-# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 场景 B: Bash 命令执行确认
-
-```bash
-# Claude Code 执行 bash 命令时会询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：运行 npm install 安装依赖"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Run bash command?                        │
-# │ npm install                              │
-# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 场景 C: 文件编辑确认
-
-```bash
-# Claude Code 编辑现有文件时会显示 diff 并询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：在 package.json 中添加一个新的 script"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Apply changes to package.json?           │
-# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 场景 D: 文件删除确认
-
-```bash
-# Claude Code 删除文件时会询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：删除 /tmp/old-file.txt"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Delete /tmp/old-file.txt?                │
-# │ [Y]es / [N]o                             │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 场景 E: Git 操作确认
-
-```bash
-# Claude Code 执行 git 操作时会询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：提交当前的修改，commit message 为 fix: update config"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Run bash command?                        │
-# │ git commit -m "fix: update config"       │
-# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 场景 F: MCP 工具调用确认
-
-```bash
-# Claude Code 调用 MCP 工具时可能询问确认
-openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送：使用浏览器打开 https://example.com"
-
-# 预期 Claude Code 输出类似：
-# ╭──────────────────────────────────────────╮
-# │ Allow mcp__browser__navigate?            │
-# │ [Y]es / [N]o / [A]lways / [D]on't ask    │
-# ╰──────────────────────────────────────────╯
-```
-
-#### 检测到的模式汇总
-
-| 模式 | 示例 | 类型 |
-|------|------|------|
-| `[Y]es / [N]o` | Write to file? | Confirmation |
-| `[Y/n]` | Continue? [Y/n] | Confirmation |
-| `[y/N]` | Delete file? [y/N] | Confirmation |
-| `[是/否]` | 是否继续？[是/否] | Confirmation |
-| `确认？` | 确认删除？ | Confirmation |
-| `>\s*$` | Claude Code 主提示符 | ClaudePrompt |
-| `:\s*$` | 请输入文件名: | ColonPrompt |
-| `allow this action` | Do you want to allow this action? | PermissionRequest |
-| `是否授权` | 是否授权此操作？ | PermissionRequest |
-
-## Hook API 数据源研究（2026-02）
-
-### 研究结论
-
-| 数据源 | 可用性 | 说明 |
-|--------|--------|------|
-| **Hook stdin** | ✅ 最佳 | PermissionRequest 包含完整 tool_name + tool_input |
-| **终端快照** | ✅ 必需 | idle_prompt 必须用终端快照获取当前问题 |
-| **CLI 命令** | ❌ 不可用 | 无状态查询命令 |
-| **JSONL** | ❌ 不适用 | 历史记录，非实时状态 |
-| **MCP** | ❌ 不可用 | 独立实例，无法访问运行中会话 |
-| **环境变量** | ⚠️ 有限 | 只有基础信息，详情在 stdin |
-
-### Hook stdin 数据结构
-
-**PermissionRequest** - 包含完整工具信息：
-```json
-{
-  "tool_name": "Bash",
-  "tool_input": {"command": "npm install"},
-  "cwd": "/workspace"
-}
-```
-
-**Notification (idle_prompt)** - 只有通用消息：
-```json
-{
-  "notification_type": "idle_prompt",
-  "message": "Claude is ready for input",
-  "cwd": "/workspace"
-}
-```
-
-### 终端快照策略
-
-| 事件类型 | 需要终端快照 | 原因 |
-|----------|-------------|------|
-| permission_request | ❌ 否 | stdin 已有完整 tool_name + tool_input |
-| notification (idle_prompt) | ✅ 是 | stdin 无问题内容，必须从终端获取 |
-| notification (permission_prompt) | ❌ 否 | stdin 已有完整信息 |
-| stop/session_end | ✅ 是 | 需要最终状态上下文 |
-
-## 开发指南
-
-### 项目结构
-
-```
-src/
-├── main.rs              # CLI 入口，处理 notify/watch/team 等命令
-├── openclaw_notifier.rs # 通知系统核心（urgency 分类、payload 生成、路由）
-├── agent.rs             # Agent 管理（启动、停止、列表）
-├── tmux.rs              # Tmux 会话操作
-├── input_detector.rs    # 终端输入模式检测（20+ 种模式）
-├── session.rs           # Claude Code 会话管理
-├── team_discovery.rs    # Agent Teams 发现（读取 ~/.claude/teams/）
-├── task_list.rs         # Task List 集成（读取 ~/.claude/tasks/）
-├── team_bridge.rs       # Agent Teams 桥接（inbox 读写、team 管理）
-├── inbox_watcher.rs     # Inbox 监控（轮询检测、通知路由）
-├── team_orchestrator.rs # Team 编排（启动 Agent、进度聚合、任务分配）
-├── conversation_state.rs # 对话状态管理（快捷回复、pending confirmation）
-├── notification_summarizer.rs # 智能通知汇总（风险评估、自然语言描述）
-└── mcp.rs               # MCP Server 实现
-```
-
-### 新增 CLI 命令（2026-02）
-
-```bash
-# 列出所有 Agent Teams
-cam teams [--json]
-
-# 列出 team 成员
-cam team-members <team> [--json]
-
-# 列出 team 任务
-cam tasks <team> [--json]
-
-# Team 管理（新增）
-cam team-create <team-name> [--description <desc>]
-cam team-delete <team-name>
-cam team-status <team-name> [--json]
-
-# Inbox 操作（新增）
-cam inbox <team> <member> [--json] [--unread-only]
-cam inbox-send <team> <member> --message <text> [--from <sender>]
-
-# Team 监控（新增）
-cam team-watch <team>
-cam team-watch --all
-```
-
-### 运行测试
-
-```bash
-# 运行所有通知系统测试
-cargo test --lib openclaw_notifier
-
-# 运行特定测试
-cargo test --lib test_get_urgency
-
-# 运行所有测试（包括需要 tmux 的集成测试）
-cargo test --lib
-```
-
-### 构建
-
-```bash
-# Debug 构建
-cargo build
-
-# Release 构建
-cargo build --release
-
-# 构建后二进制位置
-./target/release/cam
-```
-
-### 添加新事件类型
-
-1. 在 `get_urgency()` 中添加 urgency 分类
-2. 在 `format_event()` 中添加消息格式化
-3. 在 `build_event_object()` 中添加结构化 payload
-4. 在 `generate_summary()` 中添加摘要生成
-5. 在 `main.rs` 的 `needs_snapshot` 中决定是否需要终端快照
-6. 添加对应的单元测试
-
-### 更新插件二进制
-
-修改代码后，需要更新插件目录的二进制文件：
+### 构建和更新
 
 ```bash
 cargo build --release
 cp target/release/cam plugins/cam/bin/cam
 openclaw gateway restart
+
+# 重启 watcher（更新后必须）
+kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
 ```
 
-### 通知系统架构（2026-02 更新）
+### 数据存储
 
-```
-Claude Code Hook / Watcher Daemon
-       │
-       ▼
-  cam notify
-       │
-       ▼
-┌──────────────────┐
-│ OpenclawNotifier │
-├──────────────────┤
-│ 1. 解析 context  │
-│ 2. 判断 urgency  │
-│ 3. 创建 payload  │
-│ 4. 路由发送      │
-└──────────────────┘
-       │
-       ├─── HIGH/MEDIUM ──▶ openclaw system event (结构化 payload)
-       │                           │
-       │                           ▼
-       │                    OpenClaw Agent (AI 处理)
-       │                           │
-       │                           ▼
-       │                    channel (Telegram/WhatsApp)
-       │
-       └─── LOW ──────────▶ 静默（不发送）
-```
-
-### Payload 格式
-
-HIGH/MEDIUM urgency 事件发送结构化 JSON payload：
-
-```json
-{
-  "type": "cam_notification",
-  "version": "1.0",
-  "urgency": "HIGH",
-  "event_type": "permission_request",
-  "agent_id": "cam-xxx",
-  "project": "/path/to/project",
-  "summary": "请求执行 Bash 工具",
-  "event": { "tool_name": "Bash", "tool_input": {...} },
-  "timestamp": "2026-02-08T00:00:00Z"
-}
-```
-
-### 快捷回复
-
-用户可以用简单的 y/n 回复，而不需要输入 agent_id：
-
-| 用户输入 | 处理方式 |
-|----------|----------|
-| y / yes / 是 / 好 / 可以 | 发送 "y" 到等待中的 agent |
-| n / no / 否 / 不 / 取消 | 发送 "n" 到等待中的 agent |
-| 1 / 2 / 3 | 发送对应选项到等待中的 agent |
-
-### 通知格式（2026-02 更新）
-
-**新格式示例**：
-
-等待选择：
-```
-⏸️ myproject 等待选择
-
-1. 学习/练习项目
-2. 个人实用工具
-3. 演示/面试项目
-
-回复数字选择 `cam-1770529396`
-```
-
-请求确认：
-```
-⏸️ myproject 请求确认
-
-Write to /tmp/test.txt?
-
-回复 y/n `cam-1770529396`
-```
-
-权限请求：
-```
-🔐 myproject 请求权限
-
-执行: Bash
-rm -rf /tmp/test
-
-回复 y 允许 / n 拒绝 `cam-1770529396`
-```
-
-完成/退出（不显示 agent_id，因为不需要回复）：
-```
-✅ myproject 已完成
-```
-
-**格式改进**：
-- 用项目名替代 agent_id（如 `cam-1770529396` → `myproject`）
-- 过滤终端噪音（状态栏、进度条、分隔线）
-- 智能提取选项和问题内容
-- 使用 Telegram monospace 格式包裹 agent_id（方便点击复制）
-- 只有需要回复的事件才显示 agent_id 标记
-
-### 会话类型
-
-| 类型 | agent_id 格式 | 来源 | 通知 | 远程回复 |
-|------|--------------|------|------|---------|
-| CAM 管理 | `cam-xxxxxxxx` | 通过 CAM 启动 | ✅ 发送 | ✅ 支持 |
-| 外部会话 | `ext-xxxxxxxx` | 直接运行 `claude` | ❌ 过滤 | ❌ 不支持 |
-
-**外部会话说明**：
-- 用户直接在终端运行 `claude` 产生的会话
-- CAM 自动注册为 `ext-{session_id前8位}`
-- 不发送通知（因为无法远程回复，通知只会造成打扰）
-- 用户需要在终端直接操作
-
-## 通知链路调试指南
-
-本章节记录通知链路的完整架构和逐层调试方法，基于 2026-02 调查总结。
-
-### 1. 通知链路架构
-
-```
-Watcher Daemon → input_detector → notifier.send_event → openclaw system event → Gateway → Telegram
-```
-
-完整数据流：
-1. **Watcher Daemon** 轮询 tmux 会话，获取终端输出
-2. **input_detector** 分析终端内容，检测等待输入模式
-3. **notifier.send_event** 根据 urgency 决定是否发送
-4. **openclaw system event** 将结构化 payload 发送到 Gateway
-5. **Gateway** 路由到 OpenClaw Agent 进行 AI 处理
-6. **Telegram** 最终用户收到通知
-
-### 2. 每个环节的检查方法
-
-#### Step 1: Watcher 检测层
-
-```bash
-# 检查 watcher 是否运行
-ps aux | grep "cam watch-daemon" | grep -v grep
-
-# 检查 watcher PID 文件
-cat ~/.claude-monitor/watcher.pid
-
-# 检查 agent 是否在列表
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
-
-# 检查特定 agent 状态
-echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agent_status","arguments":{"agent_id":"<AGENT_ID>"}}}' | ./target/release/cam serve 2>/dev/null | jq -r '.result.content[0].text'
-
-# 手动运行 watcher 查看详细输出
-./target/release/cam watch-daemon -i 2 2>&1
-```
-
-#### Step 2: Input Detector 层
-
-```bash
-# 直接查看 agent 终端输出（最近 15 行）
-command tmux capture-pane -t <AGENT_ID> -p -S -15
-
-# 检查是否包含等待输入模式
-command tmux capture-pane -t <AGENT_ID> -p -S -15 | grep -E '\[Y/n\]|\[Y\]es|❯|>'
-```
-
-#### Step 3: OpenClaw 发送层
-
-```bash
-# 使用 dry-run 测试通知（不实际发送）
-echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event WaitingForInput --agent-id <AGENT_ID> --dry-run
-
-# 检查 gateway 状态
-openclaw gateway status
-
-# 查看 gateway 日志
-tail -50 ~/.openclaw/logs/gateway.log
-
-# 手动测试 system event
-openclaw system event --text '{"type":"test"}' --mode now
-```
-
-#### Step 4: Telegram 接收层
-
-```bash
-# 检查 channel 配置
-cat ~/.openclaw/openclaw.json | jq '.channels'
-
-# 手动测试直接发送到 Telegram
-openclaw message send --channel telegram --target <CHAT_ID> --message "test"
-```
-
-### 3. 常见问题
-
-| 问题 | 症状 | 解决方案 |
-|------|------|---------|
-| Watcher 未运行 | 无检测日志，PID 文件不存在 | `./target/release/cam watch-daemon -i 3 &` |
-| Agent 不在列表 | agent_status 返回 null | 检查 `~/.claude-monitor/agents.json` 或重新启动 agent |
-| Gateway 异常 | system event 失败 | `openclaw gateway restart` |
-| 网络问题 | Telegram API 超时/失败 | 检查 VPN/网络连接 |
-| ❯ 提示符未检测 | is_waiting=false 但终端显示 ❯ | 确保 input_detector 支持 Unicode ❯ (U+276F) |
-| 检测行数不足 | 状态栏覆盖实际内容 | 增加 get_last_lines 参数到 15 行 |
-| 空闲检测延迟 | 3 秒等待与轮询冲突 | 使用 detect_immediate() 替代 detect() |
-
-### 4. 本次调查发现的问题（2026-02）
-
-1. **❯ 提示符检测**
-   - 问题：Claude Code 使用 Unicode ❯ (U+276F) 作为主提示符
-   - 位置：`src/input_detector.rs`
-   - 解决：在 `CLAUDE_PROMPT_PATTERNS` 中添加 `❯\s*$` 模式
-
-2. **检测行数不足**
-   - 问题：`get_last_lines(5)` 获取的行数被状态栏占用，实际内容被截断
-   - 位置：`src/agent_watcher.rs` 的 `check_agent_status()`
-   - 解决：增加到 `get_last_lines(15)` 确保捕获足够内容
-
-3. **空闲检测冲突**
-   - 问题：`detect()` 方法内置 3 秒等待，与 watcher 轮询间隔冲突
-   - 位置：`src/input_detector.rs`
-   - 解决：新增 `detect_immediate()` 方法，跳过等待直接检测
-
-4. **网络问题**
-   - 问题：Telegram API 请求在某些网络环境下失败
-   - 解决：检查 VPN 连接，或使用 `--dry-run` 先验证逻辑正确性
-
-### 5. 调试流程示例
-
-完整的端到端调试流程：
-
-```bash
-# 1. 确认 watcher 运行
-ps aux | grep "cam watch-daemon"
-
-# 2. 确认 agent 在列表中
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
-
-# 3. 查看 agent 终端内容
-command tmux capture-pane -t cam-xxxxxxx -p -S -15
-
-# 4. 测试 dry-run 通知
-echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event WaitingForInput --agent-id cam-xxxxxxx --dry-run
-
-# 5. 如果 dry-run 成功，检查 gateway
-openclaw gateway status
-
-# 6. 如果 gateway 正常，检查网络
-openclaw message send --channel telegram --target <CHAT_ID> --message "debug test"
-```
-
-## Agent Teams 集成（2026-02）
-
-CAM 支持与 Claude Code Agent Teams 原生集成，允许远程管理 Team 协作。
-
-### 概念
-
-- **Agent Teams**: Claude Code 的原生多 Agent 协作功能
-- **Team Bridge**: CAM 与 Agent Teams 的桥接模块
-- **Inbox Watcher**: 监控 Team inbox 并路由通知
-
-### 文件结构
-
-Agent Teams 使用文件系统存储状态：
-
-```
-~/.claude/teams/{team-name}/
-├── config.json           # Team 配置（成员列表）
-├── inboxes/
-│   ├── {member-name}.json  # 每个成员的收件箱
-│   └── ...
-└── ...
-
-~/.claude/tasks/{team-name}/
-├── {task-id}.json        # 任务详情
-└── ...
-```
-
-### CLI 命令
-
-#### Team 管理
-
-```bash
-# 创建新 Team
-cam team-create <team-name> [--description <desc>]
-
-# 删除 Team
-cam team-delete <team-name>
-
-# 查看 Team 状态（成员、任务、待处理请求）
-cam team-status <team-name> [--json]
-```
-
-#### Inbox 操作
-
-```bash
-# 读取成员收件箱
-cam inbox <team> <member> [--json] [--unread-only]
-
-# 发送消息到成员收件箱
-cam inbox-send <team> <member> --message <text> [--from <sender>]
-```
-
-#### Team 监控
-
-```bash
-# 监控 Team 的所有 inbox（阻塞式）
-cam team-watch <team>
-
-# 监控所有 Teams
-cam team-watch --all
-```
-
-### MCP 工具
-
-CAM MCP Server 提供以下 Team 相关工具：
-
-| 工具 | 描述 |
+| 路径 | 说明 |
 |------|------|
-| `team_create` | 创建新 Team |
-| `team_delete` | 删除 Team |
-| `team_status` | 获取 Team 状态（成员、任务、待处理请求） |
-| `inbox_read` | 读取成员收件箱 |
-| `inbox_send` | 发送消息到成员收件箱 |
-| `team_pending_requests` | 获取待处理的权限请求 |
+| `~/.claude-monitor/agents.json` | 运行中的代理 |
+| `~/.claude-monitor/watcher.pid` | Watcher PID |
+| `~/.claude-monitor/hook.log` | Hook 日志 |
+| `~/.claude-monitor/conversation_state.json` | 对话状态 |
+| `~/.claude/teams/` | Agent Teams |
+| `~/.claude/tasks/` | 任务列表 |
 
 ### 通知路由
 
-Inbox Watcher 根据消息类型决定通知策略：
+| Urgency | 事件 | 行为 |
+|---------|------|------|
+| HIGH | permission_request, Error, WaitingForInput | 立即发送 |
+| MEDIUM | AgentExited, idle_prompt | 发送 |
+| LOW | session_start, stop | 静默 |
 
-| 消息类型 | Urgency | 通知行为 |
-|----------|---------|---------|
-| `permission_request` | HIGH | 立即通知用户 |
-| `task_assignment` | MEDIUM | 通知用户 |
-| `idle_notification` | - | 静默 |
-| `shutdown_approved` | - | 静默 |
-| 包含 "error/错误/失败" | HIGH | 立即通知用户 |
-| 包含 "完成/completed/done" | MEDIUM | 通知用户 |
-| 有 summary 字段 | LOW | 通知用户 |
-| 其他普通消息 | - | 静默 |
+### 会话类型
 
-### 使用示例
-
-#### 远程管理 Team
-
-```bash
-# 1. 查看当前 Team 状态
-cam team-status my-project
-
-# 2. 查看待处理的权限请求
-cam team-status my-project --json | jq '.pending_requests'
-
-# 3. 读取特定成员的消息
-cam inbox my-project developer --unread-only
-
-# 4. 回复成员
-cam inbox-send my-project developer --message "已批准，请继续" --from team-lead
-```
-
-#### 启动 Team 监控
-
-```bash
-# 在后台监控 Team（会自动发送通知到 Telegram）
-cam team-watch my-project &
-
-# 或监控所有 Teams
-cam team-watch --all &
-```
-
-### Agent ID 格式
-
-Team 成员使用 `{name}@{team}` 格式标识：
-
-```
-developer@my-project
-tester@my-project
-```
-
-### 模块说明
-
-#### TeamBridge (`src/team_bridge.rs`)
-
-提供与 Agent Teams 文件系统的交互：
-
-- `create_team()` / `delete_team()` - Team 生命周期管理
-- `read_inbox()` / `send_message()` - Inbox 读写
-- `list_teams()` / `get_team_status()` - 状态查询
-
-#### InboxWatcher (`src/inbox_watcher.rs`)
-
-监控 inbox 目录变化并触发通知：
-
-- 轮询检测新消息
-- 根据消息类型判断 urgency
-- 通过 OpenclawNotifier 发送通知
-
-### 测试
-
-```bash
-# 运行 Team Bridge 测试
-cargo test --lib team_bridge
-
-# 运行 Inbox Watcher 测试
-cargo test --lib inbox_watcher
-```
-
-## Agent Teams 编排（2026-02 新增）
-
-CAM 支持完整的 Agent Teams 编排功能，包括在 Team 中启动 Agent、对话状态管理、智能通知汇总。
-
-### 新增模块
-
-| 模块 | 文件 | 说明 |
+| 类型 | 格式 | 通知 |
 |------|------|------|
-| TeamOrchestrator | `src/team_orchestrator.rs` | Team 编排核心（启动 Agent、进度聚合、任务分配） |
-| ConversationStateManager | `src/conversation_state.rs` | 对话状态管理（快捷回复、pending confirmation 追踪） |
-| NotificationSummarizer | `src/notification_summarizer.rs` | 智能通知汇总（风险评估、自然语言描述） |
+| CAM 管理 | `cam-xxxxxxxx` | 发送 |
+| 外部会话 | `ext-xxxxxxxx` | 过滤 |
 
-### 新增 CLI 命令
+## 详细文档
 
-```bash
-# 在 Team 中启动 Agent
-cam team-spawn <team> <name> [--type <agent_type>] [--prompt <initial_prompt>] [--json]
+- [开发指南](docs/development.md) - 项目结构、构建、扩展
+- [调试指南](docs/debugging.md) - 问题排查、链路调试
+- [测试指南](docs/testing.md) - 测试场景、端到端测试
+- [Agent Teams Skill](skills/agent-teams/SKILL.md) - Team 编排详细用法
+- [通知处理 Skill](skills/cam-notify/SKILL.md) - 通知类型和处理流程
+- [E2E 测试 Skill](skills/cam-e2e-test/SKILL.md) - 端到端测试流程
 
-# 获取 Team 聚合进度
-cam team-progress <team> [--json]
+## 开发原则
 
-# 优雅关闭 Team
-cam team-shutdown <team>
+### 避免硬编码 AI 工具特定模式
 
-# 查看待处理确认
-cam pending-confirmations [--json]
+CAM 需要兼容多种 AI 编码工具（Claude Code、Codex、OpenCode 等），**不要硬编码特定工具的模式**。
 
-# 快捷回复
-cam reply <reply> [--target <agent_id>]
+**错误示例**：
+```rust
+// ❌ 硬编码 Claude Code 特定状态
+static PROCESSING_PATTERNS: &[&str] = &[
+    "Hatching…",
+    "Brewing…",
+    "Thinking…",
+];
+
+// ❌ 硬编码终端清理模式
+static NOISE_PATTERNS: &[&str] = &[
+    r"(?m)^.*Brewing.*$",
+    r"(?m)^.*Thinking.*$",
+];
 ```
 
-### 新增 MCP 工具
-
-| 工具 | 描述 | 参数 |
-|------|------|------|
-| `team_spawn_agent` | 在 Team 中启动 Agent | `team`, `name`, `agent_type`, `initial_prompt` |
-| `team_progress` | 获取 Team 聚合进度 | `team` |
-| `team_shutdown` | 优雅关闭 Team | `team` |
-| `get_pending_confirmations` | 获取待处理确认 | - |
-| `reply_pending` | 回复待处理确认 | `reply`, `target` (可选) |
-| `team_orchestrate` | 根据任务描述创建 Team | `task_desc`, `project` |
-| `team_assign_task` | 分配任务给成员 | `team`, `member`, `task` |
-| `handle_user_reply` | 处理自然语言回复 | `reply`, `context` (可选) |
-
-### 快捷回复支持
-
-用户可以用简单的 y/n/1/2/3 回复，系统自动路由到正确的 Agent：
-
-| 用户输入 | 标准化为 | 说明 |
-|----------|----------|------|
-| y / yes / 是 / 好 / 可以 / 批准 | "y" | 批准操作 |
-| n / no / 否 / 不 / 取消 / 拒绝 | "n" | 拒绝操作 |
-| 1 / 2 / 3 / 4 | "1" / "2" / "3" / "4" | 选择选项 |
-
-### 风险评估
-
-NotificationSummarizer 自动评估权限请求的风险等级：
-
-| 风险 | 示例 | 显示 |
-|------|------|------|
-| ✅ 低 | `ls`, `cat`, `/tmp` 文件 | 安全操作 |
-| ⚠️ 中 | `npm install`, 项目文件 | 请确认 |
-| 🔴 高 | `rm -rf`, `sudo`, 系统文件 | 高风险警告 |
-
-**Bash 命令风险评估规则**：
-- 高风险：`rm -rf`, `sudo`, `chmod 777`, `curl | sh`, `> /dev/`
-- 中风险：`npm install`, `cargo build`, `git push`, `docker`
-- 低风险：`ls`, `cat`, `echo`, `pwd`, `cd`
-
-**文件路径风险评估规则**：
-- 高风险：`/etc/`, `/usr/`, `~/.ssh/`, `~/.aws/`, 系统配置
-- 中风险：项目目录内的文件
-- 低风险：`/tmp/`, `/var/tmp/`, 缓存目录
-
-### 对话状态存储
-
-对话状态存储在 `~/.claude-monitor/conversation_state.json`：
-
-```json
-{
-  "current_team": "my-project",
-  "current_agent": {
-    "agent_id": "cam-xxx",
-    "team": "my-project",
-    "name": "developer"
-  },
-  "pending_confirmations": [
-    {
-      "id": "conf-xxx",
-      "agent_id": "cam-xxx",
-      "team": "my-project",
-      "confirmation_type": {
-        "PermissionRequest": {
-          "tool": "Bash",
-          "input": {"command": "npm install"}
-        }
-      },
-      "context": "安装依赖",
-      "created_at": "2026-02-08T00:00:00Z"
+**正确做法**：使用 Haiku API 进行智能判断
+```rust
+// ✅ 使用 AI 判断 agent 状态
+pub fn is_processing(content: &str) -> bool {
+    use crate::anthropic::{is_agent_processing, AgentStatus};
+    match is_agent_processing(content) {
+        AgentStatus::Processing => true,
+        AgentStatus::WaitingForInput => false,
+        AgentStatus::Unknown => false,
     }
-  ]
 }
+
+// ✅ 使用 AI 提取问题内容
+pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, String, String)>
 ```
 
-### 测试新功能
+**关键模块**：
+- `src/anthropic.rs` - Haiku API 客户端，包含：
+  - `is_agent_processing()` - 判断 agent 是否在处理中
+  - `extract_question_with_haiku()` - 提取问题和选项
+  - `extract_notification_content()` - 提取通知内容
+- `src/notification/terminal_cleaner.rs` - 只有 `is_processing()` 函数，调用 AI 判断
+- `src/notification/formatter.rs` - 消息格式化，使用 AI 提取问题
 
-```bash
-# 测试 Team 编排
-cargo test --lib team_orchestrator
+**原则**：
+1. 状态判断用 AI，不用正则
+2. 内容提取用 AI，不用硬编码模式
+3. 回退策略：AI 失败时显示原始内容的最后 N 行
 
-# 测试对话状态管理
-cargo test --lib conversation_state
-
-# 测试通知汇总
-cargo test --lib notification_summarizer
-
-# 端到端测试
-# 1. 创建 Team
-cam team-create test-team --description "测试团队"
-
-# 2. 在 Team 中启动 Agent
-cam team-spawn test-team developer --prompt "你好"
-
-# 3. 查看进度
-cam team-progress test-team
-
-# 4. 查看待处理确认
-cam pending-confirmations
-
-# 5. 快捷回复
-cam reply y
-
-# 6. 关闭 Team
-cam team-shutdown test-team
-```
-
-### 自然语言意图识别
-
-TeamOrchestrator 支持自然语言意图识别：
-
-| 用户输入 | 识别意图 | 操作 |
-|----------|----------|------|
-| "启动一个团队做 xxx" | CreateTeam | `team_orchestrate` |
-| "看看团队进度" | CheckProgress | `team_progress` |
-| "给 developer 分配任务" | AssignTask | `team_assign_task` |
-| "y" / "批准" | Approve | `reply_pending("y")` |
-| "n" / "拒绝" | Reject | `reply_pending("n")` |
-| "停掉团队" | Shutdown | `team_shutdown` |

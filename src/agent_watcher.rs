@@ -7,6 +7,7 @@ use crate::tmux::TmuxManager;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tracing::{info, debug};
 
 /// 监控事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -106,15 +107,16 @@ impl AgentWatcher {
 
         // 获取所有活跃的 agent
         let agents = self.agent_manager.list_agents()?;
-        eprintln!("轮询 {} 个 agent", agents.len());
+        debug!(agent_count = agents.len(), "Polling agents");
         for agent in &agents {
-            eprintln!("  - {}", agent.agent_id);
+            debug!(agent_id = %agent.agent_id, "  - checking agent");
         }
 
         // 检查每个 agent
         for agent in &agents {
             // 1. 检查 tmux session 是否存活
             if !self.tmux.session_exists(&agent.tmux_session) {
+                info!(agent_id = %agent.agent_id, "Agent tmux session exited");
                 events.push(WatchEvent::AgentExited {
                     agent_id: agent.agent_id.clone(),
                     project_path: agent.project_path.clone(),
@@ -159,14 +161,17 @@ impl AgentWatcher {
             }
 
             // 3. 检测输入等待状态
-            if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 30) {
+            if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50) {
                 let wait_result = self.input_detector.detect_immediate(&output);
-                eprintln!("  {} 检测结果: is_waiting={}, pattern={:?}",
-                    agent.agent_id,
-                    wait_result.is_waiting,
-                    wait_result.pattern_type);
                 let was_waiting = self.last_waiting_state.get(&agent.agent_id).copied().unwrap_or(false);
-                eprintln!("  {} was_waiting={}", agent.agent_id, was_waiting);
+
+                debug!(
+                    agent_id = %agent.agent_id,
+                    is_waiting = wait_result.is_waiting,
+                    pattern = ?wait_result.pattern_type,
+                    was_waiting = was_waiting,
+                    "Input wait detection"
+                );
 
                 if wait_result.is_waiting && !was_waiting {
                     // 新进入等待状态
@@ -175,6 +180,12 @@ impl AgentWatcher {
                         .map(|p| format!("{:?}", p))
                         .unwrap_or_else(|| "Unknown".to_string());
 
+                    info!(
+                        agent_id = %agent.agent_id,
+                        pattern_type = %pattern_type,
+                        "Agent entered waiting state, generating WaitingForInput event"
+                    );
+
                     events.push(WatchEvent::WaitingForInput {
                         agent_id: agent.agent_id.clone(),
                         pattern_type,
@@ -182,12 +193,20 @@ impl AgentWatcher {
                     });
                 } else if !wait_result.is_waiting && was_waiting {
                     // 从等待状态恢复
+                    info!(agent_id = %agent.agent_id, "Agent resumed from waiting state");
                     events.push(WatchEvent::AgentResumed {
                         agent_id: agent.agent_id.clone(),
                     });
                 }
 
                 self.last_waiting_state.insert(agent.agent_id.clone(), wait_result.is_waiting);
+            }
+        }
+
+        if !events.is_empty() {
+            info!(event_count = events.len(), "Poll generated events");
+            for event in &events {
+                info!(event = ?event, "  - event");
             }
         }
 
@@ -212,7 +231,7 @@ impl AgentWatcher {
         };
 
         // 检测输入等待状态
-        let waiting_for_input = if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 20) {
+        let waiting_for_input = if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50) {
             let result = self.input_detector.detect_immediate(&output);
             if result.is_waiting {
                 Some(result)

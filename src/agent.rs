@@ -175,6 +175,7 @@ impl AgentManager {
         let lock_path = self.lock_file_path();
         let lock_file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&lock_path)?;
 
@@ -203,6 +204,7 @@ impl AgentManager {
         let lock_path = self.lock_file_path();
         let lock_file = OpenOptions::new()
             .create(true)
+            .truncate(true)
             .write(true)
             .open(&lock_path)?;
 

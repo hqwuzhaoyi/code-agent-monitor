@@ -394,7 +394,10 @@ impl OpenclawNotifier {
     /// 2. 终端快照从 event.terminal_snapshot 获取，数据来源清晰
     /// 3. 类型安全，避免参数混淆
     /// 4. 内置去重机制，防止重复通知
+    /// 5. 检测处理中状态，避免发送无意义通知
     pub fn send_notification_event(&self, event: &NotificationEvent) -> Result<SendResult> {
+        use crate::notification::terminal_cleaner::is_processing;
+
         let total_start = std::time::Instant::now();
         let agent_id = &event.agent_id;
 
@@ -405,6 +408,18 @@ impl OpenclawNotifier {
             }
             debug!(agent_id = %agent_id, "Skipping external session notification");
             return Ok(SendResult::Skipped("external session".to_string()));
+        }
+
+        // 检测处理中状态（使用 AI 判断，兼容 Claude Code/Codex/OpenCode 等）
+        // 如果 agent 正在处理中，不发送 idle_prompt 通知
+        if let Some(ref snapshot) = event.terminal_snapshot {
+            if is_processing(snapshot) {
+                if self.dry_run {
+                    eprintln!("[DRY-RUN] Agent is processing (AI detection), skipping: {}", agent_id);
+                }
+                debug!(agent_id = %agent_id, "Skipping notification - agent is processing");
+                return Ok(SendResult::Skipped("agent processing".to_string()));
+            }
         }
 
         // 获取事件类型字符串用于 urgency 判断
@@ -635,7 +650,6 @@ impl Default for OpenclawNotifier {
 mod tests {
     use super::*;
     use crate::notification::formatter::MessageFormatter;
-    use crate::notification::terminal_cleaner::{clean_terminal_context, find_context_start};
 
     #[test]
     fn test_get_urgency_high() {
@@ -1139,84 +1153,7 @@ $ cargo build
         assert_eq!(name4, "ext-123");
     }
 
-    #[test]
-    fn test_clean_terminal_context() {
-        // 测试：保留选项和问题（Claude Code 格式：选项在前，问题在后）
-        let raw = "Old content\n─────────────\n> \n📡 via direct\n1. Option one\n2. Option two\nActual question?";
-        let cleaned = clean_terminal_context(raw);
-        // 应该保留选项和问题
-        assert!(cleaned.contains("Actual question?"));
-        assert!(cleaned.contains("1. Option one"));
-        assert!(cleaned.contains("2. Option two"));
-        assert!(!cleaned.contains("─────"));
-        assert!(!cleaned.contains("📡 via direct"));
-        // Old content 应该被过滤掉（因为在选项之前）
-        assert!(!cleaned.contains("Old content"));
-    }
-
     // ==================== 新格式集成测试 ====================
-
-    #[test]
-    fn test_clean_terminal_context_real_output() {
-        // 测试实际的 Claude Code 终端输出
-        let raw = r#"  1. 核心功能 - 添加、删除、标记完成/未完成
-  2. 筛选功能 - 全部/已完成/未完成 切换显示
-  3. 编辑功能 - 双击编辑任务标题
-  4. 清空已完成 - 一键删除所有已完成任务
-
-  推荐选 1 和 2，保持简单实用。你想要哪些？
-
-❯ 1
-
-⏺ 好的，只保留核心功能：添加、删除、标记完成。
-
-  我现在对需求有清晰的理解了，让我呈现设计方案。
-
-  ---
-  设计方案 - 第一部分：项目结构
-
-  react-todo/
-  ├── src/
-  │   ├── components/
-  │   │   ├── TodoInput.tsx      # 输入框组件
-  │   │   ├── TodoItem.tsx       # 单个任务项
-  │   │   └── TodoList.tsx       # 任务列表容器
-  │   ├── hooks/
-  │   │   └── useTodos.ts        # Todo 逻辑 + localStorage 持久化
-  │   ├── types/
-  │   │   └── todo.ts            # Todo 类型定义
-  │   ├── App.tsx                # 主应用组件
-  │   ├── main.tsx               # 入口文件
-  │   └── index.css              # Tailwind 入口
-  ├── index.html
-  ├── package.json
-  ├── tailwind.config.js
-  ├── tsconfig.json
-  └── vite.config.ts
-
-  核心设计决策：
-  - 使用自定义 Hook useTodos 封装所有状态逻辑和 localStorage 操作
-  - 组件保持纯展示，逻辑集中在 Hook 中
-  - 扁平结构，不过度拆分
-
-  这个结构看起来合适吗？
-
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-❯
-────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
-  [Opus 4.6] ███░░░░░░░ 27% | ⏱️  1h 44m
-  workspace git:(main*)
-  2 MCPs | 5 hooks
-  ✓ Skill ×1 | ✓ Bash ×1"#;
-
-        let cleaned = clean_terminal_context(raw);
-        println!("=== Cleaned output ===");
-        println!("{}", cleaned);
-        println!("=== End ===");
-
-        // 应该包含最后一个问题
-        assert!(cleaned.contains("这个结构看起来合适吗？"), "Should contain the question");
-    }
 
     #[test]
     fn test_format_notification_with_no_ai_fallback() {
@@ -1255,195 +1192,6 @@ But contains a question somewhere"#;
 
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-    }
-
-    #[test]
-    fn test_clean_terminal_context_open_question_with_context() {
-        // 测试开放式问题（无选项）保留前面的上下文
-        let context = r#"❯ 1
-
-⏺ 好的，保持最简单。
-
-我现在对需求有了清晰的理解，让我分段呈现设计方案。
-
----
-设计方案 - 第一部分：项目结构
-
-react-todo/
-├── src/
-│   ├── components/
-│   │   ├── TodoInput.tsx
-│   │   ├── TodoItem.tsx
-│   │   └── TodoList.tsx
-│   ├── hooks/
-│   │   └── useTodos.ts
-│   └── App.tsx
-
-设计思路：
-- 组件职责单一
-- 状态集中管理
-
-这部分结构看起来合适吗？"#;
-
-        let cleaned = clean_terminal_context(context);
-
-        // 应该包含问题
-        assert!(cleaned.contains("这部分结构看起来合适吗"), "Should contain the question");
-        // 应该包含目录结构（上下文）
-        assert!(cleaned.contains("react-todo/"), "Should contain directory structure");
-        assert!(cleaned.contains("├── src/"), "Should contain tree structure");
-        assert!(cleaned.contains("TodoInput.tsx"), "Should contain file names");
-        // 应该包含设计说明
-        assert!(cleaned.contains("设计方案"), "Should contain section title");
-        // 不应该包含分隔符之前的内容
-        assert!(!cleaned.contains("好的，保持最简单"), "Should NOT contain content before separator");
-        assert!(!cleaned.contains("❯ 1"), "Should NOT contain user input");
-    }
-
-    #[test]
-    fn test_clean_terminal_context_open_question_with_code_block() {
-        // 测试开放式问题保留代码块上下文
-        let context = r#"⏺ 修改后的代码：
-
-fn main() {
-    let items = vec![1, 2, 3];
-    for item in items {
-        println!("{}", item);
-    }
-}
-
-这样修改可以吗？"#;
-
-        let cleaned = clean_terminal_context(context);
-
-        // 应该包含问题
-        assert!(cleaned.contains("这样修改可以吗"), "Should contain the question");
-        // 应该包含代码
-        assert!(cleaned.contains("fn main()"), "Should contain code");
-        assert!(cleaned.contains("println!"), "Should contain code content");
-        // 不应该包含 agent 响应标记
-        assert!(!cleaned.contains("⏺"), "Should NOT contain agent marker");
-    }
-
-    #[test]
-    fn test_clean_terminal_context_open_question_max_lines() {
-        // 测试上下文行数限制（最多 15 行）
-        // 实际场景：有分隔符的情况下，从分隔符后开始
-        let mut lines = Vec::new();
-        // 添加早期内容
-        for i in 1..=5 {
-            lines.push(format!("Early line {}", i));
-        }
-        // 添加分隔符
-        lines.push("---".to_string());
-        // 添加 20 行内容（超过 15 行限制）
-        for i in 1..=20 {
-            lines.push(format!("Content line {}", i));
-        }
-        lines.push("这个方案可以吗？".to_string());
-
-        let context = lines.join("\n");
-        let cleaned = clean_terminal_context(&context);
-
-        // 应该包含问题
-        assert!(cleaned.contains("这个方案可以吗"), "Should contain the question");
-        // 应该包含分隔符后的内容
-        assert!(cleaned.contains("Content line 20"), "Should contain recent content");
-        // 不应该包含分隔符之前的内容
-        assert!(!cleaned.contains("Early line"), "Should NOT contain content before separator");
-    }
-
-    #[test]
-    fn test_find_context_start_stops_at_separator() {
-        // 测试 find_context_start 在分隔符处停止
-        let lines = vec![
-            "早期内容",
-            "---",
-            "设计方案",
-            "代码结构",
-            "这个可以吗？",
-        ];
-
-        let start = find_context_start(&lines, 4);
-
-        // 应该从分隔符后开始（索引 2）
-        assert_eq!(start, 2, "Should start after separator");
-    }
-
-    #[test]
-    fn test_find_context_start_stops_at_user_input() {
-        // 测试 find_context_start 在用户输入处停止
-        let lines = vec![
-            "之前的问题",
-            "❯ 1",
-            "新的内容",
-            "代码结构",
-            "这个可以吗？",
-        ];
-
-        let start = find_context_start(&lines, 4);
-
-        // 应该从用户输入后开始（索引 2）
-        assert_eq!(start, 2, "Should start after user input");
-    }
-
-    #[test]
-    fn test_find_context_start_stops_at_agent_response() {
-        // 测试 find_context_start 在 agent 响应处停止
-        let lines = vec![
-            "之前的内容",
-            "⏺ 好的，我来处理",
-            "新的设计",
-            "代码结构",
-            "这个可以吗？",
-        ];
-
-        let start = find_context_start(&lines, 4);
-
-        // 应该从 agent 响应后开始（索引 2）
-        assert_eq!(start, 2, "Should start after agent response");
-    }
-
-    #[test]
-    fn test_clean_terminal_context_preserves_question_before_user_input() {
-        // 测试修复：当用户已输入回复时，保留问题内容
-        // 场景：Agent 问"这部分结构看起来合适吗？"，用户回复"y"
-        // 修复前：问题会被丢弃，只剩下用户输入后的内容
-        // 修复后：应该保留问题内容
-        let context = r#"
-这是一个设计方案：
-
-1. 组件 A
-2. 组件 B
-3. 组件 C
-
-这部分结构看起来合适吗？
-❯ y
-好的，我继续执行
-❯ "#;
-
-        let cleaned = clean_terminal_context(context);
-
-        // 应该包含问题
-        assert!(cleaned.contains("这部分结构看起来合适吗"),
-            "Should preserve the question before user input. Got: {}", cleaned);
-    }
-
-    #[test]
-    fn test_clean_terminal_context_preserves_confirmation_before_user_input() {
-        // 测试修复：当用户已输入回复时，保留确认提示
-        let context = r#"
-Write to /tmp/test.txt?
-[Y]es / [N]o / [A]lways / [D]on't ask
-❯ y
-File written successfully
-❯ "#;
-
-        let cleaned = clean_terminal_context(context);
-
-        // 应该包含确认提示
-        assert!(cleaned.contains("[Y]es") || cleaned.contains("Write to"),
-            "Should preserve the confirmation prompt. Got: {}", cleaned);
     }
 
 }

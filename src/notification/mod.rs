@@ -34,7 +34,7 @@ pub use dispatcher::NotificationDispatcher;
 pub use builder::NotificationBuilder;
 pub use urgency::{Urgency, get_urgency};
 pub use payload::PayloadBuilder;
-pub use terminal_cleaner::{clean_terminal_context, is_question_line, find_context_start, NOISE_PATTERNS};
+pub use terminal_cleaner::is_processing;
 pub use formatter::{MessageFormatter, msg};
 pub use deduplicator::NotificationDeduplicator;
 pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};

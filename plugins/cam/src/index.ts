@@ -55,14 +55,23 @@ export default function (api) {
       project_path: Type.String({ description: "项目目录路径（必填）" }),
       agent_type: Type.Optional(Type.String({ description: "代理类型: claude/opencode/codex，默认 claude" })),
       prompt: Type.Optional(Type.String({ description: "初始提示词" })),
+      agent_id: Type.Optional(Type.String({ description: "自定义 agent ID（可选，默认自动生成）" })),
+      tmux_session: Type.Optional(Type.String({ description: "自定义 tmux session 名称（可选，默认使用 agent_id）" })),
     }),
     async execute(_id, params) {
       try {
+        // 生成默认的 agent_id 和 tmux_session（如果未提供）
+        const timestamp = Math.floor(Date.now() / 1000);
+        const agentId = params.agent_id || `cam-${timestamp}`;
+        const tmuxSession = params.tmux_session || agentId;
+
         // agent_start 需要更长的超时时间，因为要等待 Claude Code 就绪（最多 30 秒）
         const result = await callCamMcp("agent_start", {
           agent_type: params.agent_type || "claude",
           project_path: params.project_path,
           initial_prompt: params.prompt,  // MCP 工具期望 initial_prompt
+          agent_id: agentId,
+          tmux_session: tmuxSession,
         }, 45000);  // 45 秒超时
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (error) {

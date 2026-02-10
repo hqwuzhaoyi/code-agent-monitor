@@ -61,6 +61,7 @@ struct RawJsonlMessage {
 
 #[derive(Debug, Clone, Deserialize)]
 struct RawMessageContent {
+    #[allow(dead_code)]
     role: Option<String>,
     content: Option<serde_json::Value>,
 }
@@ -355,7 +356,7 @@ fn extract_tool_target(tool_name: &str, input: &serde_json::Value) -> Option<Str
         "Read" | "Edit" | "Write" => {
             input.get("file_path").and_then(|p| p.as_str()).map(|s| {
                 // 简化路径显示
-                s.split('/').last().unwrap_or(s).to_string()
+                s.split('/').next_back().unwrap_or(s).to_string()
             })
         }
         "Bash" => {
