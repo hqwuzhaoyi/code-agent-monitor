@@ -21,6 +21,7 @@ pub mod notification_summarizer;
 pub mod conversation_state;
 pub mod anthropic;
 pub mod notification;
+pub mod terminal_utils;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};

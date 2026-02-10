@@ -62,13 +62,6 @@ pub struct MessageFormatter {
     no_ai: bool,
 }
 
-/// 获取终端快照的最后 N 行（作为 AI 提取失败时的回退）
-fn get_last_lines(content: &str, n: usize) -> String {
-    let lines: Vec<&str> = content.lines().collect();
-    let start = lines.len().saturating_sub(n);
-    lines[start..].join("\n")
-}
-
 impl MessageFormatter {
     /// 创建新的 MessageFormatter
     pub fn new() -> Self {
@@ -363,9 +356,8 @@ impl MessageFormatter {
             }
         }
 
-        // 回退到显示最后 10 行
-        let last_lines = get_last_lines(context, 10);
-        format!("⏸️ {} {}\n\n{}\n\n{}", project_name, msg::WAITING_INPUT, last_lines.trim(), msg::REPLY_CONTENT)
+        // AI 提取失败，返回简洁提示
+        format!("⏸️ {} {}\n\n无法解析通知内容，请查看终端", project_name, msg::WAITING_INPUT)
     }
 
     /// 格式化错误通知
@@ -620,11 +612,11 @@ mod tests {
             "Do you want to continue? [Y/n]",
         );
 
-        // 简化后的格式：使用 Haiku 提取或显示原始内容
+        // AI 禁用时，返回简洁提示而非原始内容
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-        // 应该包含原始问题内容
-        assert!(message.contains("Do you want to continue?") || message.contains("[Y/n]"));
+        // 新行为：AI 提取失败时显示简洁提示
+        assert!(message.contains("无法解析通知内容，请查看终端"));
     }
 
     #[test]

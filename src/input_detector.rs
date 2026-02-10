@@ -1,8 +1,13 @@
 //! 输入等待检测模块 - 检测 Agent 是否在等待用户输入
+//!
+//! 使用 AI 判断 Agent 状态，避免硬编码特定工具的模式。
+//! 参考 CLAUDE.md "避免硬编码 AI 工具特定模式" 原则。
 
-use regex::Regex;
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
+
+use crate::anthropic::{is_agent_processing, AgentStatus};
+use crate::terminal_utils::truncate_for_status;
 
 /// 输入等待检测结果
 #[derive(Debug, Clone)]
@@ -16,6 +21,9 @@ pub struct InputWaitResult {
 }
 
 /// 等待输入的模式类型
+///
+/// 注意：使用 AI 判断时，无法区分具体类型，统一返回 `Other`。
+/// 保留这些类型是为了向后兼容。
 #[derive(Debug, Clone, PartialEq)]
 pub enum InputWaitPattern {
     /// Claude Code 的 > 提示符
@@ -30,11 +38,14 @@ pub enum InputWaitPattern {
     ColonPrompt,
     /// 权限请求
     PermissionRequest,
-    /// 其他等待模式
+    /// 其他等待模式（AI 判断时使用此类型）
     Other,
 }
 
 /// 输入等待检测器
+///
+/// 使用 AI 判断 Agent 是否在等待用户输入，而不是硬编码正则模式。
+/// 这样可以兼容不同的 AI 编码工具（Claude Code、Codex、OpenCode 等）。
 pub struct InputWaitDetector {
     /// 每个 session 的上次输出
     last_outputs: HashMap<String, String>,
@@ -42,8 +53,6 @@ pub struct InputWaitDetector {
     last_change_times: HashMap<String, Instant>,
     /// 空闲检测阈值（秒）
     idle_threshold: Duration,
-    /// 等待输入的正则模式
-    patterns: Vec<(Regex, InputWaitPattern)>,
 }
 
 impl InputWaitDetector {
@@ -54,54 +63,17 @@ impl InputWaitDetector {
 
     /// 创建带自定义空闲阈值的检测器
     pub fn with_idle_threshold(idle_threshold: Duration) -> Self {
-        let patterns = vec![
-            // Claude Code 的提示符（支持 > 和 ❯）
-            (Regex::new(r"(?m)^[>❯]\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
-            // Claude Code 的 ❯ 提示符（Unicode U+276F）
-            (Regex::new(r"❯\s*$").unwrap(), InputWaitPattern::ClaudePrompt),
-            // 确认提示 - 英文
-            (Regex::new(r"\[Y/n\]").unwrap(), InputWaitPattern::Confirmation),
-            (Regex::new(r"\[y/N\]").unwrap(), InputWaitPattern::Confirmation),
-            (Regex::new(r"\[yes/no\]").unwrap(), InputWaitPattern::Confirmation),
-            // Claude Code 实际格式: [Y]es / [N]o / [A]lways / [D]on't ask
-            (Regex::new(r"\[Y\]es\s*/\s*\[N\]o").unwrap(), InputWaitPattern::Confirmation),
-            (Regex::new(r"\[A\]lways").unwrap(), InputWaitPattern::Confirmation),
-            // 确认提示 - 中文
-            (Regex::new(r"\[是/否\]").unwrap(), InputWaitPattern::Confirmation),
-            (Regex::new(r"确认[？?]").unwrap(), InputWaitPattern::Confirmation),
-            // 按回车继续 - 英文
-            (Regex::new(r"(?i)press enter").unwrap(), InputWaitPattern::PressEnter),
-            (Regex::new(r"(?i)press any key").unwrap(), InputWaitPattern::PressEnter),
-            // 按回车继续 - 中文
-            (Regex::new(r"按.*继续").unwrap(), InputWaitPattern::PressEnter),
-            (Regex::new(r"回车继续").unwrap(), InputWaitPattern::PressEnter),
-            // 继续执行提示 - 英文
-            (Regex::new(r"(?i)continue\?").unwrap(), InputWaitPattern::Continue),
-            (Regex::new(r"(?i)proceed\?").unwrap(), InputWaitPattern::Continue),
-            // 继续执行提示 - 中文
-            (Regex::new(r"是否继续").unwrap(), InputWaitPattern::Continue),
-            (Regex::new(r"继续执行[？?]").unwrap(), InputWaitPattern::Continue),
-            // 权限请求 - 英文
-            (Regex::new(r"(?i)allow this action").unwrap(), InputWaitPattern::PermissionRequest),
-            (Regex::new(r"(?i)do you want to").unwrap(), InputWaitPattern::PermissionRequest),
-            // 权限请求 - 中文
-            (Regex::new(r"允许.*操作").unwrap(), InputWaitPattern::PermissionRequest),
-            (Regex::new(r"是否授权").unwrap(), InputWaitPattern::PermissionRequest),
-            // 冒号结尾的提示（最后一行以冒号结尾）- 英文和中文
-            (Regex::new(r"[：:]\s*$").unwrap(), InputWaitPattern::ColonPrompt),
-        ];
-
         Self {
             last_outputs: HashMap::new(),
             last_change_times: HashMap::new(),
             idle_threshold,
-            patterns,
         }
     }
 
     /// 检测是否在等待输入
     ///
-    /// 返回 Some(InputWaitResult) 如果检测到等待输入，否则返回 None
+    /// 使用 AI 判断 Agent 状态，而不是硬编码正则模式。
+    /// 只有在输出空闲（超过阈值时间没有变化）时才调用 AI 判断。
     pub fn detect(&mut self, session_name: &str, output: &str) -> InputWaitResult {
         let now = Instant::now();
 
@@ -136,46 +108,28 @@ impl InputWaitDetector {
             };
         }
 
-        // 获取最后几行作为上下文
-        let context = Self::get_last_lines(output, 30);
-
-        // 检测等待模式
-        for (pattern, pattern_type) in &self.patterns {
-            if pattern.is_match(&context) {
-                return InputWaitResult {
-                    is_waiting: true,
-                    pattern_type: Some(pattern_type.clone()),
-                    context,
-                };
-            }
-        }
-
-        // 空闲但没有匹配到特定模式
-        InputWaitResult {
-            is_waiting: false,
-            pattern_type: None,
-            context,
-        }
+        // 空闲状态，使用 AI 判断
+        self.detect_immediate(output)
     }
 
     /// 立即检测（不考虑空闲时间）
+    ///
+    /// 使用 AI 判断 Agent 是否在等待用户输入。
+    /// 这种方式比硬编码模式更灵活，可以兼容不同的 AI 编码工具。
     pub fn detect_immediate(&self, output: &str) -> InputWaitResult {
-        let context = Self::get_last_lines(output, 30);
+        let context = truncate_for_status(output);
 
-        for (pattern, pattern_type) in &self.patterns {
-            if pattern.is_match(&context) {
-                return InputWaitResult {
-                    is_waiting: true,
-                    pattern_type: Some(pattern_type.clone()),
-                    context,
-                };
-            }
-        }
-
-        InputWaitResult {
-            is_waiting: false,
-            pattern_type: None,
-            context,
+        match is_agent_processing(&context) {
+            AgentStatus::WaitingForInput => InputWaitResult {
+                is_waiting: true,
+                pattern_type: Some(InputWaitPattern::Other),
+                context,
+            },
+            AgentStatus::Processing | AgentStatus::Unknown => InputWaitResult {
+                is_waiting: false,
+                pattern_type: None,
+                context,
+            },
         }
     }
 
@@ -183,13 +137,6 @@ impl InputWaitDetector {
     pub fn clear_session(&mut self, session_name: &str) {
         self.last_outputs.remove(session_name);
         self.last_change_times.remove(session_name);
-    }
-
-    /// 获取最后 N 行
-    fn get_last_lines(text: &str, n: usize) -> String {
-        let lines: Vec<&str> = text.lines().collect();
-        let start = if lines.len() > n { lines.len() - n } else { 0 };
-        lines[start..].join("\n")
     }
 }
 
@@ -203,134 +150,20 @@ impl Default for InputWaitDetector {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_detect_claude_prompt() {
-        let detector = InputWaitDetector::new();
-        let output = "Some output\n>\n";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::ClaudePrompt));
-    }
+    // =========================================================================
+    // 单元测试 - 不需要 API
+    // =========================================================================
 
     #[test]
-    fn test_detect_claude_prompt_unicode() {
-        let detector = InputWaitDetector::new();
-        // Claude Code 使用 ❯ (U+276F) 作为提示符
-        let output = "Some output\n❯ \n";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::ClaudePrompt));
-    }
-
-    #[test]
-    fn test_detect_claude_prompt_unicode_end_of_line() {
-        let detector = InputWaitDetector::new();
-        // 实际 Claude Code 终端输出格式
-        let output = "选择一个选项：\n1. 选项一\n2. 选项二\n❯ ";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::ClaudePrompt));
-    }
-
-    #[test]
-    fn test_detect_confirmation_yn() {
-        let detector = InputWaitDetector::new();
-        let output = "Do you want to continue? [Y/n]";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::Confirmation));
-    }
-
-    #[test]
-    fn test_detect_confirmation_yN() {
-        let detector = InputWaitDetector::new();
-        let output = "Are you sure? [y/N]";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::Confirmation));
-    }
-
-    #[test]
-    fn test_detect_press_enter() {
-        let detector = InputWaitDetector::new();
-        let output = "Press Enter to continue...";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::PressEnter));
-    }
-
-    #[test]
-    fn test_detect_continue_prompt() {
-        let detector = InputWaitDetector::new();
-        let output = "Would you like to continue?";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::Continue));
-    }
-
-    #[test]
-    fn test_detect_permission_request() {
-        let detector = InputWaitDetector::new();
-        let output = "Do you want to allow this action?";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::PermissionRequest));
-    }
-
-    #[test]
-    fn test_detect_colon_prompt() {
-        let detector = InputWaitDetector::new();
-        let output = "Enter your name:";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(result.is_waiting);
-        assert_eq!(result.pattern_type, Some(InputWaitPattern::ColonPrompt));
-    }
-
-    #[test]
-    fn test_no_wait_pattern() {
-        let detector = InputWaitDetector::new();
-        let output = "Processing files...\nDone!";
-
-        let result = detector.detect_immediate(output);
-
-        assert!(!result.is_waiting);
-        assert_eq!(result.pattern_type, None);
-    }
-
-    #[test]
-    fn test_idle_detection() {
+    fn test_idle_detection_first_call() {
         let mut detector = InputWaitDetector::with_idle_threshold(Duration::from_millis(100));
         let session = "test-session";
-        let output = ">\n";
+        let output = "Some output";
 
         // 首次检测，不应该是等待状态（还没空闲）
-        let result1 = detector.detect(session, output);
-        assert!(!result1.is_waiting);
-
-        // 等待超过阈值
-        std::thread::sleep(Duration::from_millis(150));
-
-        // 再次检测，应该是等待状态
-        let result2 = detector.detect(session, output);
-        assert!(result2.is_waiting);
+        let result = detector.detect(session, output);
+        assert!(!result.is_waiting);
+        assert!(result.context.is_empty());
     }
 
     #[test]
@@ -344,16 +177,10 @@ mod tests {
         // 等待超过阈值
         std::thread::sleep(Duration::from_millis(150));
 
-        // 输出变化，应该重置空闲计时
-        let result = detector.detect(session, "output 2\n>");
+        // 输出变化，应该重置空闲计时，不触发 AI 检测
+        let result = detector.detect(session, "output 2");
         assert!(!result.is_waiting);
-    }
-
-    #[test]
-    fn test_get_last_lines() {
-        let text = "line1\nline2\nline3\nline4\nline5\nline6";
-        let last_3 = InputWaitDetector::get_last_lines(text, 3);
-        assert_eq!(last_3, "line4\nline5\nline6");
+        assert!(result.context.is_empty());
     }
 
     #[test]
@@ -366,5 +193,89 @@ mod tests {
 
         detector.clear_session(session);
         assert!(!detector.last_outputs.contains_key(session));
+    }
+
+    #[test]
+    fn test_input_wait_pattern_equality() {
+        assert_eq!(InputWaitPattern::Other, InputWaitPattern::Other);
+        assert_ne!(InputWaitPattern::Other, InputWaitPattern::Confirmation);
+    }
+
+    #[test]
+    fn test_input_wait_result_clone() {
+        let result = InputWaitResult {
+            is_waiting: true,
+            pattern_type: Some(InputWaitPattern::Other),
+            context: "test context".to_string(),
+        };
+        let cloned = result.clone();
+        assert_eq!(cloned.is_waiting, result.is_waiting);
+        assert_eq!(cloned.pattern_type, result.pattern_type);
+        assert_eq!(cloned.context, result.context);
+    }
+
+    // =========================================================================
+    // 集成测试 - 需要 API（使用 #[ignore] 标记）
+    // 运行: cargo test --package cam -- --ignored
+    // =========================================================================
+
+    #[test]
+    #[ignore = "requires Anthropic API key"]
+    fn test_detect_immediate_waiting() {
+        let detector = InputWaitDetector::new();
+        // Claude Code 风格的等待输入提示
+        let output = "Some output\n>\n";
+
+        let result = detector.detect_immediate(output);
+
+        // AI 应该判断为等待输入
+        assert!(result.is_waiting);
+        assert_eq!(result.pattern_type, Some(InputWaitPattern::Other));
+    }
+
+    #[test]
+    #[ignore = "requires Anthropic API key"]
+    fn test_detect_immediate_processing() {
+        let detector = InputWaitDetector::new();
+        // 处理中的状态
+        let output = "Thinking...\n✢ Processing your request";
+
+        let result = detector.detect_immediate(output);
+
+        // AI 应该判断为处理中
+        assert!(!result.is_waiting);
+        assert_eq!(result.pattern_type, None);
+    }
+
+    #[test]
+    #[ignore = "requires Anthropic API key"]
+    fn test_detect_confirmation_prompt() {
+        let detector = InputWaitDetector::new();
+        let output = "Do you want to continue? [Y/n]";
+
+        let result = detector.detect_immediate(output);
+
+        // AI 应该判断为等待输入
+        assert!(result.is_waiting);
+    }
+
+    #[test]
+    #[ignore = "requires Anthropic API key"]
+    fn test_idle_then_detect() {
+        let mut detector = InputWaitDetector::with_idle_threshold(Duration::from_millis(100));
+        let session = "test-session";
+        let output = ">\n";
+
+        // 首次检测，不应该是等待状态（还没空闲）
+        let result1 = detector.detect(session, output);
+        assert!(!result1.is_waiting);
+
+        // 等待超过阈值
+        std::thread::sleep(Duration::from_millis(150));
+
+        // 再次检测，应该触发 AI 判断
+        let result2 = detector.detect(session, output);
+        // AI 应该判断为等待输入
+        assert!(result2.is_waiting);
     }
 }

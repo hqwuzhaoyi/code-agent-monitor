@@ -14,6 +14,8 @@ use std::fs;
 use std::time::Duration;
 use tracing::{debug, info, warn};
 
+use crate::terminal_utils::{truncate_for_ai, truncate_for_status};
+
 /// Anthropic API 基础 URL
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
@@ -399,13 +401,8 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
     };
     let client = AnthropicClient::new(config)?;
 
-    // 截取最后 30 行，避免 token 过多
-    let lines: Vec<&str> = terminal_snapshot.lines().collect();
-    let truncated = if lines.len() > 30 {
-        lines[lines.len() - 30..].join("\n")
-    } else {
-        terminal_snapshot.to_string()
-    };
+    // 截取最后 N 行，避免 token 过多
+    let truncated = truncate_for_ai(terminal_snapshot);
 
     let system = "你是一个终端输出分析专家。从 AI Agent 终端快照中提取正在询问用户的问题信息。只返回 JSON，不要其他内容。";
 
@@ -425,6 +422,7 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
 }}
 
 规则：
+- 重要：只分析终端输出中最后出现的问题或提示，忽略之前的历史会话内容。
 - question_type:
   - "options": 有多个选项供选择（如 1. xxx 2. xxx）
   - "confirmation": 是/否确认（如 [Y/n]、确认？）
@@ -517,13 +515,8 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
         }
     };
 
-    // 截取最后 30 行
-    let lines: Vec<&str> = terminal_snapshot.lines().collect();
-    let truncated = if lines.len() > 30 {
-        lines[lines.len() - 30..].join("\n")
-    } else {
-        terminal_snapshot.to_string()
-    };
+    // 截取最后 N 行
+    let truncated = truncate_for_ai(terminal_snapshot);
 
     let system = "你是一个终端输出分析专家。从给定的终端快照中提取用户正在被询问的问题。";
 
@@ -537,6 +530,8 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 - question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题）
 - question: 核心问题内容（简洁，不超过 100 字）
 - reply_hint: 回复提示（如"回复 y/n"、"回复数字选择"、"回复内容"）
+
+重要：只分析终端输出中最后出现的问题或提示，忽略之前的历史会话内容。
 
 只返回 JSON，不要其他内容。如果没有问题，question_type 设为 "none"。"#,
         truncated
@@ -623,13 +618,8 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
         }
     };
 
-    // 只取最后 10 行，减少 token 消耗
-    let lines: Vec<&str> = terminal_snapshot.lines().collect();
-    let last_lines = if lines.len() > 10 {
-        lines[lines.len() - 10..].join("\n")
-    } else {
-        terminal_snapshot.to_string()
-    };
+    // 只取最后 N 行，减少 token 消耗
+    let last_lines = truncate_for_status(terminal_snapshot);
 
     let system = "你是一个终端状态分析专家。判断 AI 编码助手（如 Claude Code、Codex、OpenCode）的当前状态。只回答 PROCESSING 或 WAITING，不要其他内容。";
 
@@ -641,6 +631,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
 </terminal>
 
 判断规则：
+- 只判断终端最后的状态，忽略历史输出
 - PROCESSING: 如果看到处理中的指示器（如 Thinking…、Brewing…、Hatching…、Running…、Executing…、Loading…、Working… 等带省略号的状态，或旋转动画字符 ✢✻✶✽◐）
 - WAITING: 如果看到空闲提示符（如 >、❯、$）或问题/选项等待用户输入
 

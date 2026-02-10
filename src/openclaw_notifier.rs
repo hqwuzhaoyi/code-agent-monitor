@@ -716,11 +716,11 @@ line 1"#;
             "Do you want to continue? [Y/n]",
         );
 
-        // 简化后的格式：使用 Haiku 提取或显示原始内容
+        // 简化后的格式：AI 禁用时显示提示信息
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-        // 应该包含原始问题内容
-        assert!(message.contains("Do you want to continue?") || message.contains("[Y/n]"));
+        // AI 禁用时显示无法解析提示
+        assert!(message.contains("无法解析通知内容") || message.contains("Do you want to continue?"));
     }
 
     #[test]
