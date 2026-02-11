@@ -316,14 +316,17 @@ impl AgentManager {
 
         // 如果有初始 prompt，等待 Claude Code 就绪后发送
         if let Some(prompt) = &request.initial_prompt {
-            // 循环检测 Claude Code 是否显示 > 提示符
+            // 循环检测 Claude Code 是否显示提示符
             let max_attempts = 30; // 最多等待 30 秒
             let mut ready = false;
             for _ in 0..max_attempts {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 if let Ok(output) = self.tmux.capture_pane(&tmux_session, 30) {
-                    // 检测 Claude Code 就绪的标志：使用正则匹配行首 > 提示符
-                    let claude_prompt_re = regex::Regex::new(r"(?m)^>\s*$").unwrap();
+                    // 检测 Claude Code 就绪的标志：
+                    // - ❯ (U+276F) 是 Claude Code 的提示符
+                    // - > (U+003E) 是旧版本的提示符
+                    // - "Welcome to" 或 "Claude Code" 表示启动完成
+                    let claude_prompt_re = regex::Regex::new(r"(?m)^[❯>]\s*$").unwrap();
                     if claude_prompt_re.is_match(&output) || output.contains("Welcome to") || output.contains("Claude Code") {
                         ready = true;
                         // 额外等待 1 秒确保完全就绪

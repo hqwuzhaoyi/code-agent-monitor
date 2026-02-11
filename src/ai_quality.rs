@@ -177,10 +177,20 @@ pub fn assess_status_detection(status: &AgentStatus, snapshot: &str) -> QualityA
     match status {
         AgentStatus::Processing => {
             // 处理中状态应该有处理指示器
-            let processing_hints = ["…", "...", "Thinking", "Brewing", "Running", "Loading"];
-            let has_hint = processing_hints.iter().any(|h| snapshot.contains(h));
-            if !has_hint {
-                assessment = assessment.with_issue("处理中状态但快照无处理指示器", 0.2);
+            let processing_hints = ["…", "...", "Thinking", "Brewing", "Running", "Loading", "Streaming", "Executing"];
+            let has_processing_hint = processing_hints.iter().any(|h| snapshot.contains(h));
+
+            // 检查是否有等待输入的指示器（与 Processing 状态矛盾）
+            let waiting_hints = [">", "❯", "$"];
+            let has_waiting_hint = waiting_hints.iter().any(|h| snapshot.contains(h));
+
+            if !has_processing_hint {
+                assessment = assessment.with_issue("处理中状态但快照无处理指示器", 0.3);
+            }
+
+            // 如果有等待提示符但没有处理指示器，大幅降低置信度
+            if has_waiting_hint && !has_processing_hint {
+                assessment = assessment.with_issue("快照有等待提示符但 AI 判断为处理中", 0.4);
             }
         }
         AgentStatus::WaitingForInput => {

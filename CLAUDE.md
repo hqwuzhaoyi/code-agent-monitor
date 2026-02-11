@@ -48,6 +48,8 @@ kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
 | `~/.claude-monitor/watcher.pid` | Watcher PID |
 | `~/.claude-monitor/hook.log` | Hook 日志 |
 | `~/.claude-monitor/conversation_state.json` | 对话状态 |
+| `~/.claude-monitor/dedup_state.json` | 通知去重状态 |
+| `~/.config/cam` | Haiku API 配置 |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | 任务列表 |
 
@@ -124,5 +126,71 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 **原则**：
 1. 状态判断用 AI，不用正则
 2. 内容提取用 AI，不用硬编码模式
-3. 回退策略：AI 失败时显示原始内容的最后 N 行
+3. 回退策略：AI 失败时显示"无法解析通知内容，请查看终端"
+4. 上下文完整性：AI 判断上下文是否完整，不完整时自动扩展
+
+### 上下文完整性检测
+
+通知内容提取时，AI 会判断终端快照是否包含完整的上下文。如果问题引用了未显示的内容（如"这个项目结构看起来合适吗？"但结构未显示），AI 会返回 `context_complete: false`，系统会自动扩展上下文重试。
+
+**扩展策略**：80 行 → 150 行 → 300 行
+
+**AI 提示词包含**：
+```json
+{
+  "context_complete": true/false,  // 上下文是否完整
+  "contains_ui_noise": true/false  // 是否包含 UI 噪音（加载动画等）
+}
+```
+
+**相关代码**：`src/anthropic.rs` - `extract_question_with_haiku()`
+
+### Haiku API 配置
+
+CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置按以下优先级读取：
+
+1. **`~/.config/cam`**（推荐）- JSON 格式
+2. 环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
+3. `~/.anthropic/api_key`
+4. `~/.openclaw/openclaw.json`
+
+**配置示例** (`~/.config/cam`):
+```json
+{
+  "anthropic_api_key": "sk-xxx",
+  "anthropic_base_url": "http://localhost:23000/"
+}
+```
+
+**模型**: `claude-haiku-4-5-20251001`
+
+### tmux send-keys 必须使用 -l 标志
+
+向 tmux 发送输入时，**必须使用 `-l` 标志**确保文本被字面解释，否则某些字符可能被解释为特殊按键。
+
+**错误示例**：
+```rust
+// ❌ 没有 -l 标志，"1" 可能被解释为特殊按键
+Command::new("tmux")
+    .args(["send-keys", "-t", session, input])
+    .status()?;
+```
+
+**正确做法**：
+```rust
+// ✅ 使用 -l 标志发送字面文本
+Command::new("tmux")
+    .args(["send-keys", "-t", session, "-l", input])
+    .status()?;
+
+// ✅ Enter 单独发送（不使用 -l，因为需要解释为按键）
+Command::new("tmux")
+    .args(["send-keys", "-t", session, "Enter"])
+    .status()?;
+```
+
+**相关文件**：
+- `src/tmux.rs` - `send_keys()` 和 `send_keys_raw()`
+- `src/session.rs` - `send_to_tmux()`
+- `src/conversation_state.rs` - `send_to_tmux()`
 

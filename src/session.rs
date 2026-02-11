@@ -235,9 +235,10 @@ impl SessionManager {
 
     /// 向 tmux 会话发送输入
     pub fn send_to_tmux(&self, tmux_session: &str, input: &str) -> Result<()> {
+        // 使用 -l 标志发送字面文本，避免特殊字符被解释
         // 文本和 Enter 必须分开发送，否则 Enter 可能不生效
         Command::new("tmux")
-            .args(["send-keys", "-t", tmux_session, input])
+            .args(["send-keys", "-t", tmux_session, "-l", input])
             .status()?;
 
         Command::new("tmux")

@@ -15,7 +15,7 @@
 use std::fs;
 
 use super::event::{NotificationEvent, NotificationEventType};
-use crate::anthropic::{extract_question_with_haiku, ExtractedQuestion};
+use crate::anthropic::{extract_question_with_haiku, ExtractedQuestion, ExtractionResult, TaskSummary};
 use crate::notification_summarizer::NotificationSummarizer;
 
 /// Notification message constants (Chinese)
@@ -121,9 +121,17 @@ impl MessageFormatter {
         project_name: &str,
         extracted: &ExtractedQuestion,
     ) -> String {
+        // 根据问题类型选择不同的 emoji 和标签
+        let (emoji, label) = match extracted.question_type.as_str() {
+            "choice" => ("📋", "请选择"),
+            "confirm" => ("🔔", "请确认"),
+            "open" => ("❓", "有问题"),
+            _ => ("⏸️", msg::WAITING_INPUT),
+        };
+
         let mut result = format!(
-            "⏸️ {} {}\n\n{}",
-            project_name, msg::WAITING_INPUT, extracted.question
+            "{} {} {}\n\n{}",
+            emoji, project_name, label, extracted.question
         );
 
         // 如果有选项，添加选项列表
@@ -132,10 +140,34 @@ impl MessageFormatter {
             for option in &extracted.options {
                 result.push_str(&format!("\n{}", option));
             }
+            // 选择题显示回复数字提示
+            let n = extracted.options.len();
+            result.push_str(&format!("\n\n回复数字 (1-{})", n));
+        } else if extracted.question_type == "confirm" {
+            result.push_str("\n\ny 确认 / n 取消");
+        } else {
+            result.push_str(&format!("\n\n{}", extracted.reply_hint));
         }
 
-        result.push_str(&format!("\n\n{}", extracted.reply_hint));
         result
+    }
+
+    /// 格式化无问题场景（显示任务摘要）
+    fn format_no_question(project_name: &str, summary: &TaskSummary) -> String {
+        match (summary.status.as_str(), &summary.last_action) {
+            ("completed", Some(action)) => {
+                format!("✅ {} 已完成\n\n{}\n\n回复继续", project_name, action)
+            }
+            ("completed", None) => {
+                format!("✅ {} 已完成任务\n\n回复继续", project_name)
+            }
+            (_, Some(action)) => {
+                format!("💤 {} 空闲中\n\n最后操作：{}\n\n回复继续", project_name, action)
+            }
+            _ => {
+                format!("💤 {} 等待指令", project_name)
+            }
+        }
     }
 
     /// 格式化事件消息（新设计：简洁、可操作、专业）
@@ -300,15 +332,28 @@ impl MessageFormatter {
 
                     // 尝试使用 Haiku 提取问题
                     if !self.no_ai {
-                        if let Some(extracted) = extract_question_with_haiku(snap) {
-                            return Self::format_extracted_question(&project_name, &extracted);
+                        match extract_question_with_haiku(snap) {
+                            ExtractionResult::Found(extracted) => {
+                                return Self::format_extracted_question(&project_name, &extracted);
+                            }
+                            ExtractionResult::NoQuestion(summary) => {
+                                // AI 判断没有问题，显示任务摘要
+                                return Self::format_no_question(&project_name, &summary);
+                            }
+                            ExtractionResult::Failed => {
+                                // AI 提取失败，提示用户查看终端
+                                return format!(
+                                    "⏸️ {} {}\n\n无法解析通知内容，请查看终端",
+                                    project_name, msg::WAITING_INPUT
+                                );
+                            }
                         }
                     }
 
-                    // 回退到显示清洗后的内容
+                    // AI 禁用时，显示简洁提示
                     format!(
-                        "⏸️ {} {}\n\n{}\n\n{}",
-                        project_name, msg::WAITING_INPUT, snap.trim(), msg::REPLY_CONTENT
+                        "⏸️ {} {}\n\n无法解析通知内容，请查看终端",
+                        project_name, msg::WAITING_INPUT
                     )
                 } else if !message.is_empty() {
                     format!("⏸️ {} {}\n\n{}", project_name, msg::WAITING_INPUT, message)
@@ -317,30 +362,30 @@ impl MessageFormatter {
                 }
             }
             "permission_prompt" => {
-                // 权限确认 - 优先使用终端快照，其次使用 message
-                let content = if let Some(snap) = snapshot {
-                    if !snap.trim().is_empty() {
-                        snap.trim().to_string()
-                    } else if !message.is_empty() {
-                        message.to_string()
-                    } else {
-                        String::new()
+                // 权限确认 - 优先使用 AI 提取
+                if !self.no_ai {
+                    if let Some(snap) = snapshot {
+                        if !snap.trim().is_empty() {
+                            if let ExtractionResult::Found(extracted) = extract_question_with_haiku(snap) {
+                                return format!(
+                                    "🔐 {} {}\n\n{}\n\n{}",
+                                    project_name, msg::NEED_CONFIRM, extracted.question, msg::REPLY_YN
+                                );
+                            }
+                        }
                     }
-                } else if !message.is_empty() {
-                    message.to_string()
-                } else {
-                    String::new()
-                };
+                }
 
-                if content.is_empty() {
+                // AI 提取失败，使用 message 或简洁提示
+                if !message.is_empty() {
                     format!(
-                        "🔐 {} {}\n\n{}",
-                        project_name, msg::NEED_CONFIRM, msg::REPLY_YN
+                        "🔐 {} {}\n\n{}\n\n{}",
+                        project_name, msg::NEED_CONFIRM, message, msg::REPLY_YN
                     )
                 } else {
                     format!(
-                        "🔐 {} {}\n\n{}\n\n{}",
-                        project_name, msg::NEED_CONFIRM, content, msg::REPLY_YN
+                        "🔐 {} {}\n\n{}",
+                        project_name, msg::NEED_CONFIRM, msg::REPLY_YN
                     )
                 }
             }
@@ -370,12 +415,21 @@ impl MessageFormatter {
 
         // 使用 Haiku 提取问题
         if !self.no_ai {
-            if let Some(extracted) = extract_question_with_haiku(context) {
-                return Self::format_extracted_question(project_name, &extracted);
+            match extract_question_with_haiku(context) {
+                ExtractionResult::Found(extracted) => {
+                    return Self::format_extracted_question(project_name, &extracted);
+                }
+                ExtractionResult::NoQuestion(summary) => {
+                    // AI 判断没有问题，显示任务摘要
+                    return Self::format_no_question(project_name, &summary);
+                }
+                ExtractionResult::Failed => {
+                    // AI 提取失败，提示用户查看终端
+                }
             }
         }
 
-        // AI 提取失败，返回简洁提示
+        // AI 提取失败或禁用，返回简洁提示
         format!("⏸️ {} {}\n\n无法解析通知内容，请查看终端", project_name, msg::WAITING_INPUT)
     }
 
@@ -462,16 +516,22 @@ impl MessageFormatter {
 
             // 尝试使用 Haiku 提取问题
             if !self.no_ai {
-                if let Some(extracted) = extract_question_with_haiku(snap) {
-                    return Self::format_extracted_question(project_name, &extracted);
+                match extract_question_with_haiku(snap) {
+                    ExtractionResult::Found(extracted) => {
+                        return Self::format_extracted_question(project_name, &extracted);
+                    }
+                    ExtractionResult::NoQuestion(summary) => {
+                        // AI 判断没有问题，显示任务摘要
+                        return Self::format_no_question(project_name, &summary);
+                    }
+                    ExtractionResult::Failed => {
+                        // AI 提取失败，提示用户查看终端
+                    }
                 }
             }
 
-            // 回退到显示清洗后的内容
-            format!(
-                "⏸️ {} {}\n\n{}\n\n{}",
-                project_name, msg::WAITING_INPUT, snap.trim(), msg::REPLY_CONTENT
-            )
+            // AI 提取失败或禁用，显示简洁提示
+            format!("⏸️ {} {}\n\n无法解析通知内容，请查看终端", project_name, msg::WAITING_INPUT)
         } else {
             format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
         }
@@ -536,14 +596,24 @@ impl MessageFormatter {
 
                     // 尝试使用 Haiku 提取问题
                     if !self.no_ai {
-                        if let Some(extracted) = extract_question_with_haiku(snap) {
-                            return Self::format_extracted_question(&project_name, &extracted);
+                        match extract_question_with_haiku(snap) {
+                            ExtractionResult::Found(extracted) => {
+                                return Self::format_extracted_question(&project_name, &extracted);
+                            }
+                            ExtractionResult::NoQuestion(summary) => {
+                                // AI 判断没有问题，显示任务摘要
+                                return Self::format_no_question(&project_name, &summary);
+                            }
+                            ExtractionResult::Failed => {
+                                // AI 提取失败，提示用户查看终端
+                            }
                         }
                     }
 
+                    // AI 提取失败或禁用
                     format!(
-                        "⏸️ {} {}\n\n{}\n\n{}",
-                        project_name, msg::WAITING_INPUT, snap.trim(), msg::REPLY_CONTENT
+                        "⏸️ {} {}\n\n无法解析通知内容，请查看终端",
+                        project_name, msg::WAITING_INPUT
                     )
                 } else if !message.is_empty() {
                     format!("⏸️ {} {}\n\n{}", project_name, msg::WAITING_INPUT, message)
@@ -552,15 +622,25 @@ impl MessageFormatter {
                 }
             }
             "permission_prompt" => {
-                let content = snapshot.as_ref()
-                    .filter(|s| !s.trim().is_empty())
-                    .map(|s| s.trim().to_string())
-                    .or_else(|| if !message.is_empty() { Some(message.to_string()) } else { None });
+                // 优先使用 AI 提取问题内容
+                if !self.no_ai {
+                    if let Some(snap) = snapshot {
+                        if !snap.trim().is_empty() {
+                            if let ExtractionResult::Found(extracted) = extract_question_with_haiku(snap) {
+                                return format!(
+                                    "🔐 {} {}\n\n{}\n\n{}",
+                                    project_name, msg::NEED_CONFIRM, extracted.question, msg::REPLY_YN
+                                );
+                            }
+                        }
+                    }
+                }
 
-                if let Some(c) = content {
+                // AI 提取失败，使用 message 或简洁提示
+                if !message.is_empty() {
                     format!(
                         "🔐 {} {}\n\n{}\n\n{}",
-                        project_name, msg::NEED_CONFIRM, c, msg::REPLY_YN
+                        project_name, msg::NEED_CONFIRM, message, msg::REPLY_YN
                     )
                 } else {
                     format!(
@@ -869,7 +949,7 @@ Build successful."#;
 
     #[test]
     fn test_format_notification_with_no_ai_fallback() {
-        // 测试当 AI 禁用时，回退到显示原始快照
+        // 测试当 AI 禁用时，回退到简洁提示（不显示原始快照，避免 UI 元素泄露）
         let formatter = MessageFormatter::new().with_no_ai(true);
 
         let context = r#"{"notification_type": "idle_prompt", "message": ""}
@@ -880,11 +960,11 @@ Please provide your input here"#;
 
         let message = formatter.format_event("cam-123", "notification", "", context);
 
-        // 应该回退到显示原始快照内容
+        // 应该显示简洁提示，不显示原始快照内容
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-        // 应该包含原始快照内容（因为 AI 被禁用）
-        assert!(message.contains("Please provide your input here") || message.contains("回复内容"));
+        // 新行为：AI 提取失败时显示简洁提示，不显示原始快照
+        assert!(message.contains("无法解析通知内容，请查看终端"));
     }
 
     #[test]
@@ -906,10 +986,118 @@ But contains a question somewhere"#;
         assert!(message.contains("等待输入"));
     }
 
+    // ==================== 修复验证测试：终端快照泄露问题 ====================
+
+    #[test]
+    fn test_ai_extraction_failure_does_not_leak_terminal_snapshot() {
+        // 验证修复：当 AI 提取失败时，不应该将原始终端快照作为通知内容发送
+        // 这是为了防止 UI 元素（如 ANSI 转义序列、进度条等）泄露到通知中
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        // 模拟包含 UI 元素的终端快照
+        let terminal_snapshot_with_ui = r#"
+╭──────────────────────────────────────────────────────────────────────────────╮
+│ Claude Code                                                                   │
+├──────────────────────────────────────────────────────────────────────────────┤
+│ > What would you like me to do?                                              │
+│                                                                              │
+│ [Thinking...] ████████████░░░░░░░░ 60%                                       │
+╰──────────────────────────────────────────────────────────────────────────────╯"#;
+
+        let context = format!(
+            r#"{{"notification_type": "idle_prompt", "message": ""}}
+
+--- 终端快照 ---
+{}"#,
+            terminal_snapshot_with_ui
+        );
+
+        let message = formatter.format_event("cam-123", "notification", "", &context);
+
+        // 验证：不应该包含 UI 元素
+        assert!(!message.contains("╭"));
+        assert!(!message.contains("╰"));
+        assert!(!message.contains("████"));
+        assert!(!message.contains("░░░░"));
+
+        // 验证：应该显示简洁的回退提示
+        assert!(message.contains("无法解析通知内容，请查看终端"));
+    }
+
+    #[test]
+    fn test_waiting_for_input_fallback_message() {
+        // 验证 WaitingForInput 事件在 AI 提取失败时的回退行为
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::waiting_for_input("cam-test", "ClaudePrompt")
+            .with_project_path("/workspace/myproject")
+            .with_terminal_snapshot("Some unrecognized terminal content\nWith multiple lines\nAnd no clear question");
+
+        let message = formatter.format_notification_event(&event);
+
+        // 验证：显示项目名和状态
+        assert!(message.contains("myproject"));
+        assert!(message.contains("等待输入"));
+
+        // 验证：显示回退提示而非原始快照
+        assert!(message.contains("无法解析通知内容，请查看终端"));
+        assert!(!message.contains("unrecognized terminal content"));
+    }
+
+    #[test]
+    fn test_idle_prompt_fallback_message() {
+        // 验证 idle_prompt 通知在 AI 提取失败时的回退行为
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::notification("cam-test", "idle_prompt", "")
+            .with_project_path("/workspace/backend")
+            .with_terminal_snapshot("Random terminal output that AI cannot parse");
+
+        let message = formatter.format_notification_event(&event);
+
+        // 验证：显示回退提示
+        assert!(message.contains("无法解析通知内容，请查看终端"));
+        assert!(!message.contains("Random terminal output"));
+    }
+
+    #[test]
+    fn test_empty_snapshot_shows_simple_message() {
+        // 验证空快照时显示简洁消息
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::waiting_for_input("cam-test", "ClaudePrompt")
+            .with_project_path("/workspace/app");
+        // 不设置 terminal_snapshot
+
+        let message = formatter.format_notification_event(&event);
+
+        // 验证：只显示基本状态，不显示回退提示
+        assert!(message.contains("app"));
+        assert!(message.contains("等待输入"));
+        assert!(!message.contains("无法解析"));
+    }
+
+    #[test]
+    fn test_whitespace_only_snapshot_treated_as_empty() {
+        // 验证只有空白字符的快照被视为空
+        let formatter = MessageFormatter::new().with_no_ai(true);
+
+        let event = NotificationEvent::waiting_for_input("cam-test", "ClaudePrompt")
+            .with_project_path("/workspace/app")
+            .with_terminal_snapshot("   \n\n   \t  ");
+
+        let message = formatter.format_notification_event(&event);
+
+        // 验证：空白快照不触发回退提示
+        assert!(message.contains("等待输入"));
+        assert!(!message.contains("无法解析"));
+    }
+
     // ========== 新 API (format_notification_event) 测试 ==========
 
     #[test]
     fn test_format_notification_event_waiting_for_input() {
+        // 测试当 AI 禁用时，回退到简洁提示（不显示原始快照）
         let formatter = MessageFormatter::new().with_no_ai(true);
 
         let event = NotificationEvent::waiting_for_input("cam-123", "ClaudePrompt")
@@ -921,7 +1109,8 @@ But contains a question somewhere"#;
         assert!(message.contains("⏸️"));
         assert!(message.contains("myproject")); // 使用项目名而非 agent_id
         assert!(message.contains("等待输入"));
-        assert!(message.contains("Do you want to continue?"));
+        // 新行为：AI 禁用时显示简洁提示，不显示原始快照
+        assert!(message.contains("无法解析通知内容，请查看终端"));
     }
 
     #[test]
@@ -944,6 +1133,7 @@ But contains a question somewhere"#;
 
     #[test]
     fn test_format_notification_event_idle_prompt() {
+        // 测试当 AI 禁用时，回退到简洁提示（不显示原始快照）
         let formatter = MessageFormatter::new().with_no_ai(true);
 
         let event = NotificationEvent::notification("cam-789", "idle_prompt", "")
@@ -955,7 +1145,8 @@ But contains a question somewhere"#;
         assert!(message.contains("⏸️"));
         assert!(message.contains("backend"));
         assert!(message.contains("等待输入"));
-        assert!(message.contains("What would you like me to do next?"));
+        // 新行为：AI 禁用时显示简洁提示，不显示原始快照
+        assert!(message.contains("无法解析通知内容，请查看终端"));
     }
 
     #[test]

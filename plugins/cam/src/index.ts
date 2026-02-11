@@ -123,10 +123,16 @@ export default function (api) {
     }),
     async execute(_id, params) {
       try {
+        // 验证参数完整性
+        if (!params.agent_id || !params.message) {
+          const errorMsg = `Missing required params: agent_id=${params.agent_id}, message=${params.message}`;
+          api.logger.error("cam_agent_send validation failed", { params, errorMsg });
+          return { content: [{ type: "text", text: JSON.stringify({ error: true, message: errorMsg }) }] };
+        }
         const result = await callCamMcp("agent_send", params);
         return { content: [{ type: "text", text: JSON.stringify(result) }] };
       } catch (error) {
-        api.logger.error("cam_agent_send failed", { error, params });
+        api.logger.error("cam_agent_send failed", { error: error.message, params });
         return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
       }
     },

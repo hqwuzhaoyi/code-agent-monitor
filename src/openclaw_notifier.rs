@@ -1184,7 +1184,7 @@ $ cargo build
 
     #[test]
     fn test_format_notification_with_no_ai_fallback() {
-        // 测试当 AI 禁用时，回退到显示原始快照
+        // 测试当 AI 禁用时，回退到简洁提示（不显示原始快照，避免 UI 元素泄露）
         let notifier = OpenclawNotifier::new().with_no_ai(true);
 
         let context = r#"{"notification_type": "idle_prompt", "message": ""}
@@ -1195,11 +1195,11 @@ Please provide your input here"#;
 
         let message = notifier.format_event("cam-123", "notification", "", context);
 
-        // 应该回退到显示原始快照内容
+        // 应该显示简洁提示，不显示原始快照内容
         assert!(message.contains("⏸️"));
         assert!(message.contains("等待输入"));
-        // 应该包含原始快照内容（因为 AI 被禁用）
-        assert!(message.contains("Please provide your input here") || message.contains("回复内容"));
+        // 新行为：AI 提取失败时显示简洁提示，不显示原始快照
+        assert!(message.contains("无法解析通知内容，请查看终端"));
     }
 
     #[test]

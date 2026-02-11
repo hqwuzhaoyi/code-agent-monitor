@@ -502,8 +502,16 @@ async fn main() -> Result<()> {
             // 从 stdin 读取 hook 输入（Claude Code 通过 stdin 传递 JSON）
             let context = std::io::read_to_string(std::io::stdin()).unwrap_or_default();
 
+            // 分离终端快照部分，确保 JSON 解析成功
+            // 测试命令可能通过管道传入 JSON + 终端快照
+            let raw_context = if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+                &context[..idx]
+            } else {
+                &context
+            };
+
             // 解析 JSON 获取 session_id 和 cwd
-            let json: Option<serde_json::Value> = serde_json::from_str(&context).ok();
+            let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
             let session_id = json.as_ref()
                 .and_then(|j| j.get("session_id"))
                 .and_then(|v| v.as_str())
@@ -605,9 +613,13 @@ async fn main() -> Result<()> {
             };
 
             // 获取终端快照
+            // 优先使用 stdin 中的终端快照（测试命令可能通过管道传入）
             let terminal_snapshot = if needs_snapshot {
-                // 优先通过 resolved_agent_id 直接获取
-                if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 50) {
+                // 检查 stdin 中是否包含终端快照
+                if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+                    Some(context[idx + "\n\n--- 终端快照 ---\n".len()..].to_string())
+                } else if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 50) {
+                    // 通过 resolved_agent_id 直接获取
                     Some(logs)
                 } else if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
                     // 尝试通过 session_id 查找 agent

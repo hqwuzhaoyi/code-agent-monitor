@@ -240,6 +240,26 @@ cam reply y
 
 详见 [skills/agent-teams/SKILL.md](skills/agent-teams/SKILL.md)
 
+## Haiku API 配置
+
+CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置按以下优先级读取：
+
+1. **`~/.config/cam`**（推荐）
+2. 环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
+3. `~/.anthropic/api_key`
+4. `~/.openclaw/openclaw.json`
+
+**配置示例** (`~/.config/cam`):
+
+```json
+{
+  "anthropic_api_key": "sk-xxx",
+  "anthropic_base_url": "http://localhost:23000/"
+}
+```
+
+**模型**: `claude-haiku-4-5-20251001`
+
 ## MCP 工具
 
 ### Agent 管理工具
@@ -299,6 +319,7 @@ cam reply y
 | `~/.claude/settings.json` | Claude Code 配置（含 hooks） |
 | `~/.claude/teams/` | Agent Teams 配置和 inbox |
 | `~/.claude/tasks/` | Agent Teams 任务列表 |
+| `~/.config/cam` | Haiku API 配置（JSON） |
 
 ## 架构
 
@@ -373,9 +394,10 @@ code-agent-monitor/
 ├── plugins/
 │   └── cam/               # OpenClaw plugin
 ├── skills/
-│   ├── SKILL.md           # 主 Skill 文档
+│   ├── cam/               # 主 Skill（OpenClaw 集成）
 │   ├── agent-teams/       # Agent Teams 专家 Skill
-│   └── cam-notify/        # 通知系统 Skill
+│   ├── cam-notify/        # 通知处理 Skill
+│   └── cam-e2e-test/      # 端到端测试 Skill（开发用）
 ├── tests/
 │   ├── e2e.rs             # 端到端测试
 │   ├── input_detector_test.rs # 输入检测测试

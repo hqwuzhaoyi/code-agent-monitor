@@ -13,10 +13,10 @@ use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::ai_quality::{assess_question_extraction, assess_status_detection, thresholds};
-use crate::terminal_utils::{truncate_for_ai, truncate_for_status};
+use crate::terminal_utils::truncate_for_status;
 
 /// Anthropic API 基础 URL
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
@@ -438,7 +438,7 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
     let client = AnthropicClient::new(config)?;
 
     // 截取最后 N 行，避免 token 过多
-    let truncated = truncate_for_ai(terminal_snapshot);
+    let truncated = crate::terminal_utils::truncate_last_lines(terminal_snapshot, 80);
 
     let system = "你是一个终端输出分析专家。从 AI Agent 终端快照中提取正在询问用户的问题信息。只返回 JSON，不要其他内容。";
 
@@ -556,7 +556,7 @@ pub fn extract_notification_content_or_default(terminal_snapshot: &str) -> Notif
 }
 
 /// 从 Haiku 提取的问题结果
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ExtractedQuestion {
     /// 问题类型: "open", "choice", "confirm"
     pub question_type: String,
@@ -568,23 +568,85 @@ pub struct ExtractedQuestion {
     pub reply_hint: String,
 }
 
+/// 任务摘要（NoQuestion 场景使用）
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct TaskSummary {
+    /// Agent 状态: "completed", "idle", "waiting"
+    pub status: String,
+    /// 最后操作摘要
+    pub last_action: Option<String>,
+}
+
+/// 提取结果
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExtractionResult {
+    /// 成功提取到问题
+    Found(ExtractedQuestion),
+    /// AI 判断没有问题需要回答，但可能有任务摘要
+    NoQuestion(TaskSummary),
+    /// 提取失败（API 错误、解析失败等）
+    Failed,
+}
+
 /// 从终端快照中提取问题（使用 Haiku）
 ///
 /// 这是一个便捷函数，用于替代 `extract_question_with_ai`。
 /// 使用 Haiku 模型，延迟约 1-2 秒，比 Opus 快 10 倍。
-pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<ExtractedQuestion> {
+///
+/// 如果 AI 判断上下文不完整，会自动获取更多行数重试。
+///
+/// 返回值：
+/// - `ExtractionResult::Found(question)` - 成功提取到问题
+/// - `ExtractionResult::NoQuestion(summary)` - AI 判断没有问题需要回答，包含任务摘要
+/// - `ExtractionResult::Failed` - 提取失败
+pub fn extract_question_with_haiku(terminal_snapshot: &str) -> ExtractionResult {
+    // 尝试不同的上下文大小
+    let context_sizes = [80, 150, 300];
+
+    for &lines in &context_sizes {
+        match extract_question_with_context(terminal_snapshot, lines) {
+            Ok(InternalResult::Question(result)) => return ExtractionResult::Found(result),
+            Ok(InternalResult::NoQuestion(summary)) => return ExtractionResult::NoQuestion(summary),
+            Err(NeedMoreContext) => {
+                debug!(lines = lines, "AI needs more context, retrying with more lines");
+                continue;
+            }
+            Err(ExtractionFailed) => return ExtractionResult::Failed,
+        }
+    }
+
+    warn!("Failed to extract question even with maximum context");
+    ExtractionResult::Failed
+}
+
+/// 提取错误类型
+enum ExtractionError {
+    NeedMoreContext,
+    ExtractionFailed,
+}
+
+/// 内部提取结果
+enum InternalResult {
+    Question(ExtractedQuestion),
+    NoQuestion(TaskSummary),
+}
+
+use ExtractionError::*;
+
+/// 使用指定行数的上下文提取问题
+fn extract_question_with_context(terminal_snapshot: &str, lines: usize) -> Result<InternalResult, ExtractionError> {
     let client = match AnthropicClient::from_config() {
         Ok(c) => c,
         Err(e) => {
             warn!(error = %e, "Failed to create Anthropic client");
-            return None;
+            return Err(ExtractionFailed);
         }
     };
 
     // 截取最后 N 行
-    let truncated = truncate_for_ai(terminal_snapshot);
+    let truncated = crate::terminal_utils::truncate_last_lines(terminal_snapshot, lines);
 
-    let system = "你是一个终端输出分析专家。从给定的终端快照中提取用户正在被询问的问题。";
+    let system = "你是一个终端输出分析专家。从给定的终端快照中提取用户正在被询问的问题，或分析 Agent 当前状态。";
 
     let prompt = format!(
         r#"分析以下 AI Agent 终端输出，提取正在询问用户的问题。
@@ -593,12 +655,29 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<ExtractedQ
 {}
 
 请用 JSON 格式回复，包含以下字段：
-- question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题）
-- question: 核心问题内容（简洁，不超过 100 字）
+- question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题，Agent 空闲等待指令）
+- question: 核心问题内容（简洁，不超过 100 字）。重要：必须包含问题所引用的具体内容，让用户无需查看终端就能理解问题
 - options: 选项列表（仅当 question_type 为 "choice" 时提取，格式如 ["1. 选项A", "2. 选项B"]，否则为空数组 []）
 - reply_hint: 回复提示（如"回复 y/n"、"回复数字选择"、"回复内容"）
+- contains_ui_noise: true/false（问题内容是否包含终端 UI 元素，如工具调用标记、状态指示器、进度条、ASCII art 等）
+- context_complete: true/false（判断标准见下方）
+- agent_status: "completed"（刚完成任务，终端显示了完成信息）、"idle"（空闲等待，无明显完成信息）、"waiting"（等待用户回答问题）
+- last_action: Agent 最后完成的操作摘要。重要：仔细查看终端输出，提取 Agent 完成的具体任务（如"React Todo List 项目已完成"、"创建了 TodoList 组件"、"修复了登录 bug"、"项目构建成功"）。如果终端显示了任务完成信息（如"已完成"、"成功"、"done"等），必须提取。只有在完全无法判断时才返回 null
 
-重要：只分析终端输出中最后出现的问题或提示，忽略之前的历史会话内容。
+context_complete 判断标准（非常重要）：
+- 如果问题中包含指示词如"这个"、"上面的"、"以下"、"这些"、"该"等，必须检查被引用的内容是否在终端输出中可见
+- 例如："这个项目结构看起来合适吗？" - 必须能看到具体的项目结构内容，否则 context_complete = false
+- 例如："这个方案可以吗？" - 必须能看到具体的方案内容，否则 context_complete = false
+- 例如："以下选项选择哪个？" - 必须能看到选项列表，否则 context_complete = false
+- 如果问题是独立的（如"你想要实现什么功能？"），则 context_complete = true
+
+重要规则：
+1. 只分析终端输出中最后出现的问题或提示，忽略之前的历史会话内容
+2. question 字段只应包含纯文本问题，不要包含终端 UI 元素（如工具调用标记 ⏺、状态指示器 ✻、进度条、ASCII art logo 等）
+3. 如果无法提取干净的问题内容（即问题中混杂了 UI 元素），设置 contains_ui_noise 为 true
+4. 如果问题引用了看不到的上下文，必须设置 context_complete 为 false
+5. 如果 context_complete 为 true，question 必须包含足够的上下文让用户理解问题
+6. 当 question_type 为 "none" 时，仍需分析 agent_status 和 last_action，帮助用户了解 Agent 状态
 
 只返回 JSON，不要其他内容。如果没有问题，question_type 设为 "none"。"#,
         truncated
@@ -609,22 +688,74 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<ExtractedQ
         Ok(r) => r,
         Err(e) => {
             warn!(error = %e, "Haiku API call failed");
-            return None;
+            return Err(ExtractionFailed);
         }
     };
-    debug!(elapsed_ms = start.elapsed().as_millis(), "Haiku API call completed");
+    debug!(elapsed_ms = start.elapsed().as_millis(), lines = lines, "Haiku API call completed");
+    trace!(response = %response, "Haiku raw response");
 
     // 解析 JSON 响应
-    let json_str = extract_json_from_output(&response)?;
-    let parsed: serde_json::Value = serde_json::from_str(&json_str).ok()?;
+    let json_str = match extract_json_from_output(&response) {
+        Some(s) => s,
+        None => {
+            warn!(response = %response, "Failed to extract JSON from Haiku response");
+            return Err(ExtractionFailed);
+        }
+    };
+    debug!(json = %json_str, "Haiku returned JSON");
+    let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(_) => return Err(ExtractionFailed),
+    };
 
-    let question_type = parsed.get("question_type")?.as_str()?;
+    let question_type = match parsed.get("question_type").and_then(|v| v.as_str()) {
+        Some(t) => t,
+        None => return Err(ExtractionFailed),
+    };
+
     if question_type == "none" {
-        return None;
+        // 提取任务摘要
+        let status = parsed
+            .get("agent_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("idle")
+            .to_string();
+        let last_action = parsed
+            .get("last_action")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+        return Ok(InternalResult::NoQuestion(TaskSummary { status, last_action }));
     }
 
-    let question = parsed.get("question")?.as_str()?.to_string();
-    let reply_hint = parsed.get("reply_hint")?.as_str()?.to_string();
+    // 检查上下文是否完整
+    let context_complete = parsed
+        .get("context_complete")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !context_complete {
+        debug!("AI indicates context is incomplete");
+        return Err(NeedMoreContext);
+    }
+
+    // 检查 AI 是否标记了 UI 噪音
+    let contains_ui_noise = parsed
+        .get("contains_ui_noise")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+    if contains_ui_noise {
+        warn!("AI detected UI noise in extracted question, rejecting");
+        return Err(ExtractionFailed);
+    }
+
+    let question = match parsed.get("question").and_then(|v| v.as_str()) {
+        Some(q) => q.to_string(),
+        None => return Err(ExtractionFailed),
+    };
+    let reply_hint = parsed
+        .get("reply_hint")
+        .and_then(|v| v.as_str())
+        .unwrap_or("回复内容")
+        .to_string();
 
     // 提取选项列表
     let options = parsed
@@ -637,12 +768,12 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<ExtractedQ
         })
         .unwrap_or_default();
 
-    Some(ExtractedQuestion {
+    Ok(InternalResult::Question(ExtractedQuestion {
         question_type: question_type.to_string(),
         question,
         options,
         reply_hint,
-    })
+    }))
 }
 
 /// Agent 状态
@@ -722,6 +853,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
   * 旋转动画字符（✢✻✶✽◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
   * 进度条或百分比指示器
 - WAITING: 如果看到空闲提示符（如 >、❯、$）或问题/选项等待用户输入
+- 注意：⏺ 符号是输出块标记，不是处理中指示器。如果终端显示完成信息（如"已完成"、"成功"）后跟空闲提示符，应判断为 WAITING
 
 只回答一个词：PROCESSING 或 WAITING"#
     );
