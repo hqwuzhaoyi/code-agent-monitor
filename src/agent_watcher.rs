@@ -9,6 +9,17 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{info, debug};
 
+/// 通知动作
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum NotifyAction {
+    /// 发送通知
+    Send,
+    /// 发送提醒（用户长时间未响应）
+    SendReminder,
+    /// 被抑制（锁定期内或已发送）
+    Suppressed,
+}
+
 /// 监控事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "event_type")]
@@ -64,6 +75,19 @@ pub struct AgentSnapshot {
     pub last_activity: Option<String>,
 }
 
+/// 通知锁定记录（时间窗口锁定方案）
+#[derive(Debug, Clone)]
+struct NotificationLock {
+    /// 首次通知时间（Unix 时间戳秒）- 用于计算总超时
+    first_notified_at: u64,
+    /// 锁定开始时间（Unix 时间戳秒）
+    locked_at: u64,
+    /// 锁定时的内容指纹
+    content_fingerprint: u64,
+    /// 是否已发送提醒
+    reminder_sent: bool,
+}
+
 /// Agent 监控器
 pub struct AgentWatcher {
     /// Agent 管理器
@@ -74,11 +98,20 @@ pub struct AgentWatcher {
     input_detector: InputWaitDetector,
     /// 每个 agent 的 JSONL 解析器
     jsonl_parsers: HashMap<String, JsonlParser>,
-    /// 每个 agent 的上次等待状态
+    /// 每个 agent 的通知锁定状态
+    notification_locks: HashMap<String, NotificationLock>,
+    /// 每个 agent 的上次等待状态（用于检测恢复）
     last_waiting_state: HashMap<String, bool>,
 }
 
 impl AgentWatcher {
+    /// 通知锁定时长（30 分钟）
+    const LOCK_DURATION_SECS: u64 = 1800;
+    /// 提醒延迟（锁定结束后 30 分钟发送提醒）
+    const REMINDER_DELAY_SECS: u64 = 1800;
+    /// 最大通知时限（2 小时后停止发送）
+    const MAX_NOTIFICATION_DURATION_SECS: u64 = 7200;
+
     /// 创建新的监控器
     pub fn new() -> Self {
         Self {
@@ -86,6 +119,7 @@ impl AgentWatcher {
             tmux: TmuxManager::new(),
             input_detector: InputWaitDetector::new(),
             jsonl_parsers: HashMap::new(),
+            notification_locks: HashMap::new(),
             last_waiting_state: HashMap::new(),
         }
     }
@@ -97,8 +131,139 @@ impl AgentWatcher {
             tmux: TmuxManager::new(),
             input_detector: InputWaitDetector::new(),
             jsonl_parsers: HashMap::new(),
+            notification_locks: HashMap::new(),
             last_waiting_state: HashMap::new(),
         }
+    }
+
+    /// 获取当前 Unix 时间戳（秒）
+    fn current_timestamp() -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
+
+    /// 计算内容指纹
+    fn content_fingerprint(content: &str) -> u64 {
+        use std::hash::{Hash, Hasher};
+        use std::collections::hash_map::DefaultHasher;
+
+        // 规范化内容：移除动画字符和时间相关内容
+        let normalized = Self::normalize_content(content);
+
+        let mut hasher = DefaultHasher::new();
+        normalized.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// 规范化内容（移除噪声）
+    fn normalize_content(content: &str) -> String {
+        content
+            .lines()
+            // 移除包含动画指示器的行
+            .filter(|line| {
+                !line.contains("Flowing")
+                    && !line.contains("Brewing")
+                    && !line.contains("Thinking")
+                    && !line.contains("Running…")
+                    && !line.contains("tokens")
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string()
+    }
+
+    /// 检查是否应该发送通知（时间窗口锁定方案）
+    fn should_send_notification(&mut self, agent_id: &str, content: &str) -> NotifyAction {
+        let now = Self::current_timestamp();
+        let fingerprint = Self::content_fingerprint(content);
+
+        if let Some(lock) = self.notification_locks.get_mut(agent_id) {
+            let elapsed = now.saturating_sub(lock.locked_at);
+            let total_elapsed = now.saturating_sub(lock.first_notified_at);
+
+            // 超过 2 小时，停止发送任何通知
+            if total_elapsed >= Self::MAX_NOTIFICATION_DURATION_SECS {
+                debug!(
+                    agent_id = %agent_id,
+                    total_elapsed_secs = total_elapsed,
+                    "Max notification duration exceeded, suppressing"
+                );
+                return NotifyAction::Suppressed;
+            }
+
+            // 锁定期内
+            if elapsed < Self::LOCK_DURATION_SECS {
+                // 内容不同，发送新通知并重新锁定
+                if fingerprint != lock.content_fingerprint {
+                    debug!(
+                        agent_id = %agent_id,
+                        elapsed_secs = elapsed,
+                        "Different content detected, sending new notification"
+                    );
+                    lock.locked_at = now;
+                    lock.content_fingerprint = fingerprint;
+                    lock.reminder_sent = false;
+                    // 注意：不重置 first_notified_at，保持总时间计算
+                    return NotifyAction::Send;
+                }
+                // 相同内容，抑制
+                return NotifyAction::Suppressed;
+            }
+
+            // 锁定期结束，检查是否需要发送提醒
+            if elapsed >= Self::LOCK_DURATION_SECS + Self::REMINDER_DELAY_SECS {
+                // 内容相同且未发送提醒
+                if fingerprint == lock.content_fingerprint && !lock.reminder_sent {
+                    debug!(
+                        agent_id = %agent_id,
+                        elapsed_secs = elapsed,
+                        "Sending reminder notification"
+                    );
+                    lock.reminder_sent = true;
+                    return NotifyAction::SendReminder;
+                }
+
+                // 内容不同，发送新通知并重新锁定
+                if fingerprint != lock.content_fingerprint {
+                    lock.locked_at = now;
+                    lock.content_fingerprint = fingerprint;
+                    lock.reminder_sent = false;
+                    return NotifyAction::Send;
+                }
+
+                // 已发送过提醒，抑制
+                return NotifyAction::Suppressed;
+            }
+
+            // 锁定期刚结束，等待提醒时机
+            if fingerprint == lock.content_fingerprint {
+                return NotifyAction::Suppressed;
+            }
+
+            // 内容不同，发送新通知
+            lock.locked_at = now;
+            lock.content_fingerprint = fingerprint;
+            lock.reminder_sent = false;
+            return NotifyAction::Send;
+        }
+
+        // 首次通知，创建锁定
+        self.notification_locks.insert(agent_id.to_string(), NotificationLock {
+            first_notified_at: now,
+            locked_at: now,
+            content_fingerprint: fingerprint,
+            reminder_sent: false,
+        });
+
+        NotifyAction::Send
+    }
+
+    /// 清除 agent 的通知锁定（当 agent 恢复运行时调用）
+    fn clear_notification_lock(&mut self, agent_id: &str) {
+        self.notification_locks.remove(agent_id);
     }
 
     /// 执行一次轮询，返回检测到的事件
@@ -160,7 +325,7 @@ impl AgentWatcher {
                 }
             }
 
-            // 3. 检测输入等待状态
+            // 3. 检测输入等待状态（时间窗口锁定方案）
             if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50) {
                 let wait_result = self.input_detector.detect_immediate(&output);
                 let was_waiting = self.last_waiting_state.get(&agent.agent_id).copied().unwrap_or(false);
@@ -173,30 +338,65 @@ impl AgentWatcher {
                     "Input wait detection"
                 );
 
-                if wait_result.is_waiting && !was_waiting {
-                    // 新进入等待状态
-                    let pattern_type = wait_result.pattern_type
-                        .as_ref()
-                        .map(|p| format!("{:?}", p))
-                        .unwrap_or_else(|| "Unknown".to_string());
+                if wait_result.is_waiting {
+                    // 检查是否应该发送通知
+                    let action = self.should_send_notification(&agent.agent_id, &wait_result.context);
 
-                    info!(
-                        agent_id = %agent.agent_id,
-                        pattern_type = %pattern_type,
-                        "Agent entered waiting state, generating WaitingForInput event"
-                    );
+                    match action {
+                        NotifyAction::Send => {
+                            let pattern_type = wait_result.pattern_type
+                                .as_ref()
+                                .map(|p| format!("{:?}", p))
+                                .unwrap_or_else(|| "Unknown".to_string());
 
-                    events.push(WatchEvent::WaitingForInput {
-                        agent_id: agent.agent_id.clone(),
-                        pattern_type,
-                        context: wait_result.context.clone(),
-                    });
-                } else if !wait_result.is_waiting && was_waiting {
-                    // 从等待状态恢复
-                    info!(agent_id = %agent.agent_id, "Agent resumed from waiting state");
-                    events.push(WatchEvent::AgentResumed {
-                        agent_id: agent.agent_id.clone(),
-                    });
+                            info!(
+                                agent_id = %agent.agent_id,
+                                pattern_type = %pattern_type,
+                                "Agent waiting for input, sending notification"
+                            );
+
+                            events.push(WatchEvent::WaitingForInput {
+                                agent_id: agent.agent_id.clone(),
+                                pattern_type,
+                                context: wait_result.context.clone(),
+                            });
+                        }
+                        NotifyAction::SendReminder => {
+                            let pattern_type = wait_result.pattern_type
+                                .as_ref()
+                                .map(|p| format!("{:?}", p))
+                                .unwrap_or_else(|| "Unknown".to_string());
+
+                            info!(
+                                agent_id = %agent.agent_id,
+                                pattern_type = %pattern_type,
+                                "Agent still waiting, sending reminder"
+                            );
+
+                            events.push(WatchEvent::WaitingForInput {
+                                agent_id: agent.agent_id.clone(),
+                                pattern_type: format!("{} (提醒)", pattern_type),
+                                context: wait_result.context.clone(),
+                            });
+                        }
+                        NotifyAction::Suppressed => {
+                            // 被抑制，不发送
+                            debug!(
+                                agent_id = %agent.agent_id,
+                                "Notification suppressed (within lock window)"
+                            );
+                        }
+                    }
+                } else {
+                    // 不在等待状态
+                    if was_waiting {
+                        // 从等待状态恢复，清除锁定
+                        info!(agent_id = %agent.agent_id, "Agent resumed from waiting state");
+                        self.clear_notification_lock(&agent.agent_id);
+                        events.push(WatchEvent::AgentResumed {
+                            agent_id: agent.agent_id.clone(),
+                        });
+                    }
                 }
 
                 self.last_waiting_state.insert(agent.agent_id.clone(), wait_result.is_waiting);
@@ -278,6 +478,7 @@ impl AgentWatcher {
     /// 清理 agent 相关状态
     fn cleanup_agent(&mut self, agent_id: &str) {
         self.jsonl_parsers.remove(agent_id);
+        self.notification_locks.remove(agent_id);
         self.last_waiting_state.remove(agent_id);
         self.input_detector.clear_session(agent_id);
     }
