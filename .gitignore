@@ -21,4 +21,25 @@ watch_log.txt
 # Worktrees
 .worktrees/
 
+# Planning docs
 docs/plans/*
+docs/plan/*
+
+# Agent/IDE configs
+.agent/
+.agents/
+.augment/
+.claude/
+.cursor/
+.kiro/
+.trae/
+.windsurf/
+
+# Temporary work files
+findings.md
+progress.md
+task_plan.md
+
+# Symlinks to external skills
+skills/find-skills
+skills/planning-with-files
