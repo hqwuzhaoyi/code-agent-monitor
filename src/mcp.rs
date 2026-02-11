@@ -6,12 +6,10 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::{ProcessScanner, SessionManager, AgentManager, StartAgentRequest};
 use crate::jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use};
 use crate::input_detector::InputWaitDetector;
-use crate::team_discovery;
+use crate::team;
 use crate::task_list;
-use crate::team_bridge::{TeamBridge, InboxMessage};
-use crate::inbox_watcher::InboxWatcher;
+use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
 use crate::openclaw_notifier::OpenclawNotifier;
-use crate::team_orchestrator::TeamOrchestrator;
 use crate::conversation_state::{ConversationStateManager, ReplyResult};
 
 /// MCP 请求
@@ -314,7 +312,7 @@ impl McpServer {
 
     /// 处理 team/list - 列出所有 teams
     fn handle_team_list(&self) -> Result<serde_json::Value> {
-        let teams = team_discovery::discover_teams();
+        let teams = team::discovery::discover_teams();
 
         let teams_json: Vec<serde_json::Value> = teams.iter().map(|t| {
             serde_json::json!({
@@ -336,7 +334,7 @@ impl McpServer {
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing team_name"))?;
 
-        match team_discovery::get_team_members(team_name) {
+        match team::discovery::get_team_members(team_name) {
             Some(members) => {
                 let members_json: Vec<serde_json::Value> = members.iter().map(|m| {
                     serde_json::json!({
