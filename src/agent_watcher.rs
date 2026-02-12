@@ -419,6 +419,9 @@ impl AgentWatcher {
     pub fn poll_once(&mut self) -> Result<Vec<WatchEvent>> {
         let mut events = Vec::new();
 
+        // Load latest hook events for coordination
+        self.load_hook_events();
+
         // 获取所有活跃的 agent
         let agents = self.agent_manager.list_agents()?;
         debug!(agent_count = agents.len(), "Polling agents");
@@ -474,22 +477,74 @@ impl AgentWatcher {
                 }
             }
 
-            // 3. 检测输入等待状态（时间窗口锁定方案）
+            // 3. 检测输入等待状态（带稳定性检测优化）
             if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50) {
+                let now = Self::current_timestamp();
+                let content_hash = Self::content_fingerprint(&output);
+                let agent_id = agent.agent_id.clone();
+
+                // Update stability state
+                let stability = self.stability_states
+                    .entry(agent_id.clone())
+                    .or_insert_with(|| StabilityState::new(content_hash, now));
+                let content_changed = stability.update(content_hash, now);
+
+                // Extract stability info for decision making
+                let ai_checked = stability.ai_checked;
+                let is_stable = stability.is_stable(now, Self::STABILITY_THRESHOLD_SECS);
+
+                // Check if AI detection should be performed
+                let in_quiet_period = self.hook_tracker.is_in_quiet_period(&agent_id, now, Self::HOOK_QUIET_PERIOD_SECS);
+
+                let should_check = !content_changed && !ai_checked && is_stable && !in_quiet_period;
+
+                if !should_check {
+                    let skip_reason = if ai_checked {
+                        "already_checked"
+                    } else if !is_stable {
+                        "not_stable_yet"
+                    } else if in_quiet_period {
+                        "recent_hook_event"
+                    } else {
+                        "content_changed"
+                    };
+
+                    debug!(
+                        agent_id = %agent_id,
+                        reason = skip_reason,
+                        "Skipping AI check (stability optimization)"
+                    );
+
+                    // Still need to track waiting state for resume detection
+                    let was_waiting = self.last_waiting_state.get(&agent_id).copied().unwrap_or(false);
+                    if was_waiting {
+                        // Content changed while waiting - might have resumed
+                        // Will be detected on next stable check
+                    }
+                    continue;
+                }
+
+                // Perform AI detection
                 let wait_result = self.input_detector.detect_immediate(&output);
-                let was_waiting = self.last_waiting_state.get(&agent.agent_id).copied().unwrap_or(false);
+
+                // Mark AI checked
+                if let Some(stability) = self.stability_states.get_mut(&agent_id) {
+                    stability.mark_ai_checked();
+                }
+
+                let was_waiting = self.last_waiting_state.get(&agent_id).copied().unwrap_or(false);
 
                 debug!(
-                    agent_id = %agent.agent_id,
+                    agent_id = %agent_id,
                     is_waiting = wait_result.is_waiting,
                     pattern = ?wait_result.pattern_type,
                     was_waiting = was_waiting,
-                    "Input wait detection"
+                    "Input wait detection (AI called)"
                 );
 
                 if wait_result.is_waiting {
                     // 检查是否应该发送通知
-                    let action = self.should_send_notification(&agent.agent_id, &wait_result.context);
+                    let action = self.should_send_notification(&agent_id, &wait_result.context);
 
                     match action {
                         NotifyAction::Send => {
@@ -499,13 +554,13 @@ impl AgentWatcher {
                                 .unwrap_or_else(|| "Unknown".to_string());
 
                             info!(
-                                agent_id = %agent.agent_id,
+                                agent_id = %agent_id,
                                 pattern_type = %pattern_type,
                                 "Agent waiting for input, sending notification"
                             );
 
                             events.push(WatchEvent::WaitingForInput {
-                                agent_id: agent.agent_id.clone(),
+                                agent_id: agent_id.clone(),
                                 pattern_type,
                                 context: wait_result.context.clone(),
                             });
@@ -517,21 +572,20 @@ impl AgentWatcher {
                                 .unwrap_or_else(|| "Unknown".to_string());
 
                             info!(
-                                agent_id = %agent.agent_id,
+                                agent_id = %agent_id,
                                 pattern_type = %pattern_type,
                                 "Agent still waiting, sending reminder"
                             );
 
                             events.push(WatchEvent::WaitingForInput {
-                                agent_id: agent.agent_id.clone(),
+                                agent_id: agent_id.clone(),
                                 pattern_type: format!("{} (提醒)", pattern_type),
                                 context: wait_result.context.clone(),
                             });
                         }
                         NotifyAction::Suppressed => {
-                            // 被抑制，不发送
                             debug!(
-                                agent_id = %agent.agent_id,
+                                agent_id = %agent_id,
                                 "Notification suppressed (within lock window)"
                             );
                         }
@@ -539,16 +593,15 @@ impl AgentWatcher {
                 } else {
                     // 不在等待状态
                     if was_waiting {
-                        // 从等待状态恢复，清除锁定
-                        info!(agent_id = %agent.agent_id, "Agent resumed from waiting state");
-                        self.clear_notification_lock(&agent.agent_id);
+                        info!(agent_id = %agent_id, "Agent resumed from waiting state");
+                        self.clear_notification_lock(&agent_id);
                         events.push(WatchEvent::AgentResumed {
-                            agent_id: agent.agent_id.clone(),
+                            agent_id: agent_id.clone(),
                         });
                     }
                 }
 
-                self.last_waiting_state.insert(agent.agent_id.clone(), wait_result.is_waiting);
+                self.last_waiting_state.insert(agent_id, wait_result.is_waiting);
             }
         }
 
