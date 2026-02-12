@@ -136,6 +136,33 @@ impl StabilityState {
     }
 }
 
+/// Hook event tracker for cross-process coordination
+#[derive(Debug, Clone, Default)]
+struct HookEventTracker {
+    /// Last hook event timestamp per agent (Unix seconds)
+    last_hook_times: HashMap<String, u64>,
+}
+
+impl HookEventTracker {
+    /// Record a hook event for an agent
+    fn record_hook(&mut self, agent_id: &str, now: u64) {
+        self.last_hook_times.insert(agent_id.to_string(), now);
+    }
+
+    /// Check if agent is within quiet period (recent hook event)
+    fn is_in_quiet_period(&self, agent_id: &str, now: u64, quiet_secs: u64) -> bool {
+        self.last_hook_times
+            .get(agent_id)
+            .map(|&last_time| now.saturating_sub(last_time) < quiet_secs)
+            .unwrap_or(false)
+    }
+
+    /// Clear tracking for an agent
+    fn clear(&mut self, agent_id: &str) {
+        self.last_hook_times.remove(agent_id);
+    }
+}
+
 /// Agent 监控器
 pub struct AgentWatcher {
     /// Agent 管理器
@@ -718,5 +745,30 @@ mod tests {
         assert!(!state.is_stable(1005, 6)); // 5 secs, not stable
         assert!(state.is_stable(1006, 6));  // 6 secs, stable
         assert!(state.is_stable(1010, 6));  // 10 secs, stable
+    }
+
+    // === HookEventTracker tests ===
+
+    #[test]
+    fn test_hook_tracker_record_and_check() {
+        let mut tracker = HookEventTracker::default();
+        tracker.record_hook("agent-1", 1000);
+
+        // Within quiet period (10 secs)
+        assert!(tracker.is_in_quiet_period("agent-1", 1005, 10));
+        // After quiet period
+        assert!(!tracker.is_in_quiet_period("agent-1", 1015, 10));
+        // Different agent
+        assert!(!tracker.is_in_quiet_period("agent-2", 1005, 10));
+    }
+
+    #[test]
+    fn test_hook_tracker_clear() {
+        let mut tracker = HookEventTracker::default();
+        tracker.record_hook("agent-1", 1000);
+        assert!(tracker.is_in_quiet_period("agent-1", 1005, 10));
+
+        tracker.clear("agent-1");
+        assert!(!tracker.is_in_quiet_period("agent-1", 1005, 10));
     }
 }
