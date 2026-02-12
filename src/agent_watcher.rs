@@ -177,6 +177,10 @@ pub struct AgentWatcher {
     notification_locks: HashMap<String, NotificationLock>,
     /// 每个 agent 的上次等待状态（用于检测恢复）
     last_waiting_state: HashMap<String, bool>,
+    /// 每个 agent 的终端稳定性状态
+    stability_states: HashMap<String, StabilityState>,
+    /// Hook 事件追踪器
+    hook_tracker: HookEventTracker,
 }
 
 impl AgentWatcher {
@@ -196,6 +200,8 @@ impl AgentWatcher {
             jsonl_parsers: HashMap::new(),
             notification_locks: HashMap::new(),
             last_waiting_state: HashMap::new(),
+            stability_states: HashMap::new(),
+            hook_tracker: HookEventTracker::default(),
         }
     }
 
@@ -208,6 +214,8 @@ impl AgentWatcher {
             jsonl_parsers: HashMap::new(),
             notification_locks: HashMap::new(),
             last_waiting_state: HashMap::new(),
+            stability_states: HashMap::new(),
+            hook_tracker: HookEventTracker::default(),
         }
     }
 
