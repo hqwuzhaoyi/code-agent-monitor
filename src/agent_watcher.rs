@@ -190,6 +190,10 @@ impl AgentWatcher {
     const REMINDER_DELAY_SECS: u64 = 1800;
     /// 最大通知时限（2 小时后停止发送）
     const MAX_NOTIFICATION_DURATION_SECS: u64 = 7200;
+    /// Terminal stability threshold (seconds)
+    const STABILITY_THRESHOLD_SECS: u64 = 6;
+    /// Hook quiet period - skip AI check if hook event within this window (seconds)
+    const HOOK_QUIET_PERIOD_SECS: u64 = 10;
 
     /// 创建新的监控器
     pub fn new() -> Self {
@@ -347,6 +351,50 @@ impl AgentWatcher {
     /// 清除 agent 的通知锁定（当 agent 恢复运行时调用）
     fn clear_notification_lock(&mut self, agent_id: &str) {
         self.notification_locks.remove(agent_id);
+    }
+
+    /// Determine if AI check should be performed
+    fn should_check_ai(
+        &self,
+        agent_id: &str,
+        stability: &StabilityState,
+        now: u64,
+        content_changed: bool,
+    ) -> bool {
+        // Condition 1: Content just changed - wait for stability
+        if content_changed {
+            return false;
+        }
+
+        // Condition 2: Already checked for this stable state
+        if stability.ai_checked {
+            return false;
+        }
+
+        // Condition 3: Not stable long enough
+        if !stability.is_stable(now, Self::STABILITY_THRESHOLD_SECS) {
+            return false;
+        }
+
+        // Condition 4: Recent hook event - let hook flow handle it
+        if self.hook_tracker.is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS) {
+            return false;
+        }
+
+        true
+    }
+
+    /// Get skip reason for debug logging
+    fn skip_reason(&self, agent_id: &str, stability: &StabilityState, now: u64) -> &'static str {
+        if stability.ai_checked {
+            "already_checked"
+        } else if !stability.is_stable(now, Self::STABILITY_THRESHOLD_SECS) {
+            "not_stable_yet"
+        } else if self.hook_tracker.is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS) {
+            "recent_hook_event"
+        } else {
+            "unknown"
+        }
     }
 
     /// 执行一次轮询，返回检测到的事件
@@ -778,5 +826,40 @@ mod tests {
 
         tracker.clear("agent-1");
         assert!(!tracker.is_in_quiet_period("agent-1", 1005, 10));
+    }
+
+    // === should_check_ai tests ===
+
+    #[test]
+    fn test_should_check_ai_content_changed() {
+        let watcher = AgentWatcher::new_for_test();
+        let state = StabilityState::new(12345, 1000);
+        // Content just changed - should NOT check
+        assert!(!watcher.should_check_ai("agent-1", &state, 1000, true));
+    }
+
+    #[test]
+    fn test_should_check_ai_already_checked() {
+        let watcher = AgentWatcher::new_for_test();
+        let mut state = StabilityState::new(12345, 1000);
+        state.ai_checked = true;
+        // Already checked - should NOT check
+        assert!(!watcher.should_check_ai("agent-1", &state, 1010, false));
+    }
+
+    #[test]
+    fn test_should_check_ai_not_stable() {
+        let watcher = AgentWatcher::new_for_test();
+        let state = StabilityState::new(12345, 1000);
+        // Only 3 seconds stable - should NOT check (threshold is 6)
+        assert!(!watcher.should_check_ai("agent-1", &state, 1003, false));
+    }
+
+    #[test]
+    fn test_should_check_ai_all_conditions_met() {
+        let watcher = AgentWatcher::new_for_test();
+        let state = StabilityState::new(12345, 1000);
+        // 10 seconds stable, not checked, no recent hook - should check
+        assert!(watcher.should_check_ai("agent-1", &state, 1010, false));
     }
 }
