@@ -144,7 +144,8 @@ struct HookEventTracker {
 }
 
 impl HookEventTracker {
-    /// Record a hook event for an agent
+    /// Record a hook event for an agent (used by tests)
+    #[allow(dead_code)]
     fn record_hook(&mut self, agent_id: &str, now: u64) {
         self.last_hook_times.insert(agent_id.to_string(), now);
     }
@@ -353,7 +354,8 @@ impl AgentWatcher {
         self.notification_locks.remove(agent_id);
     }
 
-    /// Determine if AI check should be performed
+    /// Determine if AI check should be performed (used by tests)
+    #[allow(dead_code)]
     fn should_check_ai(
         &self,
         agent_id: &str,
@@ -384,7 +386,8 @@ impl AgentWatcher {
         true
     }
 
-    /// Get skip reason for debug logging
+    /// Get skip reason for debug logging (used by tests)
+    #[allow(dead_code)]
     fn skip_reason(&self, agent_id: &str, stability: &StabilityState, now: u64) -> &'static str {
         if stability.ai_checked {
             "already_checked"
