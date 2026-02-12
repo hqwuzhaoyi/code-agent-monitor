@@ -31,7 +31,7 @@ pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
 const DEFAULT_TIMEOUT_MS: u64 = 5000;
 
 /// 默认最大 tokens
-const DEFAULT_MAX_TOKENS: u32 = 500;
+const DEFAULT_MAX_TOKENS: u32 = 1500;
 
 /// 内容提取超时（毫秒）- 10 秒（本地代理可能需要更长时间）
 const EXTRACT_TIMEOUT_MS: u64 = 10000;
@@ -656,7 +656,7 @@ fn extract_question_with_context(terminal_snapshot: &str, lines: usize) -> Resul
 
 请用 JSON 格式回复，包含以下字段：
 - question_type: "open"（开放问题）、"choice"（选择题）、"confirm"（确认）、"none"（无问题，Agent 空闲等待指令）
-- question: 核心问题内容（简洁，不超过 100 字）。重要：必须包含问题所引用的具体内容，让用户无需查看终端就能理解问题
+- question: 完整的问题内容。重要：必须包含问题所引用的具体内容（如代码结构、设计方案、选项列表等），让用户无需查看终端就能理解和回答问题。不要截断或省略重要上下文
 - options: 选项列表（仅当 question_type 为 "choice" 时提取，格式如 ["1. 选项A", "2. 选项B"]，否则为空数组 []）
 - reply_hint: 回复提示（如"回复 y/n"、"回复数字选择"、"回复内容"）
 - contains_ui_noise: true/false（问题内容是否包含终端 UI 元素，如工具调用标记、状态指示器、进度条、ASCII art 等）
@@ -678,8 +678,9 @@ context_complete 判断标准（非常重要）：
 4. 如果问题引用了看不到的上下文，必须设置 context_complete 为 false
 5. 如果 context_complete 为 true，question 必须包含足够的上下文让用户理解问题
 6. 当 question_type 为 "none" 时，仍需分析 agent_status 和 last_action，帮助用户了解 Agent 状态
+7. 如果 Agent 只是显示了结果/总结然后等待（终端只有空闲提示符 ❯ 或 >，没有明确问问题），应该返回 question_type: "none"
 
-只返回 JSON，不要其他内容。如果没有问题，question_type 设为 "none"。"#,
+只返回 JSON，不要其他内容。"#,
         truncated
     );
 
@@ -1149,5 +1150,225 @@ That's all."#;
         // 测试不相等
         assert_ne!(processing, waiting);
         assert_ne!(waiting, unknown);
+    }
+
+    /// 集成测试：验证完整问题内容提取（需要 API key）
+    ///
+    /// 运行方式：cargo test test_extract_full_question_content -- --ignored --nocapture
+    #[test]
+    #[ignore] // 需要 API key，默认跳过
+    fn test_extract_full_question_content() {
+        // 模拟包含完整组件设计的终端快照
+        let snapshot = r#"
+⏺ 第三部分：组件设计
+
+  TodoInput.tsx
+  - 受控输入框 + 添加按钮
+  - props: onAdd: (text: string) => void
+  - 内部管理输入文本状态，提交后清空
+
+  TodoList.tsx
+  - 渲染 Todo 数组
+  - props: todos, onToggle, onDelete
+  - 空列表时显示提示文字
+
+  TodoItem.tsx
+  - 显示单个待办项：复选框 + 文本 + 删除按钮
+  - props: todo, onToggle, onDelete
+  - 已完成项文本添加删除线样式
+
+  数据流：
+    App (todos state)
+    ├── TodoInput (onAdd)
+    ├── TodoList (todos, onToggle, onDelete)
+    │   └── TodoItem × N
+
+  单向数据流，状态提升到 App，子组件通过回调通知变更。
+
+  这个组件设计没问题吗？
+
+❯
+"#;
+
+        let result = extract_question_with_haiku(snapshot);
+
+        match result {
+            ExtractionResult::Found(extracted) => {
+                println!("=== 提取结果 ===");
+                println!("问题类型: {}", extracted.question_type);
+                println!("问题内容 ({} 字符):\n{}", extracted.question.len(), extracted.question);
+                println!("回复提示: {}", extracted.reply_hint);
+
+                // 验证问题内容包含关键信息
+                assert!(extracted.question.contains("TodoInput") || extracted.question.contains("组件设计"),
+                    "问题应包含 TodoInput 或组件设计关键词");
+                assert!(extracted.question.contains("TodoList") || extracted.question.contains("数据流"),
+                    "问题应包含 TodoList 或数据流关键词");
+
+                // 验证问题内容足够长（不被截断）
+                assert!(extracted.question.len() > 100,
+                    "问题内容应超过 100 字符，实际: {} 字符", extracted.question.len());
+            }
+            ExtractionResult::NoQuestion(summary) => {
+                panic!("AI 判断没有问题，但终端明显有问题。status: {}, last_action: {:?}",
+                    summary.status, summary.last_action);
+            }
+            ExtractionResult::Failed => {
+                panic!("提取失败，请检查 API key 配置");
+            }
+        }
+    }
+
+    /// 集成测试：验证 Agent Teams 场景的完整内容提取
+    ///
+    /// 运行方式：cargo test test_extract_agent_teams_question -- --ignored --nocapture
+    #[test]
+    #[ignore] // 需要 API key，默认跳过
+    fn test_extract_agent_teams_question() {
+        // 模拟 Agent Teams 组建场景
+        let snapshot = r#"
+我将为你组建一个 Agent Team 来完成这个任务。
+
+团队结构：
+- team-lead: 负责任务分解和协调
+- researcher: 负责调研技术方案
+- developer: 负责代码实现
+- tester: 负责测试验证
+
+任务分解：
+1. 调研 React 状态管理最佳实践
+2. 设计组件架构
+3. 实现核心功能
+4. 编写单元测试
+
+预计需要 4 个 Agent 并行工作。
+
+确认组建这个团队吗？
+
+❯
+"#;
+
+        let result = extract_question_with_haiku(snapshot);
+
+        match result {
+            ExtractionResult::Found(extracted) => {
+                println!("=== Agent Teams 提取结果 ===");
+                println!("问题类型: {}", extracted.question_type);
+                println!("问题内容 ({} 字符):\n{}", extracted.question.len(), extracted.question);
+
+                // 验证问题内容包含团队结构信息
+                assert!(extracted.question.contains("team-lead") || extracted.question.contains("团队"),
+                    "问题应包含团队相关信息");
+                assert!(extracted.question.contains("researcher") || extracted.question.contains("developer") || extracted.question.contains("任务"),
+                    "问题应包含角色或任务信息");
+            }
+            ExtractionResult::NoQuestion(_) => {
+                panic!("AI 判断没有问题，但终端明显有确认问题");
+            }
+            ExtractionResult::Failed => {
+                panic!("提取失败，请检查 API key 配置");
+            }
+        }
+    }
+
+    /// 集成测试：验证代码查询结果场景（Agent 完成任务后等待输入）
+    ///
+    /// 这个场景是 Agent 完成了代码查询任务，显示了完整结果，然后等待用户下一步指令。
+    /// 期望：AI 应该识别为 NoQuestion（没有问题需要回答），并提取任务摘要。
+    ///
+    /// 运行方式：cargo test test_extract_code_query_result -- --ignored --nocapture
+    #[test]
+    #[ignore] // 需要 API key，默认跳过
+    fn test_extract_code_query_result() {
+        // 模拟代码查询完成后的终端快照
+        let snapshot = r#"
+⏺ 根据探索结果，找到了"回单图片"的相关信息：
+
+  回单图片字段和接口
+
+  字段名：
+  - receiptFileList - 回单图片列表（数组）
+  - showReceiptPicFlag - 是否显示回单图片的标志
+
+  接口：
+  - 路径：/supplement/cardDetail
+  - 方法：GET
+  - API 函数：getMBOrderDetail(params)
+
+  相关文件：
+  - API 定义：src/api_new/saasTmsTrans/index.js:101-107
+  - 图片展示组件：src/views/order/create/components/common/MbCardImageBlock.vue:14-15
+  - 卡片组件：src/views/order/create/components/common/MbOrderCard.vue:88
+
+⏺ 关键代码
+
+  1. API 接口定义 (src/api_new/saasTmsTrans/index.js:101-107)
+  // 查询满帮订单详情
+  export const getMBOrderDetail = (params) => {
+    return saasTmsTrans.request({
+      method: 'get',
+      url: '/supplement/cardDetail',
+      params
+    })
+  }
+
+  2. 组件传参 (MbOrderCard.vue:83-91)
+  <MbCardImageBlock
+    :detail="detail"
+    :mybOrderId="detailInfo.orderTmsInfo && detailInfo.orderTmsInfo.id"
+    :loadFileList="detailInfo.loadFileList"
+    :unloadFileList="detailInfo.unloadFileList"
+    :receiptFileList="detailInfo.receiptFileList"
+    :showReceipt="detailInfo.showReceiptPicFlag"
+    @uploadSuccess="onImgUploadSuccess"
+  />
+
+  3. 回单图片展示 (MbCardImageBlock.vue:12-18)
+  <div class="item-warp">
+    <div v-if="showReceipt">
+      <span>回单图片</span>
+      <span @click="onClickReceipt(receiptFileList)" class="count">【{{ receiptFileList.length }}】</span>
+    </div>
+  </div>
+
+  总结：
+  - 接口：GET /supplement/cardDetail
+  - 字段：receiptFileList（图片列表）、showReceiptPicFlag（是否显示）
+
+❯
+"#;
+
+        let result = extract_question_with_haiku(snapshot);
+
+        match result {
+            ExtractionResult::Found(extracted) => {
+                println!("=== 代码查询结果提取 ===");
+                println!("问题类型: {}", extracted.question_type);
+                println!("问题内容 ({} 字符):\n{}", extracted.question.len(), extracted.question);
+                println!("回复提示: {}", extracted.reply_hint);
+
+                // 如果 AI 认为有问题，验证内容是否合理
+                // 这种场景下，AI 可能会认为是开放式问题（等待下一步指令）
+                println!("\n注意：这个场景 AI 可能识别为开放式问题或无问题");
+            }
+            ExtractionResult::NoQuestion(summary) => {
+                println!("=== AI 判断没有问题 ===");
+                println!("状态: {}", summary.status);
+                println!("最后操作: {:?}", summary.last_action);
+
+                // 验证任务摘要包含关键信息
+                if let Some(action) = &summary.last_action {
+                    println!("\n任务摘要内容: {}", action);
+                    // 期望摘要包含回单图片或代码查询相关信息
+                    assert!(
+                        action.contains("回单") || action.contains("receiptFileList") || action.contains("代码") || action.contains("查询"),
+                        "任务摘要应包含回单图片或代码查询相关信息"
+                    );
+                }
+            }
+            ExtractionResult::Failed => {
+                panic!("提取失败，请检查 API key 配置");
+            }
+        }
     }
 }
