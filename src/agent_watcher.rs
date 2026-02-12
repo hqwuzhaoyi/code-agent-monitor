@@ -88,6 +88,54 @@ struct NotificationLock {
     reminder_sent: bool,
 }
 
+/// Terminal stability state for AI call optimization
+#[derive(Debug, Clone)]
+struct StabilityState {
+    /// Terminal content hash
+    content_hash: u64,
+    /// Timestamp when this hash was first seen (Unix seconds)
+    first_seen_at: u64,
+    /// Number of consecutive polls with same hash
+    consecutive_count: u32,
+    /// Whether AI check has been performed for this stable state
+    ai_checked: bool,
+}
+
+impl StabilityState {
+    fn new(hash: u64, now: u64) -> Self {
+        Self {
+            content_hash: hash,
+            first_seen_at: now,
+            consecutive_count: 1,
+            ai_checked: false,
+        }
+    }
+
+    /// Update state with new hash, returns true if content changed
+    fn update(&mut self, hash: u64, now: u64) -> bool {
+        if hash == self.content_hash {
+            self.consecutive_count += 1;
+            false
+        } else {
+            self.content_hash = hash;
+            self.first_seen_at = now;
+            self.consecutive_count = 1;
+            self.ai_checked = false;
+            true
+        }
+    }
+
+    /// Check if terminal has been stable for threshold duration
+    fn is_stable(&self, now: u64, threshold_secs: u64) -> bool {
+        now.saturating_sub(self.first_seen_at) >= threshold_secs
+    }
+
+    /// Mark that AI check has been performed
+    fn mark_ai_checked(&mut self) {
+        self.ai_checked = true;
+    }
+}
+
 /// Agent 监控器
 pub struct AgentWatcher {
     /// Agent 管理器
@@ -631,5 +679,44 @@ mod tests {
             .collect();
 
         assert_eq!(critical.len(), 2);
+    }
+
+    // === StabilityState tests ===
+
+    #[test]
+    fn test_stability_state_new() {
+        let state = StabilityState::new(12345, 1000);
+        assert_eq!(state.content_hash, 12345);
+        assert_eq!(state.first_seen_at, 1000);
+        assert_eq!(state.consecutive_count, 1);
+        assert!(!state.ai_checked);
+    }
+
+    #[test]
+    fn test_stability_state_update_same_hash() {
+        let mut state = StabilityState::new(12345, 1000);
+        let changed = state.update(12345, 1001);
+        assert!(!changed);
+        assert_eq!(state.consecutive_count, 2);
+        assert_eq!(state.first_seen_at, 1000); // unchanged
+    }
+
+    #[test]
+    fn test_stability_state_update_different_hash() {
+        let mut state = StabilityState::new(12345, 1000);
+        state.ai_checked = true;
+        let changed = state.update(67890, 1002);
+        assert!(changed);
+        assert_eq!(state.consecutive_count, 1);
+        assert_eq!(state.first_seen_at, 1002);
+        assert!(!state.ai_checked); // reset
+    }
+
+    #[test]
+    fn test_stability_state_is_stable() {
+        let state = StabilityState::new(12345, 1000);
+        assert!(!state.is_stable(1005, 6)); // 5 secs, not stable
+        assert!(state.is_stable(1006, 6));  // 6 secs, stable
+        assert!(state.is_stable(1010, 6));  // 10 secs, stable
     }
 }
