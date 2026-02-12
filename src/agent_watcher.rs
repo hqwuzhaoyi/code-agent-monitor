@@ -683,6 +683,8 @@ impl AgentWatcher {
         self.notification_locks.remove(agent_id);
         self.last_waiting_state.remove(agent_id);
         self.input_detector.clear_session(agent_id);
+        self.stability_states.remove(agent_id);
+        self.hook_tracker.clear(agent_id);
     }
 
     /// 获取 agent 管理器引用
