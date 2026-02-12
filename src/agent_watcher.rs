@@ -397,6 +397,24 @@ impl AgentWatcher {
         }
     }
 
+    /// Load hook events from file (cross-process coordination)
+    fn load_hook_events(&mut self) {
+        let hook_file = dirs::home_dir()
+            .unwrap_or_else(|| std::path::PathBuf::from("."))
+            .join(".claude-monitor")
+            .join("last_hook_events.json");
+
+        if hook_file.exists() {
+            if let Ok(content) = std::fs::read_to_string(&hook_file) {
+                if let Ok(events) = serde_json::from_str::<HashMap<String, u64>>(&content) {
+                    for (agent_id, timestamp) in events {
+                        self.hook_tracker.last_hook_times.insert(agent_id, timestamp);
+                    }
+                }
+            }
+        }
+    }
+
     /// 执行一次轮询，返回检测到的事件
     pub fn poll_once(&mut self) -> Result<Vec<WatchEvent>> {
         let mut events = Vec::new();

@@ -229,6 +229,41 @@ enum Commands {
     },
 }
 
+/// Record hook event timestamp for cross-process coordination with watcher
+fn record_hook_event(agent_id: &str) -> Result<()> {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    use std::collections::HashMap;
+
+    let hook_file = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".claude-monitor")
+        .join("last_hook_events.json");
+
+    // Read existing events
+    let mut events: HashMap<String, u64> = if hook_file.exists() {
+        std::fs::read_to_string(&hook_file)
+            .ok()
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    } else {
+        HashMap::new()
+    };
+
+    // Update timestamp
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    events.insert(agent_id.to_string(), now);
+
+    // Atomic write via temp file
+    let temp_file = hook_file.with_extension("tmp");
+    std::fs::write(&temp_file, serde_json::to_string(&events)?)?;
+    std::fs::rename(&temp_file, &hook_file)?;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // 初始化 tracing 日志系统
@@ -584,6 +619,9 @@ async fn main() -> Result<()> {
             } else {
                 agent_id.unwrap_or_else(|| "unknown".to_string())
             };
+
+            // Record hook event for watcher coordination
+            let _ = record_hook_event(&resolved_agent_id);
 
             // 记录 hook 触发日志
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
