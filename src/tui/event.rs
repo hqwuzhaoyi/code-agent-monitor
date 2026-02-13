@@ -23,8 +23,8 @@ pub fn poll_event(timeout: Duration) -> Result<Option<TuiEvent>> {
 
 /// 处理按键事件
 pub fn handle_key(app: &mut crate::tui::App, key: KeyEvent) {
-    if app.search_mode {
-        handle_search_key(app, key);
+    if app.filter_mode {
+        handle_filter_key(app, key);
         return;
     }
     match app.view {
@@ -33,35 +33,37 @@ pub fn handle_key(app: &mut crate::tui::App, key: KeyEvent) {
     }
 }
 
-fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
-    match (key.code, key.modifiers) {
-        // 退出搜索
-        (KeyCode::Esc, _) => app.exit_search_mode(),
-
-        // 确认搜索
-        (KeyCode::Enter, _) => app.confirm_search(),
+fn handle_filter_key(app: &mut crate::tui::App, key: KeyEvent) {
+    match key.code {
+        // 退出过滤模式（保留过滤结果）
+        KeyCode::Enter => app.exit_filter_mode(),
+        // 取消过滤（清除）
+        KeyCode::Esc => app.clear_filter(),
 
         // 光标移动
-        (KeyCode::Left, _) => app.search_input.move_left(),
-        (KeyCode::Right, _) => app.search_input.move_right(),
-        (KeyCode::Home, _) => app.search_input.move_home(),
-        (KeyCode::End, _) => app.search_input.move_end(),
-        (KeyCode::Char('a'), KeyModifiers::CONTROL) => app.search_input.move_home(),
-        (KeyCode::Char('e'), KeyModifiers::CONTROL) => app.search_input.move_end(),
+        KeyCode::Left => app.filter_input.move_left(),
+        KeyCode::Right => app.filter_input.move_right(),
+        KeyCode::Home => app.filter_input.move_home(),
+        KeyCode::End => app.filter_input.move_end(),
 
         // 文本编辑
-        (KeyCode::Backspace, _) => app.search_input.backspace(),
-        (KeyCode::Delete, _) => app.search_input.delete(),
-        (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.search_input.clear(),
-        (KeyCode::Char('w'), KeyModifiers::CONTROL) => app.search_input.delete_word(),
+        KeyCode::Backspace => {
+            app.filter_input.backspace();
+            app.on_filter_change();
+        }
+        KeyCode::Delete => {
+            app.filter_input.delete();
+            app.on_filter_change();
+        }
 
-        // 导航匹配项（用上下方向键 + Ctrl）
-        (KeyCode::Down, KeyModifiers::CONTROL) => app.next_agent(),
-        (KeyCode::Up, KeyModifiers::CONTROL) => app.prev_agent(),
+        // 导航（在过滤模式下也可以用上下键选择）
+        KeyCode::Up => app.prev_agent(),
+        KeyCode::Down => app.next_agent(),
 
-        // 字符输入（包括 j/k）
-        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
-            app.search_input.insert(c);
+        // 字符输入
+        KeyCode::Char(c) => {
+            app.filter_input.insert(c);
+            app.on_filter_change();
         }
         _ => {}
     }
@@ -73,10 +75,16 @@ fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Char('j') | KeyCode::Down => app.next_agent(),
         KeyCode::Char('k') | KeyCode::Up => app.prev_agent(),
         KeyCode::Char('l') => app.toggle_view(),
-        KeyCode::Char('/') => app.enter_search_mode(),
+        KeyCode::Char('/') => app.enter_filter_mode(),
+        KeyCode::Esc => {
+            // Esc 清除过滤
+            if !app.filter_input.is_empty() {
+                app.clear_filter();
+            }
+        }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         KeyCode::Enter => {
-            // 跳转到 tmux 将在后续 task 实现
+            // Enter 跳转 tmux（在 run 函数中处理）
         }
         _ => {}
     }

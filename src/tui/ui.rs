@@ -21,39 +21,38 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     // 预先计算过滤后的 agents（避免重复计算）
     let filtered = app.filtered_agents();
     let filtered_count = filtered.len();
+    let filter_text = app.filter_input.text();
+    let is_filtering = !filter_text.is_empty();
 
-    // 垂直分割: 状态栏 | 主区域 | 通知 | 快捷键
+    // 垂直分割: 状态栏 | 主区域 | 通知 | 底部栏
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
             Constraint::Length(1),  // 状态栏
             Constraint::Min(10),    // 主区域
             Constraint::Length(5),  // 通知
-            Constraint::Length(1),  // 快捷键
+            Constraint::Length(1),  // 底部栏（过滤输入或快捷键）
         ])
         .split(area);
 
     // 状态栏
-    let status = if app.search_mode {
-        // 显示光标位置
-        let (before, after) = app.search_input.split_at_cursor();
-        format!(" 🔍 {}│{}", before, after)
-    } else if !app.confirmed_query.is_empty() {
+    let status = if is_filtering {
         format!(
-            " CAM TUI │ Agents: {} (filtered: {}) │ ↻ {:?} ago │ [/] search",
+            " CAM TUI │ Showing {} of {} │ ↻ {:?} ago",
             filtered_count,
-            app.confirmed_query,
+            app.agents.len(),
             app.last_refresh.elapsed()
         )
     } else {
         format!(
-            " CAM TUI │ Agents: {} │ ↻ {:?} ago │ [/] search",
+            " CAM TUI │ Agents: {} │ ↻ {:?} ago",
             app.agents.len(),
             app.last_refresh.elapsed()
         )
     };
-    let status_style = if app.search_mode {
-        Style::default().bg(Color::Yellow).fg(Color::Black)
+    // 过滤模式时边框变色（类似 lazygit）
+    let status_style = if app.filter_mode {
+        Style::default().bg(Color::Cyan).fg(Color::Black)
     } else {
         Style::default().bg(Color::Blue).fg(Color::White)
     };
@@ -78,10 +77,21 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     // 通知区域
     render_notifications(app, frame, vertical[2]);
 
-    // 快捷键栏
-    let help = " [j/k] 移动  [Enter] 跳转 tmux  [l] 日志  [q] 退出 ";
-    let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
-    frame.render_widget(help_bar, vertical[3]);
+    // 底部栏：过滤模式显示输入框，否则显示快捷键
+    if app.filter_mode {
+        let (before, after) = app.filter_input.split_at_cursor();
+        let filter_bar = Paragraph::new(format!(" Filter: {}│{} ", before, after))
+            .style(Style::default().bg(Color::Yellow).fg(Color::Black));
+        frame.render_widget(filter_bar, vertical[3]);
+    } else if is_filtering {
+        let filter_bar = Paragraph::new(format!(" Filter: {} │ [Esc] clear │ [/] edit ", filter_text))
+            .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
+        frame.render_widget(filter_bar, vertical[3]);
+    } else {
+        let help = " [j/k] 移动  [Enter] tmux  [/] filter  [l] logs  [q] quit ";
+        let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
+        frame.render_widget(help_bar, vertical[3]);
+    }
 }
 
 /// 渲染 Agent 列表（使用预先过滤的结果）
@@ -104,14 +114,25 @@ fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, fil
         })
         .collect();
 
-    let title = if app.confirmed_query.is_empty() {
+    let filter_text = app.filter_input.text();
+    let title = if filter_text.is_empty() {
         " Agents ".to_string()
     } else {
         format!(" Agents ({}) ", filtered.len())
     };
 
+    // 过滤模式时边框变色
+    let border_style = if app.filter_mode {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(title));
+        .block(Block::default()
+            .borders(Borders::ALL)
+            .title(title)
+            .border_style(border_style));
     frame.render_widget(list, area);
 }
 

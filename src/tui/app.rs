@@ -40,12 +40,10 @@ pub struct App {
     pub terminal_stream: TerminalStream,
     /// 日志状态
     pub logs_state: LogsState,
-    /// 搜索模式
-    pub search_mode: bool,
-    /// 搜索输入组件
-    pub search_input: SearchInput,
-    /// 已确认的搜索词（回车后生效）
-    pub confirmed_query: String,
+    /// 过滤模式（类似 lazygit）
+    pub filter_mode: bool,
+    /// 过滤输入
+    pub filter_input: SearchInput,
 }
 
 impl App {
@@ -60,9 +58,8 @@ impl App {
             last_refresh: std::time::Instant::now(),
             terminal_stream: TerminalStream::new(),
             logs_state: LogsState::new(),
-            search_mode: false,
-            search_input: SearchInput::new(),
-            confirmed_query: String::new(),
+            filter_mode: false,
+            filter_input: SearchInput::new(),
         }
     }
 
@@ -100,44 +97,43 @@ impl App {
         };
     }
 
-    /// 进入搜索模式
-    pub fn enter_search_mode(&mut self) {
-        self.search_mode = true;
-        self.search_input.set_text(&self.confirmed_query);
+    /// 进入过滤模式
+    pub fn enter_filter_mode(&mut self) {
+        self.filter_mode = true;
     }
 
-    /// 退出搜索模式（取消）
-    pub fn exit_search_mode(&mut self) {
-        self.search_mode = false;
-        self.search_input.clear();
+    /// 退出过滤模式（保留过滤结果）
+    pub fn exit_filter_mode(&mut self) {
+        self.filter_mode = false;
     }
 
-    /// 确认搜索
-    pub fn confirm_search(&mut self) {
-        self.search_mode = false;
-        self.confirmed_query = self.search_input.text().to_string();
+    /// 清除过滤
+    pub fn clear_filter(&mut self) {
+        self.filter_input.clear();
+        self.filter_mode = false;
+        self.selected_index = 0;
     }
 
-    /// 清除搜索
-    pub fn clear_search(&mut self) {
-        self.search_input.clear();
-        self.confirmed_query.clear();
-    }
-
-    /// 获取过滤后的 agents
+    /// 获取过滤后的 agents（实时过滤）
     pub fn filtered_agents(&self) -> Vec<&AgentItem> {
-        if self.confirmed_query.is_empty() {
+        let query = self.filter_input.text();
+        if query.is_empty() {
             self.agents.iter().collect()
         } else {
-            let query = self.confirmed_query.to_lowercase();
+            let query_lower = query.to_lowercase();
             self.agents
                 .iter()
                 .filter(|a| {
-                    a.id.to_lowercase().contains(&query)
-                        || a.project.to_lowercase().contains(&query)
+                    a.id.to_lowercase().contains(&query_lower)
+                        || a.project.to_lowercase().contains(&query_lower)
                 })
                 .collect()
         }
+    }
+
+    /// 过滤输入变化时重置选择
+    pub fn on_filter_change(&mut self) {
+        self.selected_index = 0;
     }
 
     /// 刷新 agent 列表
