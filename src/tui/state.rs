@@ -15,10 +15,10 @@ impl AgentState {
     /// 返回状态图标
     pub fn icon(&self) -> &'static str {
         match self {
-            AgentState::Running => "●",
-            AgentState::Waiting => "◉",
-            AgentState::Idle => "○",
-            AgentState::Error => "✗",
+            AgentState::Running => "🟢",
+            AgentState::Waiting => "🟡",
+            AgentState::Idle => "⚪",
+            AgentState::Error => "🔴",
         }
     }
 }

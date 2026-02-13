@@ -45,10 +45,10 @@ mod tests {
 
     #[test]
     fn test_agent_state_icon() {
-        assert_eq!(AgentState::Running.icon(), "●");
-        assert_eq!(AgentState::Waiting.icon(), "◉");
-        assert_eq!(AgentState::Idle.icon(), "○");
-        assert_eq!(AgentState::Error.icon(), "✗");
+        assert_eq!(AgentState::Running.icon(), "🟢");
+        assert_eq!(AgentState::Waiting.icon(), "🟡");
+        assert_eq!(AgentState::Idle.icon(), "⚪");
+        assert_eq!(AgentState::Error.icon(), "🔴");
     }
 
     #[test]
