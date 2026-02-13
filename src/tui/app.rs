@@ -11,6 +11,7 @@ use ratatui::prelude::*;
 
 use chrono::{DateTime, Local};
 
+use crate::tui::logs::LogsState;
 use crate::tui::state::{AgentItem, AgentState, NotificationItem, View};
 use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, AgentStatus, TmuxManager};
@@ -36,6 +37,8 @@ pub struct App {
     pub last_refresh: std::time::Instant,
     /// 终端流管理器
     pub terminal_stream: TerminalStream,
+    /// 日志状态
+    pub logs_state: LogsState,
 }
 
 impl App {
@@ -49,6 +52,7 @@ impl App {
             terminal_preview: String::new(),
             last_refresh: std::time::Instant::now(),
             terminal_stream: TerminalStream::new(),
+            logs_state: LogsState::new(),
         }
     }
 
@@ -78,7 +82,10 @@ impl App {
     /// 切换视图
     pub fn toggle_view(&mut self) {
         self.view = match self.view {
-            View::Dashboard => View::Logs,
+            View::Dashboard => {
+                let _ = self.logs_state.load();
+                View::Logs
+            }
             View::Logs => View::Dashboard,
         };
     }

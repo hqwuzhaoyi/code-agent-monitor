@@ -47,6 +47,10 @@ fn handle_logs_key(app: &mut crate::tui::App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Esc => app.toggle_view(),
+        KeyCode::Char('j') | KeyCode::Down => app.logs_state.scroll_down(),
+        KeyCode::Char('k') | KeyCode::Up => app.logs_state.scroll_up(),
+        KeyCode::Char('G') => app.logs_state.scroll_to_bottom(),
+        KeyCode::Char('f') => app.logs_state.toggle_filter(),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         _ => {}
     }

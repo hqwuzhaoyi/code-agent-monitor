@@ -119,12 +119,54 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
 }
 
 /// 渲染日志视图
-fn render_logs(_app: &App, frame: &mut Frame) {
+fn render_logs(app: &App, frame: &mut Frame) {
     let area = frame.area();
-    let block = Block::default()
-        .borders(Borders::ALL)
-        .title(" CAM Logs (Press Esc to return) ");
-    let paragraph = Paragraph::new("日志视图待实现...")
-        .block(block);
-    frame.render_widget(paragraph, area);
+
+    let vertical = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints([
+            Constraint::Length(1),  // 状态栏
+            Constraint::Min(5),     // 日志内容
+            Constraint::Length(1),  // 快捷键
+        ])
+        .split(area);
+
+    // 状态栏
+    let status = format!(
+        " CAM Logs │ Filter: {:?} │ Lines: {}",
+        app.logs_state.filter,
+        app.logs_state.lines.len()
+    );
+    let status_bar = Paragraph::new(status)
+        .style(Style::default().bg(Color::Magenta).fg(Color::White));
+    frame.render_widget(status_bar, vertical[0]);
+
+    // 日志内容
+    let filtered = app.logs_state.filtered_lines();
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .skip(app.logs_state.scroll_offset)
+        .take(vertical[1].height as usize)
+        .map(|line| {
+            let style = if line.contains("ERROR") || line.contains("❌") {
+                Style::default().fg(Color::Red)
+            } else if line.contains("WARN") || line.contains("⚠") {
+                Style::default().fg(Color::Yellow)
+            } else if line.contains("INFO") || line.contains("✅") {
+                Style::default().fg(Color::Green)
+            } else {
+                Style::default()
+            };
+            ListItem::new(*line).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL));
+    frame.render_widget(list, vertical[1]);
+
+    // 快捷键
+    let help = " [j/k] 滚动  [f] 过滤级别  [G] 跳到最新  [Esc] 返回  [q] 退出 ";
+    let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
+    frame.render_widget(help_bar, vertical[2]);
 }
