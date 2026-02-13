@@ -583,6 +583,199 @@ pub fn detect_waiting_question(terminal_snapshot: &str) -> Option<NotificationCo
     }
 }
 
+// ============================================================================
+// 简化版消息提取（直接输出格式化文本）
+// ============================================================================
+
+/// 简化版消息提取结果
+#[derive(Debug, Clone, PartialEq)]
+pub enum SimpleExtractionResult {
+    /// 成功提取到格式化消息
+    Message(String),
+    /// Agent 空闲，无问题需要回答
+    Idle { status: String, last_action: Option<String> },
+    /// 提取失败
+    Failed,
+}
+
+/// 从终端快照中提取格式化的通知消息（简化版）
+///
+/// 与 `extract_question_with_haiku` 不同，这个函数让 AI 直接输出
+/// 格式化后的通知文本，避免结构化数据的二次处理导致的问题（如选项重复）。
+///
+/// # 参数
+/// - `terminal_snapshot`: 终端快照内容
+///
+/// # 返回
+/// - `SimpleExtractionResult::Message(text)`: 格式化的通知消息
+/// - `SimpleExtractionResult::Idle { status, last_action }`: Agent 空闲状态
+/// - `SimpleExtractionResult::Failed`: 提取失败
+pub fn extract_formatted_message(terminal_snapshot: &str) -> SimpleExtractionResult {
+    // 尝试不同的上下文大小
+    let context_sizes = [80, 150, 300];
+
+    for &lines in &context_sizes {
+        match extract_formatted_message_with_context(terminal_snapshot, lines) {
+            Ok(result) => return result,
+            Err(NeedMoreContext) => {
+                debug!(
+                    lines = lines,
+                    "AI needs more context for formatted message, retrying"
+                );
+                continue;
+            }
+            Err(ExtractionFailed) => return SimpleExtractionResult::Failed,
+        }
+    }
+
+    warn!("Failed to extract formatted message even with maximum context");
+    SimpleExtractionResult::Failed
+}
+
+/// 使用指定行数的上下文提取格式化消息
+fn extract_formatted_message_with_context(
+    terminal_snapshot: &str,
+    lines: usize,
+) -> Result<SimpleExtractionResult, ExtractionError> {
+    let client = match AnthropicClient::from_config() {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(error = %e, "Failed to create Anthropic client");
+            return Err(ExtractionFailed);
+        }
+    };
+
+    // 截取最后 N 行
+    let truncated = crate::infra::terminal::truncate_last_lines(terminal_snapshot, lines);
+
+    let system = "你是一个终端输出分析专家。从 AI Agent 终端快照中提取最新的消息，格式化为简洁的通知。";
+
+    let prompt = format!(
+        r#"分析以下 AI Agent 终端输出，提取最新的问题或状态信息。
+
+终端输出:
+{truncated}
+
+请用 JSON 格式回复，包含以下字段：
+- has_question: true/false（是否有问题需要用户回答）
+- message: 格式化后的通知消息（见下方格式要求）
+- context_complete: true/false（上下文是否完整）
+- agent_status: "completed"/"idle"/"waiting"（Agent 状态）
+- last_action: Agent 最后完成的操作摘要（可为 null）
+
+message 格式要求（非常重要）：
+1. 只提取最后一条 Agent 输出的问题或状态
+2. 去除所有终端 UI 元素（进度条、边框、ANSI 转义、工具调用标记 ⏺、状态指示器 ✻ 等）
+3. 如果是选择题：
+   - 先写问题
+   - 换行后列出选项（保持原有格式如 A) xxx 或 1. xxx）
+   - 最后一行加"回复数字 (1-N)"或"回复字母 (A-D)"
+4. 如果是确认问题：最后加"y 确认 / n 取消"
+5. 如果是开放式问题：保持问题原文
+6. 保持简洁，不超过 500 字符
+7. 不要重复内容！选项只出现一次
+
+context_complete 判断：
+- 如果问题引用了"这个"、"上面的"等内容，检查被引用内容是否可见
+- 不可见则 context_complete = false
+
+示例输出（选择题）：
+{{
+  "has_question": true,
+  "message": "你需要哪些核心功能？\n\nA) 基础版 - 添加、删除、完成标记\nB) 标准版 - 基础版 + 编辑、筛选\nC) 增强版 - 标准版 + 分类、优先级\n\n回复字母 (A-C)",
+  "context_complete": true,
+  "agent_status": "waiting",
+  "last_action": null
+}}
+
+示例输出（无问题）：
+{{
+  "has_question": false,
+  "message": "",
+  "context_complete": true,
+  "agent_status": "completed",
+  "last_action": "React Todo List 项目已完成"
+}}
+
+只返回 JSON，不要其他内容。"#
+    );
+
+    let start = std::time::Instant::now();
+    let response = match client.complete(&prompt, Some(system)) {
+        Ok(r) => r,
+        Err(e) => {
+            warn!(error = %e, "Haiku API call failed for formatted message");
+            return Err(ExtractionFailed);
+        }
+    };
+    debug!(
+        elapsed_ms = start.elapsed().as_millis(),
+        lines = lines,
+        "Haiku formatted message extraction completed"
+    );
+    trace!(response = %response, "Haiku raw response");
+
+    // 解析 JSON 响应
+    let json_str = match extract_json_from_output(&response) {
+        Some(s) => s,
+        None => {
+            warn!(response = %response, "Failed to extract JSON from Haiku response");
+            return Err(ExtractionFailed);
+        }
+    };
+    debug!(json = %json_str, "Haiku returned JSON for formatted message");
+
+    let parsed: serde_json::Value = match serde_json::from_str(&json_str) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(error = %e, json = %json_str, "Failed to parse JSON");
+            return Err(ExtractionFailed);
+        }
+    };
+
+    // 检查上下文是否完整
+    let context_complete = parsed
+        .get("context_complete")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    if !context_complete {
+        debug!("AI indicates context is incomplete for formatted message");
+        return Err(NeedMoreContext);
+    }
+
+    let has_question = parsed
+        .get("has_question")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
+    if has_question {
+        let message = parsed
+            .get("message")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        if message.is_empty() {
+            return Err(ExtractionFailed);
+        }
+
+        Ok(SimpleExtractionResult::Message(message))
+    } else {
+        // 无问题，返回空闲状态
+        let status = parsed
+            .get("agent_status")
+            .and_then(|v| v.as_str())
+            .unwrap_or("idle")
+            .to_string();
+        let last_action = parsed
+            .get("last_action")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string());
+
+        Ok(SimpleExtractionResult::Idle { status, last_action })
+    }
+}
+
 /// 从输出中提取 JSON 字符串
 fn extract_json_from_output(output: &str) -> Option<String> {
     let start = output.find('{')?;

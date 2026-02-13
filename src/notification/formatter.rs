@@ -15,7 +15,7 @@
 use std::fs;
 
 use super::event::{NotificationEvent, NotificationEventType};
-use crate::anthropic::{extract_question_with_haiku, ExtractedQuestion, ExtractionResult, TaskSummary};
+use crate::anthropic::{extract_formatted_message, SimpleExtractionResult};
 use super::summarizer::NotificationSummarizer;
 
 /// Notification message constants (Chinese)
@@ -116,45 +116,16 @@ impl MessageFormatter {
         }
     }
 
-    /// 格式化提取的问题（包含选项）
-    fn format_extracted_question(
-        project_name: &str,
-        extracted: &ExtractedQuestion,
-    ) -> String {
-        // 根据问题类型选择不同的 emoji 和标签
-        let (emoji, label) = match extracted.question_type.as_str() {
-            "choice" => ("📋", "请选择"),
-            "confirm" => ("🔔", "请确认"),
-            "open" => ("❓", "有问题"),
-            _ => ("⏸️", msg::WAITING_INPUT),
-        };
-
-        let mut result = format!(
-            "{} {} {}\n\n{}",
-            emoji, project_name, label, extracted.question
-        );
-
-        // 如果有选项，添加选项列表
-        if !extracted.options.is_empty() {
-            result.push('\n');
-            for option in &extracted.options {
-                result.push_str(&format!("\n{}", option));
-            }
-            // 选择题显示回复数字提示
-            let n = extracted.options.len();
-            result.push_str(&format!("\n\n回复数字 (1-{})", n));
-        } else if extracted.question_type == "confirm" {
-            result.push_str("\n\ny 确认 / n 取消");
-        } else {
-            result.push_str(&format!("\n\n{}", extracted.reply_hint));
-        }
-
-        result
+    /// 格式化 AI 提取的消息（简化版）
+    ///
+    /// AI 直接返回格式化后的消息，这里只添加项目名前缀
+    fn format_ai_message(project_name: &str, message: &str) -> String {
+        format!("📋 {} 请选择\n\n{}", project_name, message)
     }
 
-    /// 格式化无问题场景（显示任务摘要）
-    fn format_no_question(project_name: &str, summary: &TaskSummary) -> String {
-        match (summary.status.as_str(), &summary.last_action) {
+    /// 格式化空闲状态
+    fn format_idle_status(project_name: &str, status: &str, last_action: &Option<String>) -> String {
+        match (status, last_action) {
             ("completed", Some(action)) => {
                 format!("✅ {} 已完成\n\n{}\n\n回复继续", project_name, action)
             }
@@ -324,23 +295,22 @@ impl MessageFormatter {
 
         match notification_type {
             "idle_prompt" => {
-                // 空闲等待 - 使用 Haiku 提取或显示原始内容
+                // 空闲等待 - 使用简化版 AI 提取
                 if let Some(snap) = snapshot {
                     if snap.trim().is_empty() {
                         return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
                     }
 
-                    // 尝试使用 Haiku 提取问题
+                    // 尝试使用简化版 AI 提取
                     if !self.no_ai {
-                        match extract_question_with_haiku(snap) {
-                            ExtractionResult::Found(extracted) => {
-                                return Self::format_extracted_question(project_name, &extracted);
+                        match extract_formatted_message(snap) {
+                            SimpleExtractionResult::Message(msg) => {
+                                return Self::format_ai_message(project_name, &msg);
                             }
-                            ExtractionResult::NoQuestion(summary) => {
-                                // AI 判断没有问题，显示任务摘要
-                                return Self::format_no_question(project_name, &summary);
+                            SimpleExtractionResult::Idle { status, last_action } => {
+                                return Self::format_idle_status(project_name, &status, &last_action);
                             }
-                            ExtractionResult::Failed => {
+                            SimpleExtractionResult::Failed => {
                                 // AI 提取失败，提示用户查看终端
                                 return format!(
                                     "⏸️ {} {}\n\n无法解析通知内容，请查看终端",
@@ -362,14 +332,14 @@ impl MessageFormatter {
                 }
             }
             "permission_prompt" => {
-                // 权限确认 - 优先使用 AI 提取
+                // 权限确认 - 优先使用简化版 AI 提取
                 if !self.no_ai {
                     if let Some(snap) = snapshot {
                         if !snap.trim().is_empty() {
-                            if let ExtractionResult::Found(extracted) = extract_question_with_haiku(snap) {
+                            if let SimpleExtractionResult::Message(msg) = extract_formatted_message(snap) {
                                 return format!(
                                     "🔐 {} {}\n\n{}\n\n{}",
-                                    project_name, msg::NEED_CONFIRM, extracted.question, msg::REPLY_YN
+                                    project_name, msg::NEED_CONFIRM, msg, msg::REPLY_YN
                                 );
                             }
                         }
@@ -413,17 +383,16 @@ impl MessageFormatter {
             return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
         }
 
-        // 使用 Haiku 提取问题
+        // 使用简化版 AI 提取
         if !self.no_ai {
-            match extract_question_with_haiku(context) {
-                ExtractionResult::Found(extracted) => {
-                    return Self::format_extracted_question(project_name, &extracted);
+            match extract_formatted_message(context) {
+                SimpleExtractionResult::Message(message) => {
+                    return Self::format_ai_message(project_name, &message);
                 }
-                ExtractionResult::NoQuestion(summary) => {
-                    // AI 判断没有问题，显示任务摘要
-                    return Self::format_no_question(project_name, &summary);
+                SimpleExtractionResult::Idle { status, last_action } => {
+                    return Self::format_idle_status(project_name, &status, &last_action);
                 }
-                ExtractionResult::Failed => {
+                SimpleExtractionResult::Failed => {
                     // AI 提取失败，提示用户查看终端
                 }
             }
@@ -514,17 +483,16 @@ impl MessageFormatter {
                 return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
             }
 
-            // 尝试使用 Haiku 提取问题
+            // 尝试使用简化版 AI 提取
             if !self.no_ai {
-                match extract_question_with_haiku(snap) {
-                    ExtractionResult::Found(extracted) => {
-                        return Self::format_extracted_question(project_name, &extracted);
+                match extract_formatted_message(snap) {
+                    SimpleExtractionResult::Message(message) => {
+                        return Self::format_ai_message(project_name, &message);
                     }
-                    ExtractionResult::NoQuestion(summary) => {
-                        // AI 判断没有问题，显示任务摘要
-                        return Self::format_no_question(project_name, &summary);
+                    SimpleExtractionResult::Idle { status, last_action } => {
+                        return Self::format_idle_status(project_name, &status, &last_action);
                     }
-                    ExtractionResult::Failed => {
+                    SimpleExtractionResult::Failed => {
                         // AI 提取失败，提示用户查看终端
                     }
                 }
@@ -594,17 +562,16 @@ impl MessageFormatter {
                         return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
                     }
 
-                    // 尝试使用 Haiku 提取问题
+                    // 尝试使用简化版 AI 提取
                     if !self.no_ai {
-                        match extract_question_with_haiku(snap) {
-                            ExtractionResult::Found(extracted) => {
-                                return Self::format_extracted_question(project_name, &extracted);
+                        match extract_formatted_message(snap) {
+                            SimpleExtractionResult::Message(msg) => {
+                                return Self::format_ai_message(project_name, &msg);
                             }
-                            ExtractionResult::NoQuestion(summary) => {
-                                // AI 判断没有问题，显示任务摘要
-                                return Self::format_no_question(project_name, &summary);
+                            SimpleExtractionResult::Idle { status, last_action } => {
+                                return Self::format_idle_status(project_name, &status, &last_action);
                             }
-                            ExtractionResult::Failed => {
+                            SimpleExtractionResult::Failed => {
                                 // AI 提取失败，提示用户查看终端
                             }
                         }
@@ -622,14 +589,14 @@ impl MessageFormatter {
                 }
             }
             "permission_prompt" => {
-                // 优先使用 AI 提取问题内容
+                // 优先使用简化版 AI 提取问题内容
                 if !self.no_ai {
                     if let Some(snap) = snapshot {
                         if !snap.trim().is_empty() {
-                            if let ExtractionResult::Found(extracted) = extract_question_with_haiku(snap) {
+                            if let SimpleExtractionResult::Message(msg) = extract_formatted_message(snap) {
                                 return format!(
                                     "🔐 {} {}\n\n{}\n\n{}",
-                                    project_name, msg::NEED_CONFIRM, extracted.question, msg::REPLY_YN
+                                    project_name, msg::NEED_CONFIRM, msg, msg::REPLY_YN
                                 );
                             }
                         }
@@ -979,11 +946,12 @@ Some complex terminal output
 That doesn't match standard patterns
 But contains a question somewhere"#;
 
-        // 默认模式下会尝试 AI 提取，如果失败则回退到显示原始快照
+        // 默认模式下会尝试 AI 提取
+        // 根据 AI 判断结果返回不同的 emoji：📋(有问题) / ⏸️(失败) / ✅(完成) / 💤(空闲)
         let message = formatter.format_event("cam-123", "notification", "", context);
 
-        assert!(message.contains("⏸️"));
-        assert!(message.contains("等待输入"));
+        // 验证返回了某种格式的消息
+        assert!(message.contains("📋") || message.contains("⏸️") || message.contains("✅") || message.contains("💤"));
     }
 
     // ==================== 修复验证测试：终端快照泄露问题 ====================

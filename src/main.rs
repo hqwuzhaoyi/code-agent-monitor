@@ -661,9 +661,17 @@ async fn main() -> Result<()> {
             // 获取终端快照
             // 优先使用 stdin 中的终端快照（测试命令可能通过管道传入）
             let terminal_snapshot = if needs_snapshot {
-                // 检查 stdin 中是否包含终端快照
-                if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
+                // 1. 检查 JSON 中的 terminal_snapshot 字段
+                if let Some(snapshot) = json.as_ref()
+                    .and_then(|j| j.get("terminal_snapshot"))
+                    .and_then(|v| v.as_str())
+                    .filter(|s| !s.is_empty())
+                {
+                    Some(snapshot.to_string())
+                // 2. 检查 stdin 中是否包含终端快照标记
+                } else if let Some(idx) = context.find("\n\n--- 终端快照 ---\n") {
                     Some(context[idx + "\n\n--- 终端快照 ---\n".len()..].to_string())
+                // 3. 通过 agent_id 获取日志
                 } else if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 50) {
                     // 通过 resolved_agent_id 直接获取
                     Some(logs)
