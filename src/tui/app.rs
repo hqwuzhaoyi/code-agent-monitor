@@ -12,6 +12,7 @@ use ratatui::prelude::*;
 use chrono::{DateTime, Local};
 
 use crate::tui::state::{AgentItem, AgentState, NotificationItem, View};
+use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, AgentStatus, TmuxManager};
 
 pub type AppResult<T> = Result<T>;
@@ -33,6 +34,8 @@ pub struct App {
     pub terminal_preview: String,
     /// 上次刷新时间
     pub last_refresh: std::time::Instant,
+    /// 终端流管理器
+    pub terminal_stream: TerminalStream,
 }
 
 impl App {
@@ -45,6 +48,7 @@ impl App {
             notifications: Vec::new(),
             terminal_preview: String::new(),
             last_refresh: std::time::Instant::now(),
+            terminal_stream: TerminalStream::new(),
         }
     }
 
@@ -129,13 +133,35 @@ impl App {
         Ok(())
     }
 
-    /// 刷新终端预览
+    /// 刷新终端预览（优先使用 pipe-pane，降级到 capture-pane）
     pub fn refresh_terminal_preview(&mut self, tmux_session: &str) -> AppResult<()> {
+        // 尝试从 pipe 文件读取
+        if let Some(pipe_path) = self.terminal_stream.pipe_file() {
+            if let Ok(content) = std::fs::read_to_string(pipe_path) {
+                // 只保留最后 50 行
+                let lines: Vec<&str> = content.lines().collect();
+                let start = lines.len().saturating_sub(50);
+                self.terminal_preview = lines[start..].join("\n");
+                return Ok(());
+            }
+        }
+
+        // 降级到 capture-pane
         let tmux = TmuxManager::new();
         if let Ok(output) = tmux.capture_pane(tmux_session, 30) {
             self.terminal_preview = output;
         }
         Ok(())
+    }
+
+    /// 切换选中 agent 时启动新的 pipe-pane
+    pub fn switch_agent_stream(&mut self) {
+        let session = self.selected_agent()
+            .and_then(|agent| agent.tmux_session.clone());
+        if let Some(session) = session {
+            // 尝试启动 pipe-pane，失败则忽略（会降级到轮询）
+            let _ = self.terminal_stream.start(&session);
+        }
     }
 
     /// 跳转到选中 agent 的 tmux session
@@ -217,8 +243,9 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                     }
                     let prev_selected = app.selected_index;
                     handle_key(app, key);
-                    // 如果选择变化，刷新终端预览
+                    // 如果选择变化，切换 pipe-pane 并刷新终端预览
                     if prev_selected != app.selected_index {
+                        app.switch_agent_stream();
                         let session_to_refresh = app.selected_agent()
                             .and_then(|agent| agent.tmux_session.clone());
                         if let Some(session) = session_to_refresh {
