@@ -1,6 +1,6 @@
 //! 事件处理模块
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Duration;
 use anyhow::Result;
 
@@ -8,14 +8,17 @@ use anyhow::Result;
 #[derive(Debug)]
 pub enum TuiEvent {
     Key(KeyEvent),
+    Mouse(MouseEvent),
     Tick,
 }
 
 /// 轮询事件
 pub fn poll_event(timeout: Duration) -> Result<Option<TuiEvent>> {
     if event::poll(timeout)? {
-        if let Event::Key(key) = event::read()? {
-            return Ok(Some(TuiEvent::Key(key)));
+        match event::read()? {
+            Event::Key(key) => return Ok(Some(TuiEvent::Key(key))),
+            Event::Mouse(mouse) => return Ok(Some(TuiEvent::Mouse(mouse))),
+            _ => {} // 忽略其他事件（如 Resize）
         }
     }
     Ok(None)
@@ -101,4 +104,48 @@ fn handle_logs_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         _ => {}
     }
+}
+
+/// 处理鼠标事件（带节流）
+pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
+    use std::time::Duration;
+    use crate::tui::app::SCROLL_THROTTLE_MS;
+
+    // 节流：忽略过于频繁的滚动事件
+    if app.last_scroll_time.elapsed() < Duration::from_millis(SCROLL_THROTTLE_MS) {
+        return false;
+    }
+
+    // 返回 true 表示选择发生变化，需要刷新终端预览
+    let result = match mouse.kind {
+        MouseEventKind::ScrollDown => {
+            app.last_scroll_time = std::time::Instant::now();
+            match app.view {
+                crate::tui::View::Dashboard => {
+                    app.next_agent();
+                    true
+                }
+                crate::tui::View::Logs => {
+                    app.logs_state.scroll_down();
+                    false
+                }
+            }
+        }
+        MouseEventKind::ScrollUp => {
+            app.last_scroll_time = std::time::Instant::now();
+            match app.view {
+                crate::tui::View::Dashboard => {
+                    app.prev_agent();
+                    true
+                }
+                crate::tui::View::Logs => {
+                    app.logs_state.scroll_up();
+                    false
+                }
+            }
+        }
+        _ => false, // 忽略其他鼠标事件（点击、拖拽等）
+    };
+
+    result
 }

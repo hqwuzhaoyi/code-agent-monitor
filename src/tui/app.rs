@@ -5,6 +5,7 @@ use std::io::{self, Stdout};
 use anyhow::Result;
 use crossterm::{
     execute,
+    event::{EnableMouseCapture, DisableMouseCapture},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
@@ -44,7 +45,12 @@ pub struct App {
     pub filter_mode: bool,
     /// 过滤输入
     pub filter_input: SearchInput,
+    /// 上次鼠标滚动时间（用于节流）
+    pub last_scroll_time: std::time::Instant,
 }
+
+/// 鼠标滚动节流间隔（毫秒）- 限制滚动频率，确保每次滚动只移动一项
+pub const SCROLL_THROTTLE_MS: u64 = 300;
 
 impl App {
     pub fn new() -> Self {
@@ -60,6 +66,7 @@ impl App {
             logs_state: LogsState::new(),
             filter_mode: false,
             filter_input: SearchInput::new(),
+            last_scroll_time: std::time::Instant::now(),
         }
     }
 
@@ -241,7 +248,7 @@ impl Default for App {
 pub fn init_terminal() -> AppResult<Tui> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let terminal = Terminal::new(backend)?;
     Ok(terminal)
@@ -250,11 +257,11 @@ pub fn init_terminal() -> AppResult<Tui> {
 /// 恢复终端
 pub fn restore_terminal(terminal: &mut Tui) -> AppResult<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
     Ok(())
 }
 
-use crate::tui::{render, poll_event, handle_key, TuiEvent};
+use crate::tui::{render, poll_event, handle_key, handle_mouse, TuiEvent};
 use std::time::Duration;
 
 /// 运行 TUI 主循环
@@ -301,6 +308,20 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                     handle_key(app, key);
                     // 如果选择变化，切换 pipe-pane 并刷新终端预览
                     if prev_selected != app.selected_index {
+                        app.switch_agent_stream();
+                        let session_to_refresh = app.selected_agent()
+                            .and_then(|agent| agent.tmux_session.clone());
+                        if let Some(session) = session_to_refresh {
+                            let _ = app.refresh_terminal_preview(&session);
+                        }
+                    }
+                }
+                TuiEvent::Mouse(mouse) => {
+                    // 处理鼠标事件
+                    let prev_selected = app.selected_index;
+                    let selection_changed = handle_mouse(app, mouse);
+                    // 如果选择变化，切换 pipe-pane 并刷新终端预览
+                    if selection_changed && prev_selected != app.selected_index {
                         app.switch_agent_stream();
                         let session_to_refresh = app.selected_agent()
                             .and_then(|agent| agent.tmux_session.clone());
