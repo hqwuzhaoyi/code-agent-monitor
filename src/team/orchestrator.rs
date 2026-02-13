@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 use tracing::{info, error};
 
 use crate::agent::{AgentManager, StartAgentRequest};
-use crate::conversation_state::{ConversationStateManager, ReplyResult};
+use crate::session::state::{ConversationStateManager, ReplyResult};
 use crate::infra::input::InputWaitDetector;
 use super::bridge::{TeamBridge, InboxMessage};
 use super::discovery::TeamMember;

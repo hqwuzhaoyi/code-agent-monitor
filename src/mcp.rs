@@ -10,7 +10,7 @@ use crate::team;
 use crate::task_list;
 use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
 use crate::openclaw_notifier::OpenclawNotifier;
-use crate::conversation_state::{ConversationStateManager, ReplyResult};
+use crate::session::state::{ConversationStateManager, ReplyResult};
 
 /// MCP 请求
 #[derive(Debug, Clone, Serialize, Deserialize)]
