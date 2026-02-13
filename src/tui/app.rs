@@ -12,6 +12,7 @@ use ratatui::prelude::*;
 use chrono::{DateTime, Local};
 
 use crate::tui::logs::LogsState;
+use crate::tui::search::SearchInput;
 use crate::tui::state::{AgentItem, AgentState, NotificationItem, View};
 use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, AgentStatus, TmuxManager};
@@ -41,8 +42,8 @@ pub struct App {
     pub logs_state: LogsState,
     /// 搜索模式
     pub search_mode: bool,
-    /// 搜索输入（实时输入）
-    pub search_query: String,
+    /// 搜索输入组件
+    pub search_input: SearchInput,
     /// 已确认的搜索词（回车后生效）
     pub confirmed_query: String,
 }
@@ -60,7 +61,7 @@ impl App {
             terminal_stream: TerminalStream::new(),
             logs_state: LogsState::new(),
             search_mode: false,
-            search_query: String::new(),
+            search_input: SearchInput::new(),
             confirmed_query: String::new(),
         }
     }
@@ -102,24 +103,24 @@ impl App {
     /// 进入搜索模式
     pub fn enter_search_mode(&mut self) {
         self.search_mode = true;
-        self.search_query = self.confirmed_query.clone();
+        self.search_input.set_text(&self.confirmed_query);
     }
 
     /// 退出搜索模式（取消）
     pub fn exit_search_mode(&mut self) {
         self.search_mode = false;
-        self.search_query.clear();
+        self.search_input.clear();
     }
 
     /// 确认搜索
     pub fn confirm_search(&mut self) {
         self.search_mode = false;
-        self.confirmed_query = self.search_query.clone();
+        self.confirmed_query = self.search_input.text().to_string();
     }
 
     /// 清除搜索
     pub fn clear_search(&mut self) {
-        self.search_query.clear();
+        self.search_input.clear();
         self.confirmed_query.clear();
     }
 

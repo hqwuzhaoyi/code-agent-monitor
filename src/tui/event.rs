@@ -34,20 +34,34 @@ pub fn handle_key(app: &mut crate::tui::App, key: KeyEvent) {
 }
 
 fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
-    match key.code {
-        KeyCode::Esc => app.exit_search_mode(),
-        KeyCode::Enter => {
-            // 确认搜索，应用过滤
-            app.confirm_search();
-        }
-        KeyCode::Backspace => {
-            app.search_query.pop();
-        }
-        // 允许在搜索模式下用方向键导航
-        KeyCode::Down => app.next_agent(),
-        KeyCode::Up => app.prev_agent(),
-        KeyCode::Char(c) => {
-            app.search_query.push(c);
+    match (key.code, key.modifiers) {
+        // 退出搜索
+        (KeyCode::Esc, _) => app.exit_search_mode(),
+
+        // 确认搜索
+        (KeyCode::Enter, _) => app.confirm_search(),
+
+        // 光标移动
+        (KeyCode::Left, _) => app.search_input.move_left(),
+        (KeyCode::Right, _) => app.search_input.move_right(),
+        (KeyCode::Home, _) => app.search_input.move_home(),
+        (KeyCode::End, _) => app.search_input.move_end(),
+        (KeyCode::Char('a'), KeyModifiers::CONTROL) => app.search_input.move_home(),
+        (KeyCode::Char('e'), KeyModifiers::CONTROL) => app.search_input.move_end(),
+
+        // 文本编辑
+        (KeyCode::Backspace, _) => app.search_input.backspace(),
+        (KeyCode::Delete, _) => app.search_input.delete(),
+        (KeyCode::Char('u'), KeyModifiers::CONTROL) => app.search_input.clear(),
+        (KeyCode::Char('w'), KeyModifiers::CONTROL) => app.search_input.delete_word(),
+
+        // 导航匹配项（用上下方向键 + Ctrl）
+        (KeyCode::Down, KeyModifiers::CONTROL) => app.next_agent(),
+        (KeyCode::Up, KeyModifiers::CONTROL) => app.prev_agent(),
+
+        // 字符输入（包括 j/k）
+        (KeyCode::Char(c), KeyModifiers::NONE | KeyModifiers::SHIFT) => {
+            app.search_input.insert(c);
         }
         _ => {}
     }

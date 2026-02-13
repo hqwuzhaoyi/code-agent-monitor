@@ -35,7 +35,9 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
 
     // 状态栏
     let status = if app.search_mode {
-        format!(" 🔍 {}_", app.search_query)
+        // 显示光标位置
+        let (before, after) = app.search_input.split_at_cursor();
+        format!(" 🔍 {}│{}", before, after)
     } else if !app.confirmed_query.is_empty() {
         format!(
             " CAM TUI │ Agents: {} (filtered: {}) │ ↻ {:?} ago │ [/] search",
