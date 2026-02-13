@@ -9,7 +9,7 @@ use crate::infra::input::InputWaitDetector;
 use crate::team;
 use crate::task_list;
 use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
-use crate::openclaw_notifier::OpenclawNotifier;
+use crate::notification::openclaw::OpenclawNotifier;
 use crate::session::state::{ConversationStateManager, ReplyResult};
 
 // Re-export types from types module for backwards compatibility

@@ -30,6 +30,8 @@ pub mod deduplicator;
 pub mod event;
 pub mod summarizer;
 pub mod throttle;
+pub mod watcher;
+pub mod openclaw;
 
 pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
 pub use dispatcher::NotificationDispatcher;
@@ -42,3 +44,5 @@ pub use deduplicator::NotificationDeduplicator;
 pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
 pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
+pub use watcher::{Watcher, Notifier, NotifyEvent};
+pub use openclaw::OpenclawNotifier;

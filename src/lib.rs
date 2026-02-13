@@ -7,10 +7,8 @@ pub mod infra;
 pub mod session;
 #[path = "mcp_mod/mod.rs"]
 pub mod mcp;
-pub mod notify;
 #[path = "agent_mod/mod.rs"]
 pub mod agent;
-pub mod openclaw_notifier;
 pub mod team;
 pub mod task_list;
 pub mod anthropic;
@@ -34,13 +32,15 @@ pub use session::{ConversationStateManager, ConversationState, PendingConfirmati
 pub use mcp::McpServer;
 pub use mcp::{McpError, McpRequest, McpResponse, McpTool};
 
-pub use notify::{Watcher, Notifier, NotifyEvent};
+// Re-exports from notification (backwards compatibility)
+pub use notification::{Watcher, Notifier, NotifyEvent};
 pub use notification::{NotifyThrottle, ThrottledEvent, MergedNotification};
-pub use openclaw_notifier::OpenclawNotifier;
+pub use notification::OpenclawNotifier;
 pub use notification::SendResult;
-pub use team::{TeamConfig, TeamMember, TeamBridge, InboxMessage, SpecialMessage, AgentId, InboxWatcher, NotifyDecision, TeamOrchestrator, SpawnResult, TeamProgress, discover_teams, get_team_members, get_active_team_members};
-pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
 pub use notification::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
-pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};
 pub use notification::event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
 pub use notification::deduplicator::NotificationDeduplicator;
+
+pub use team::{TeamConfig, TeamMember, TeamBridge, InboxMessage, SpecialMessage, AgentId, InboxWatcher, NotifyDecision, TeamOrchestrator, SpawnResult, TeamProgress, discover_teams, get_team_members, get_active_team_members};
+pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
+pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};

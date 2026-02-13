@@ -5,7 +5,7 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::openclaw_notifier::OpenclawNotifier;
+use crate::notification::openclaw::OpenclawNotifier;
 use crate::team::{discovery, InboxMessage, InboxWatcher, TeamBridge, TeamOrchestrator};
 
 /// Handle team/list request

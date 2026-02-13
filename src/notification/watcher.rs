@@ -2,7 +2,7 @@
 
 use crate::infra::process::{AgentInfo, ProcessScanner};
 use crate::session::SessionManager;
-use crate::openclaw_notifier::OpenclawNotifier;
+use crate::notification::openclaw::OpenclawNotifier;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;

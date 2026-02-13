@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 use tracing::{info, error, debug};
 
-use crate::openclaw_notifier::OpenclawNotifier;
+use crate::notification::openclaw::OpenclawNotifier;
 use super::bridge::{InboxMessage, SpecialMessage, TeamBridge};
 
 /// 通知紧急程度
