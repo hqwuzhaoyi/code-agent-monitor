@@ -6,9 +6,9 @@
 //! See `crate::watcher::StabilityDetector` for terminal stability detection.
 
 use crate::agent::{AgentManager, AgentRecord};
-use crate::input_detector::{InputWaitDetector, InputWaitResult};
-use crate::jsonl_parser::{JsonlEvent, JsonlParser};
-use crate::tmux::TmuxManager;
+use crate::infra::input::{InputWaitDetector, InputWaitResult};
+use crate::infra::jsonl::{JsonlEvent, JsonlParser};
+use crate::infra::tmux::TmuxManager;
 // Import new watcher module for future migration
 use crate::watcher::AgentMonitor;
 use anyhow::Result;
@@ -476,7 +476,7 @@ impl AgentWatcher {
                     for event in new_events {
                         match &event {
                             JsonlEvent::ToolUse { tool_name, input, timestamp, .. } => {
-                                let tool_target = crate::jsonl_parser::extract_tool_target_from_input(tool_name, input);
+                                let tool_target = crate::infra::jsonl::extract_tool_target_from_input(tool_name, input);
                                 events.push(WatchEvent::ToolUse {
                                     agent_id: agent.agent_id.clone(),
                                     tool_name: tool_name.clone(),

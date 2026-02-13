@@ -8,7 +8,7 @@ use tracing::{debug, info, trace, warn};
 use crate::ai::client::{AnthropicClient, AnthropicConfig};
 use crate::ai_quality::{assess_question_extraction, assess_status_detection, thresholds};
 use crate::ai_types::{AgentStatus, NotificationContent, QuestionType};
-use crate::terminal_utils::truncate_for_status;
+use crate::infra::terminal::truncate_for_status;
 
 /// 内容提取超时（毫秒）- 10 秒（本地代理可能需要更长时间）
 const EXTRACT_TIMEOUT_MS: u64 = 10000;
@@ -45,7 +45,7 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
     let client = AnthropicClient::new(config)?;
 
     // 截取最后 N 行，避免 token 过多
-    let truncated = crate::terminal_utils::truncate_last_lines(terminal_snapshot, 80);
+    let truncated = crate::infra::terminal::truncate_last_lines(terminal_snapshot, 80);
 
     let system = "你是一个终端输出分析专家。从 AI Agent 终端快照中提取正在询问用户的问题信息。只返回 JSON，不要其他内容。";
 
@@ -276,7 +276,7 @@ fn extract_question_with_context(
     };
 
     // 截取最后 N 行
-    let truncated = crate::terminal_utils::truncate_last_lines(terminal_snapshot, lines);
+    let truncated = crate::infra::terminal::truncate_last_lines(terminal_snapshot, lines);
 
     let system = "你是一个终端输出分析专家。从给定的终端快照中提取用户正在被询问的问题，或分析 Agent 当前状态。";
 

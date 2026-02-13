@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use crate::anthropic::{is_agent_processing, AgentStatus};
-use crate::terminal_utils::truncate_for_status;
+use crate::infra::terminal::truncate_for_status;
 
 /// 输入等待检测结果
 #[derive(Debug, Clone)]

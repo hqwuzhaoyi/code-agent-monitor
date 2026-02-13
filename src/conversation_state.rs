@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::agent::AgentManager;
 use crate::team::{TeamBridge, InboxMessage};
-use crate::tmux::TmuxManager;
+use crate::infra::tmux::TmuxManager;
 
 /// 确认类型
 #[derive(Debug, Clone, Serialize, Deserialize)]

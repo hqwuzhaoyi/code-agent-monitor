@@ -7,7 +7,7 @@ use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
 use chrono::{DateTime, Utc, Duration};
 
-use crate::tmux::TmuxManager;
+use crate::infra::tmux::TmuxManager;
 
 /// 会话信息
 #[derive(Debug, Clone, Serialize, Deserialize)]

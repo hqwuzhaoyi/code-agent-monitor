@@ -1,6 +1,6 @@
 //! 通知模块 - 监控代理状态并发送通知
 
-use crate::process::{AgentInfo, ProcessScanner};
+use crate::infra::process::{AgentInfo, ProcessScanner};
 use crate::session::SessionManager;
 use crate::openclaw_notifier::OpenclawNotifier;
 use anyhow::Result;

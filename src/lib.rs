@@ -3,14 +3,11 @@
 pub mod ai;
 pub mod ai_types;
 pub mod cli;
-pub mod process;
+pub mod infra;  // 新增
 pub mod session;
 pub mod mcp;
 pub mod notify;
-pub mod tmux;
 pub mod agent;
-pub mod jsonl_parser;
-pub mod input_detector;
 pub mod agent_watcher;
 pub mod openclaw_notifier;
 pub mod watcher_daemon;
@@ -19,19 +16,19 @@ pub mod task_list;
 pub mod conversation_state;
 pub mod anthropic;
 pub mod notification;
-pub mod terminal_utils;
 pub mod ai_quality;
 pub mod watcher;
 pub mod mcp_new;
 
-pub use process::ProcessScanner;
+// Re-exports from infra (backwards compatibility)
+pub use infra::{TmuxManager, ProcessScanner};
+pub use infra::jsonl::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_target_from_input};
+pub use infra::input::{InputWaitDetector, InputWaitResult, InputWaitPattern};
+
 pub use session::{SessionManager, SessionFilter};
 pub use mcp::McpServer;
 pub use notify::{Watcher, Notifier, NotifyEvent};
-pub use tmux::TmuxManager;
 pub use agent::{AgentManager, AgentRecord, AgentType, AgentStatus, StartAgentRequest, StartAgentResponse};
-pub use jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_target_from_input};
-pub use input_detector::{InputWaitDetector, InputWaitResult, InputWaitPattern};
 pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
 pub use notification::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use openclaw_notifier::OpenclawNotifier;

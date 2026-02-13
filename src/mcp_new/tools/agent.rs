@@ -6,8 +6,8 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::agent::{AgentManager, StartAgentRequest};
-use crate::input_detector::InputWaitDetector;
-use crate::jsonl_parser::{format_tool_use, JsonlEvent, JsonlParser};
+use crate::infra::input::InputWaitDetector;
+use crate::infra::jsonl::{format_tool_use, JsonlEvent, JsonlParser};
 
 /// Handle agent/start request
 pub fn handle_agent_start(

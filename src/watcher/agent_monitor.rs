@@ -2,7 +2,7 @@
 
 use anyhow::Result;
 use crate::agent::AgentRecord;
-use crate::tmux::TmuxManager;
+use crate::infra::tmux::TmuxManager;
 
 /// Monitors agent tmux sessions for health
 pub struct AgentMonitor {

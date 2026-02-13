@@ -13,7 +13,7 @@ use tracing::{info, error};
 
 use crate::agent::{AgentManager, StartAgentRequest};
 use crate::conversation_state::{ConversationStateManager, ReplyResult};
-use crate::input_detector::InputWaitDetector;
+use crate::infra::input::InputWaitDetector;
 use super::bridge::{TeamBridge, InboxMessage};
 use super::discovery::TeamMember;
 
