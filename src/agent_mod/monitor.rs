@@ -1,7 +1,7 @@
 //! Agent lifecycle monitoring - tmux session health checks
 
 use anyhow::Result;
-use crate::agent::AgentRecord;
+use crate::agent::manager::AgentRecord;
 use crate::infra::tmux::TmuxManager;
 
 /// Monitors agent tmux sessions for health

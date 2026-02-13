@@ -1,7 +1,7 @@
 //! Agent 管理模块 - Agent 生命周期管理
 
 use crate::infra::tmux::TmuxManager;
-use crate::watcher_daemon::WatcherDaemon;
+use crate::agent::daemon::WatcherDaemon;
 use anyhow::{anyhow, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};

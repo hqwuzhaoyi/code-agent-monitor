@@ -1,6 +1,6 @@
 //! Tests for the watcher module
 
-use code_agent_monitor::watcher::{AgentMonitor, StabilityDetector};
+use code_agent_monitor::agent::{AgentMonitor, StabilityDetector};
 
 #[test]
 fn test_stability_detector_is_stable_same_content() {

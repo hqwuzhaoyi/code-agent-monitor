@@ -1,16 +1,16 @@
 //! Agent 监控模块 - 监控 Agent 状态、JSONL 事件和输入等待
 //!
 //! Note: This module is being gradually migrated to use components from `crate::watcher`.
-//! See `crate::watcher::AgentMonitor` for tmux session monitoring.
-//! See `crate::watcher::EventProcessor` for JSONL event processing.
-//! See `crate::watcher::StabilityDetector` for terminal stability detection.
+//! See `crate::agent::watcher::AgentMonitor` for tmux session monitoring.
+//! See `crate::agent::watcher::EventProcessor` for JSONL event processing.
+//! See `crate::agent::watcher::StabilityDetector` for terminal stability detection.
 
 use crate::agent::{AgentManager, AgentRecord};
+use crate::agent::monitor::AgentMonitor;
 use crate::infra::input::{InputWaitDetector, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
 // Import new watcher module for future migration
-use crate::watcher::AgentMonitor;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
