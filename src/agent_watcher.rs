@@ -1,9 +1,16 @@
 //! Agent 监控模块 - 监控 Agent 状态、JSONL 事件和输入等待
+//!
+//! Note: This module is being gradually migrated to use components from `crate::watcher`.
+//! See `crate::watcher::AgentMonitor` for tmux session monitoring.
+//! See `crate::watcher::EventProcessor` for JSONL event processing.
+//! See `crate::watcher::StabilityDetector` for terminal stability detection.
 
 use crate::agent::{AgentManager, AgentRecord};
 use crate::input_detector::{InputWaitDetector, InputWaitResult};
 use crate::jsonl_parser::{JsonlEvent, JsonlParser};
 use crate::tmux::TmuxManager;
+// Import new watcher module for future migration
+use crate::watcher::{AgentMonitor, EventProcessor, StabilityDetector};
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -182,6 +189,8 @@ pub struct AgentWatcher {
     stability_states: HashMap<String, StabilityState>,
     /// Hook 事件追踪器
     hook_tracker: HookEventTracker,
+    /// New watcher module agent monitor (for gradual migration)
+    agent_monitor: AgentMonitor,
 }
 
 impl AgentWatcher {
@@ -207,6 +216,7 @@ impl AgentWatcher {
             last_waiting_state: HashMap::new(),
             stability_states: HashMap::new(),
             hook_tracker: HookEventTracker::default(),
+            agent_monitor: AgentMonitor::new(),
         }
     }
 
@@ -221,7 +231,14 @@ impl AgentWatcher {
             last_waiting_state: HashMap::new(),
             stability_states: HashMap::new(),
             hook_tracker: HookEventTracker::default(),
+            agent_monitor: AgentMonitor::new(),
         }
+    }
+
+    /// Check if agent is alive using new watcher module
+    /// This method demonstrates the migration path to the new watcher module
+    pub fn is_agent_alive(&self, agent: &AgentRecord) -> bool {
+        self.agent_monitor.is_alive(agent)
     }
 
     /// 获取当前 Unix 时间戳（秒）
