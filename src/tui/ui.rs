@@ -36,25 +36,10 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         .split(area);
 
     // 状态栏
-    let elapsed = app.last_refresh.elapsed().as_secs();
-    let refresh_text = if elapsed < 60 {
-        format!("{}s", elapsed)
-    } else {
-        format!("{}m", elapsed / 60)
-    };
     let status = if is_filtering {
-        format!(
-            " CAM TUI │ Showing {} of {} │ ↻ {} ago",
-            filtered_count,
-            app.agents.len(),
-            refresh_text
-        )
+        format!(" CAM TUI │ Showing {} of {}", filtered_count, app.agents.len())
     } else {
-        format!(
-            " CAM TUI │ Agents: {} │ ↻ {} ago",
-            app.agents.len(),
-            refresh_text
-        )
+        format!(" CAM TUI │ Agents: {}", app.agents.len())
     };
     // 过滤模式时边框变色（类似 lazygit）
     let status_style = if app.filter_mode {
