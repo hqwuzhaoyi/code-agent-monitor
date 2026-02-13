@@ -43,6 +43,9 @@ fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Backspace => {
             app.search_query.pop();
         }
+        // 允许在搜索模式下用 j/k/方向键 导航
+        KeyCode::Down => app.next_agent(),
+        KeyCode::Up => app.prev_agent(),
         KeyCode::Char(c) => {
             app.search_query.push(c);
         }
