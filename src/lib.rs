@@ -1,7 +1,6 @@
 //! Code Agent Monitor - 监控和管理 AI 编码代理进程
 
 pub mod ai;
-pub mod ai_types;
 pub mod cli;
 pub mod infra;
 #[path = "session_mod/mod.rs"]
@@ -15,7 +14,6 @@ pub mod team;
 pub mod task_list;
 pub mod anthropic;
 pub mod notification;
-pub mod ai_quality;
 pub mod mcp_new;
 
 // Re-exports from infra (backwards compatibility)

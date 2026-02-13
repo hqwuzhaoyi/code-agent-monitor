@@ -12,7 +12,7 @@
 pub use crate::ai::*;
 
 // Re-export types from ai_types for backward compatibility
-pub use crate::ai_types::{AgentStatus, NotificationContent, QuestionType};
+pub use crate::ai::types::{AgentStatus, NotificationContent, QuestionType};
 
 // Re-export constants from ai::client
 pub use crate::ai::client::{
@@ -147,7 +147,7 @@ mod tests {
     #[test]
     fn test_quality_assessment_integration() {
         // 测试 NotificationContent 与 ai_quality 模块的集成
-        use crate::ai_quality::{assess_question_extraction, thresholds};
+        use crate::ai::quality::{assess_question_extraction, thresholds};
 
         // 创建一个有效的 NotificationContent
         let content = NotificationContent {
