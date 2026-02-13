@@ -319,6 +319,16 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                             continue;
                         }
                     }
+                    // 检查是否是 x 或 d 键（关闭 agent）
+                    if key.code == crossterm::event::KeyCode::Char('x')
+                        || key.code == crossterm::event::KeyCode::Char('d')
+                    {
+                        if !app.filter_mode && app.view == View::Dashboard {
+                            let _ = app.close_selected_agent();
+                            last_full_refresh = std::time::Instant::now();
+                            continue;
+                        }
+                    }
                     let prev_selected = app.selected_index;
                     handle_key(app, key);
                     // 如果选择变化，切换 pipe-pane 并刷新终端预览
