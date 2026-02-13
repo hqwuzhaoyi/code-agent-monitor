@@ -598,6 +598,32 @@ pub enum SimpleExtractionResult {
     Failed,
 }
 
+/// 清理用户输入行中的长内容，避免 AI 误判
+/// 只清理超过一定长度的输入（可能是用户正在输入的详细回答）
+/// 保留简短的输入（如 "A"、"y"、"1" 等已提交的回答）
+fn clean_user_input_line(content: &str) -> String {
+    content
+        .lines()
+        .map(|line| {
+            // 检查是否是用户输入行（以 ❯ 开头）
+            if let Some(input_start) = line.find('❯') {
+                let after_prompt = &line[input_start + '❯'.len_utf8()..];
+                let trimmed = after_prompt.trim();
+                // 如果输入内容超过 10 个字符，认为是正在输入的详细内容
+                // 简短的回答（如 A、y、1）保留
+                if trimmed.len() > 10 {
+                    format!("{}❯ [用户正在输入...]", &line[..input_start])
+                } else {
+                    line.to_string()
+                }
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 /// 从终端快照中提取格式化的通知消息（简化版）
 ///
 /// 与 `extract_question_with_haiku` 不同，这个函数让 AI 直接输出
@@ -648,56 +674,51 @@ fn extract_formatted_message_with_context(
     // 截取最后 N 行
     let truncated = crate::infra::terminal::truncate_last_lines(terminal_snapshot, lines);
 
-    let system = "你是一个终端输出分析专家。从 AI Agent 终端快照中提取最新的消息，格式化为简洁的通知。";
+    // 预处理：清理用户输入框中的内容，避免 AI 误判
+    // 将 "❯ 用户输入内容" 替换为 "❯ [用户正在输入...]"
+    let cleaned = clean_user_input_line(&truncated);
+
+    let system = r#"你是终端输出分析专家。从 AI Agent 终端快照中提取最新的问题，格式化为简洁的通知消息。"#;
 
     let prompt = format!(
-        r#"分析以下 AI Agent 终端输出，提取最新的问题或状态信息。
+        r#"分析以下 AI Agent 终端输出，提取最新的问题。
 
-终端输出:
-{truncated}
+<terminal_snapshot>
+{cleaned}
+</terminal_snapshot>
 
-请用 JSON 格式回复，包含以下字段：
-- has_question: true/false（是否有问题需要用户回答）
-- message: 格式化后的通知消息（见下方格式要求）
-- context_complete: true/false（上下文是否完整）
-- agent_status: "completed"/"idle"/"waiting"（Agent 状态）
-- last_action: Agent 最后完成的操作摘要（可为 null）
+<task>
+判断 Agent 是否有问题等待用户回答，并提取问题内容。
+</task>
 
-message 格式要求（非常重要）：
-1. 只提取最后一条 Agent 输出的问题或状态
-2. 去除所有终端 UI 元素（进度条、边框、ANSI 转义、工具调用标记 ⏺、状态指示器 ✻ 等）
-3. 如果是选择题：
-   - 先写问题
-   - 换行后列出选项（保持原有格式如 A) xxx 或 1. xxx）
-   - 最后一行加"回复数字 (1-N)"或"回复字母 (A-D)"
-4. 如果是确认问题：最后加"y 确认 / n 取消"
-5. 如果是开放式问题：保持问题原文
-6. 保持简洁，不超过 500 字符
-7. 不要重复内容！选项只出现一次
+<rules>
+1. 找到 Agent 最后提出的问题（选择题/确认题/开放式问题）
+2. 检查问题之后是否有新的 ⏺ 开头的 Agent 回复
+3. 如果没有新的 ⏺ 回复 → has_question = true
+4. "[用户正在输入...]" 表示用户还没提交回答，忽略它
+</rules>
 
-context_complete 判断：
-- 如果问题引用了"这个"、"上面的"等内容，检查被引用内容是否可见
-- 不可见则 context_complete = false
+<output_format>
+返回 JSON：
+- has_question: boolean
+- message: string（问题内容，格式化后）
+- context_complete: boolean（只要能看到完整的问题和选项就是 true）
+- agent_status: "completed" | "idle" | "waiting"
+- last_action: string | null
+</output_format>
 
-示例输出（选择题）：
-{{
-  "has_question": true,
-  "message": "你需要哪些核心功能？\n\nA) 基础版 - 添加、删除、完成标记\nB) 标准版 - 基础版 + 编辑、筛选\nC) 增强版 - 标准版 + 分类、优先级\n\n回复字母 (A-C)",
-  "context_complete": true,
-  "agent_status": "waiting",
-  "last_action": null
-}}
+<context_complete_rule>
+context_complete = true 的条件：能看到完整的问题文本和所有选项
+context_complete = false 的条件：问题或选项被截断，无法完整显示
+注意：即使问题提到"第二个问题"，只要当前问题本身是完整的，context_complete = true
+</context_complete_rule>
 
-示例输出（无问题）：
-{{
-  "has_question": false,
-  "message": "",
-  "context_complete": true,
-  "agent_status": "completed",
-  "last_action": "React Todo List 项目已完成"
-}}
+<message_rules>
+has_question=true 时：提取问题+选项，加"回复字母/数字"提示，不超过500字符
+has_question=false 时：message 留空
+</message_rules>
 
-只返回 JSON，不要其他内容。"#
+只返回 JSON。"#
     );
 
     let start = std::time::Instant::now();
