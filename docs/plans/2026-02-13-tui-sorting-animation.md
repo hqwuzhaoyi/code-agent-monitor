@@ -2,9 +2,9 @@
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
-**Goal:** Add agent list sorting by start time (newest first) and animated state icons.
+**Goal:** Add agent list sorting by start time (newest first), animated state icons, and search functionality.
 
-**Architecture:** Global animation tick counter in App, AgentState::icon() takes tick parameter to return frame-appropriate icon. Sorting applied after loading agents.
+**Architecture:** Global animation tick counter in App, AgentState::icon() takes tick parameter to return frame-appropriate icon. Sorting applied after loading agents. Search mode with real-time filtering by ID and project name.
 
 **Tech Stack:** Rust, ratatui, chrono
 
@@ -320,20 +320,338 @@ If any fixes were needed, commit them.
 
 ---
 
-### Task 8: Manual verification
+### Task 8: Add search state to App
 
-**Step 1: Build release**
+**Files:**
+- Modify: `src/tui/app.rs:23-42` (App struct)
+- Modify: `src/tui/app.rs:45-57` (App::new)
+
+**Step 1: Add search fields to App struct**
+
+In `src/tui/app.rs`, add fields after `animation_tick`:
+
+```rust
+/// 搜索模式
+pub search_mode: bool,
+/// 搜索关键词
+pub search_query: String,
+```
+
+**Step 2: Initialize search fields in App::new()**
+
+In `App::new()`, add after `animation_tick: 0`:
+
+```rust
+search_mode: false,
+search_query: String::new(),
+```
+
+**Step 3: Add search helper methods**
+
+Add to `impl App`:
+
+```rust
+/// 进入搜索模式
+pub fn enter_search_mode(&mut self) {
+    self.search_mode = true;
+    self.search_query.clear();
+}
+
+/// 退出搜索模式
+pub fn exit_search_mode(&mut self) {
+    self.search_mode = false;
+    self.search_query.clear();
+}
+
+/// 获取过滤后的 agents
+pub fn filtered_agents(&self) -> Vec<&AgentItem> {
+    if self.search_query.is_empty() {
+        self.agents.iter().collect()
+    } else {
+        let query = self.search_query.to_lowercase();
+        self.agents
+            .iter()
+            .filter(|a| {
+                a.id.to_lowercase().contains(&query)
+                    || a.project.to_lowercase().contains(&query)
+            })
+            .collect()
+    }
+}
+```
+
+**Step 4: Build to verify**
+
+Run: `cargo build 2>&1 | tail -5`
+Expected: Build succeeds
+
+**Step 5: Commit**
+
+```bash
+git add src/tui/app.rs
+git commit -m "feat(tui): add search state to App"
+```
+
+---
+
+### Task 9: Add search event handling
+
+**Files:**
+- Modify: `src/tui/event.rs` (handle_dashboard_key, add handle_search_key)
+
+**Step 1: Add search key handler**
+
+In `src/tui/event.rs`, add new function:
+
+```rust
+fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.exit_search_mode(),
+        KeyCode::Enter => {
+            // 确认搜索，保持过滤状态但退出搜索模式
+            app.search_mode = false;
+        }
+        KeyCode::Backspace => {
+            app.search_query.pop();
+        }
+        KeyCode::Char(c) => {
+            app.search_query.push(c);
+        }
+        _ => {}
+    }
+}
+```
+
+**Step 2: Update handle_key to route to search handler**
+
+Modify `handle_key`:
+
+```rust
+pub fn handle_key(app: &mut crate::tui::App, key: KeyEvent) {
+    if app.search_mode {
+        handle_search_key(app, key);
+        return;
+    }
+    match app.view {
+        crate::tui::View::Dashboard => handle_dashboard_key(app, key),
+        crate::tui::View::Logs => handle_logs_key(app, key),
+    }
+}
+```
+
+**Step 3: Add '/' key to enter search mode**
+
+In `handle_dashboard_key`, add case:
+
+```rust
+KeyCode::Char('/') => app.enter_search_mode(),
+```
+
+**Step 4: Build to verify**
+
+Run: `cargo build 2>&1 | tail -5`
+Expected: Build succeeds
+
+**Step 5: Commit**
+
+```bash
+git add src/tui/event.rs
+git commit -m "feat(tui): add search event handling"
+```
+
+---
+
+### Task 10: Update UI to show search and filter
+
+**Files:**
+- Modify: `src/tui/ui.rs` (render_dashboard, render_agent_list)
+
+**Step 1: Update status bar to show search input**
+
+In `render_dashboard`, modify status bar rendering:
+
+```rust
+// 状态栏
+let status = if app.search_mode {
+    format!(" 🔍 {}_", app.search_query)
+} else if !app.search_query.is_empty() {
+    format!(
+        " CAM TUI │ Agents: {} (filtered) │ ↻ {:?} ago │ [/] search",
+        app.filtered_agents().len(),
+        app.last_refresh.elapsed()
+    )
+} else {
+    format!(
+        " CAM TUI │ Agents: {} │ ↻ {:?} ago │ [/] search",
+        app.agents.len(),
+        app.last_refresh.elapsed()
+    )
+};
+let status_style = if app.search_mode {
+    Style::default().bg(Color::Yellow).fg(Color::Black)
+} else {
+    Style::default().bg(Color::Blue).fg(Color::White)
+};
+let status_bar = Paragraph::new(status).style(status_style);
+frame.render_widget(status_bar, vertical[0]);
+```
+
+**Step 2: Update render_agent_list to use filtered_agents**
+
+Modify `render_agent_list` to use `app.filtered_agents()`:
+
+```rust
+fn render_agent_list(app: &App, frame: &mut Frame, area: Rect) {
+    let filtered = app.filtered_agents();
+    let items: Vec<ListItem> = filtered
+        .iter()
+        .enumerate()
+        .map(|(i, agent)| {
+            let icon = agent.state.icon(app.animation_tick);
+            let selected = if i == app.selected_index { "→ " } else { "  " };
+            let duration = chrono::Local::now()
+                .signed_duration_since(agent.started_at)
+                .num_minutes();
+            let text = format!(
+                "{}{} {}\n   {} | {}\n   [{:?}] {}m",
+                selected, icon, agent.id, agent.agent_type, agent.project,
+                agent.state, duration
+            );
+            ListItem::new(text)
+        })
+        .collect();
+
+    let title = if app.search_query.is_empty() {
+        " Agents ".to_string()
+    } else {
+        format!(" Agents ({}) ", filtered.len())
+    };
+
+    let list = List::new(items)
+        .block(Block::default().borders(Borders::ALL).title(title));
+    frame.render_widget(list, area);
+}
+```
+
+**Step 3: Build to verify**
+
+Run: `cargo build 2>&1 | tail -5`
+Expected: Build succeeds
+
+**Step 4: Commit**
+
+```bash
+git add src/tui/ui.rs
+git commit -m "feat(tui): update UI for search display and filtering"
+```
+
+---
+
+### Task 11: Add search tests
+
+**Files:**
+- Modify: `src/tui/tests.rs`
+
+**Step 1: Add search filter test**
+
+```rust
+#[test]
+fn test_search_filter() {
+    let mut app = App::new();
+    app.agents = vec![
+        AgentItem {
+            id: "cam-123".to_string(),
+            agent_type: "claude".to_string(),
+            project: "my-project".to_string(),
+            state: AgentState::Running,
+            started_at: chrono::Local::now(),
+            tmux_session: None,
+        },
+        AgentItem {
+            id: "cam-456".to_string(),
+            agent_type: "claude".to_string(),
+            project: "other-project".to_string(),
+            state: AgentState::Idle,
+            started_at: chrono::Local::now(),
+            tmux_session: None,
+        },
+    ];
+
+    // No filter
+    assert_eq!(app.filtered_agents().len(), 2);
+
+    // Filter by ID
+    app.search_query = "123".to_string();
+    assert_eq!(app.filtered_agents().len(), 1);
+    assert_eq!(app.filtered_agents()[0].id, "cam-123");
+
+    // Filter by project
+    app.search_query = "other".to_string();
+    assert_eq!(app.filtered_agents().len(), 1);
+    assert_eq!(app.filtered_agents()[0].project, "other-project");
+
+    // Case insensitive
+    app.search_query = "MY-PROJECT".to_string();
+    assert_eq!(app.filtered_agents().len(), 1);
+}
+```
+
+**Step 2: Add search mode test**
+
+```rust
+#[test]
+fn test_search_mode() {
+    let mut app = App::new();
+
+    assert!(!app.search_mode);
+    assert!(app.search_query.is_empty());
+
+    app.enter_search_mode();
+    assert!(app.search_mode);
+
+    app.search_query = "test".to_string();
+    app.exit_search_mode();
+    assert!(!app.search_mode);
+    assert!(app.search_query.is_empty());
+}
+```
+
+**Step 3: Run tests**
+
+Run: `cargo test test_search 2>&1 | tail -10`
+Expected: All tests pass
+
+**Step 4: Commit**
+
+```bash
+git add src/tui/tests.rs
+git commit -m "test(tui): add search functionality tests"
+```
+
+---
+
+### Task 12: Final verification
+
+**Step 1: Run all TUI tests**
+
+Run: `cargo test tui 2>&1 | tail -20`
+Expected: All tests pass
+
+**Step 2: Build release**
 
 Run: `cargo build --release 2>&1 | tail -5`
 Expected: Build succeeds
 
-**Step 2: Test TUI**
+**Step 3: Test TUI**
 
 Run: `cargo run --release -- tui`
 Expected:
 - Agents sorted by start time (newest at top)
 - State icons animate (rotating/pulsing)
+- Press `/` to enter search mode
+- Type to filter agents by ID or project name
+- Press `Esc` to clear search, `Enter` to confirm
 
-**Step 3: Done**
+**Step 4: Done**
 
 All features implemented and verified.
