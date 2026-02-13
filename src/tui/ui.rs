@@ -18,6 +18,10 @@ pub fn render(app: &App, frame: &mut Frame) {
 fn render_dashboard(app: &App, frame: &mut Frame) {
     let area = frame.area();
 
+    // 预先计算过滤后的 agents（避免重复计算）
+    let filtered = app.filtered_agents();
+    let filtered_count = filtered.len();
+
     // 垂直分割: 状态栏 | 主区域 | 通知 | 快捷键
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -35,7 +39,7 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     } else if !app.search_query.is_empty() {
         format!(
             " CAM TUI │ Agents: {} (filtered) │ ↻ {:?} ago │ [/] search",
-            app.filtered_agents().len(),
+            filtered_count,
             app.last_refresh.elapsed()
         )
     } else {
@@ -62,8 +66,8 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         ])
         .split(vertical[1]);
 
-    // Agent 列表
-    render_agent_list(app, frame, main_area[0]);
+    // Agent 列表（使用预先计算的 filtered）
+    render_agent_list_with_filtered(app, frame, main_area[0], &filtered);
 
     // 终端预览
     render_terminal_preview(app, frame, main_area[1]);
@@ -77,9 +81,8 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     frame.render_widget(help_bar, vertical[3]);
 }
 
-/// 渲染 Agent 列表
-fn render_agent_list(app: &App, frame: &mut Frame, area: Rect) {
-    let filtered = app.filtered_agents();
+/// 渲染 Agent 列表（使用预先过滤的结果）
+fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, filtered: &[&crate::tui::AgentItem]) {
     let items: Vec<ListItem> = filtered
         .iter()
         .enumerate()

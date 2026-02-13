@@ -54,24 +54,24 @@ mod tests {
 
     #[test]
     fn test_agent_state_animated_icon() {
-        // Running cycles through 4 frames
+        // Running cycles through 4 frames (每5帧切换一次)
         assert_eq!(AgentState::Running.icon(0), "◐");
-        assert_eq!(AgentState::Running.icon(1), "◓");
-        assert_eq!(AgentState::Running.icon(2), "◑");
-        assert_eq!(AgentState::Running.icon(3), "◒");
-        assert_eq!(AgentState::Running.icon(4), "◐"); // wraps
+        assert_eq!(AgentState::Running.icon(5), "◓");
+        assert_eq!(AgentState::Running.icon(10), "◑");
+        assert_eq!(AgentState::Running.icon(15), "◒");
+        assert_eq!(AgentState::Running.icon(20), "◐"); // wraps
 
         // Waiting pulses
         assert_eq!(AgentState::Waiting.icon(0), "◉");
-        assert_eq!(AgentState::Waiting.icon(1), "◎");
+        assert_eq!(AgentState::Waiting.icon(5), "◎");
 
         // Idle breathes
         assert_eq!(AgentState::Idle.icon(0), "○");
-        assert_eq!(AgentState::Idle.icon(1), "◌");
+        assert_eq!(AgentState::Idle.icon(5), "◌");
 
         // Error flashes
         assert_eq!(AgentState::Error.icon(0), "✗");
-        assert_eq!(AgentState::Error.icon(1), "⚠");
+        assert_eq!(AgentState::Error.icon(5), "⚠");
     }
 
     #[test]

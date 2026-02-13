@@ -260,7 +260,7 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
         // 渲染
         terminal.draw(|frame| render(app, frame))?;
 
-        // 递增动画帧
+        // 递增动画帧（每5帧更新一次，降低渲染频率）
         app.animation_tick = app.animation_tick.wrapping_add(1);
 
         // 处理事件（100ms 超时）
