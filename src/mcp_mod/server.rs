@@ -12,34 +12,10 @@ use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
 use crate::openclaw_notifier::OpenclawNotifier;
 use crate::session::state::{ConversationStateManager, ReplyResult};
 
-/// MCP 请求
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpRequest {
-    pub jsonrpc: String,
-    pub id: Option<serde_json::Value>,
-    pub method: String,
-    pub params: Option<serde_json::Value>,
-}
+// Re-export types from types module for backwards compatibility
+pub use super::types::{McpRequest, McpResponse, McpError};
 
-/// MCP 响应
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpResponse {
-    pub jsonrpc: String,
-    pub id: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub result: Option<serde_json::Value>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub error: Option<McpError>,
-}
-
-/// MCP 错误
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct McpError {
-    pub code: i32,
-    pub message: String,
-}
-
-/// MCP 工具定义
+/// MCP 工具定义 (internal use)
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct McpTool {
     name: String,

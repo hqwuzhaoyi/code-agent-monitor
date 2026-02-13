@@ -5,6 +5,7 @@ pub mod cli;
 pub mod infra;
 #[path = "session_mod/mod.rs"]
 pub mod session;
+#[path = "mcp_mod/mod.rs"]
 pub mod mcp;
 pub mod notify;
 #[path = "agent_mod/mod.rs"]
@@ -14,7 +15,6 @@ pub mod team;
 pub mod task_list;
 pub mod anthropic;
 pub mod notification;
-pub mod mcp_new;
 
 // Re-exports from infra (backwards compatibility)
 pub use infra::{TmuxManager, ProcessScanner};
@@ -30,7 +30,10 @@ pub use agent::WatcherDaemon;
 pub use session::{SessionManager, SessionFilter};
 pub use session::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult};
 
+// Re-exports from mcp (backwards compatibility)
 pub use mcp::McpServer;
+pub use mcp::{McpError, McpRequest, McpResponse, McpTool};
+
 pub use notify::{Watcher, Notifier, NotifyEvent};
 pub use notification::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use openclaw_notifier::OpenclawNotifier;
