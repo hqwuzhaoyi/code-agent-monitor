@@ -16,7 +16,7 @@ use std::fs;
 
 use super::event::{NotificationEvent, NotificationEventType};
 use crate::anthropic::{extract_question_with_haiku, ExtractedQuestion, ExtractionResult, TaskSummary};
-use crate::notification_summarizer::NotificationSummarizer;
+use super::summarizer::NotificationSummarizer;
 
 /// Notification message constants (Chinese)
 pub mod msg {

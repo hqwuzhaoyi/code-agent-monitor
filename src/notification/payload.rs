@@ -21,7 +21,7 @@ use chrono::Utc;
 use serde_json;
 
 use super::urgency::Urgency;
-use crate::notification_summarizer::NotificationSummarizer;
+use super::summarizer::NotificationSummarizer;
 
 /// Notification message constants (Chinese)
 mod msg {

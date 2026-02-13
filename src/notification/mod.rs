@@ -28,6 +28,8 @@ pub mod terminal_cleaner;
 pub mod formatter;
 pub mod deduplicator;
 pub mod event;
+pub mod summarizer;
+pub mod throttle;
 
 pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
 pub use dispatcher::NotificationDispatcher;
@@ -38,3 +40,5 @@ pub use terminal_cleaner::is_processing;
 pub use formatter::{MessageFormatter, msg};
 pub use deduplicator::NotificationDeduplicator;
 pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
+pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
+pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
