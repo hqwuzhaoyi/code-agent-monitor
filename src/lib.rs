@@ -23,6 +23,7 @@ pub mod notification;
 pub mod terminal_utils;
 pub mod ai_quality;
 pub mod watcher;
+pub mod mcp_new;
 
 pub use process::ProcessScanner;
 pub use session::{SessionManager, SessionFilter};
