@@ -99,3 +99,23 @@ pub fn restore_terminal(terminal: &mut Tui) -> AppResult<()> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
 }
+
+use crate::tui::{render, poll_event, handle_key, TuiEvent};
+use std::time::Duration;
+
+/// 运行 TUI 主循环
+pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<()> {
+    while !app.should_quit {
+        // 渲染
+        terminal.draw(|frame| render(app, frame))?;
+
+        // 处理事件（100ms 超时）
+        if let Some(event) = poll_event(Duration::from_millis(100))? {
+            match event {
+                TuiEvent::Key(key) => handle_key(app, key),
+                TuiEvent::Tick => {}
+            }
+        }
+    }
+    Ok(())
+}
