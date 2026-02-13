@@ -1201,13 +1201,13 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Tui { refresh_interval: _, no_notifications: _ } => {
+        Commands::Tui { refresh_interval, no_notifications: _ } => {
             use code_agent_monitor::tui::{App, init_terminal, restore_terminal, run};
 
             let mut terminal = init_terminal()?;
             let mut app = App::new();
 
-            let result = run(&mut terminal, &mut app);
+            let result = run(&mut terminal, &mut app, refresh_interval);
 
             restore_terminal(&mut terminal)?;
 

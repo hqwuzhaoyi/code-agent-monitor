@@ -137,6 +137,16 @@ impl App {
         }
         Ok(())
     }
+
+    /// 跳转到选中 agent 的 tmux session
+    pub fn attach_selected_tmux(&self) -> AppResult<Option<String>> {
+        if let Some(agent) = self.selected_agent() {
+            if let Some(ref session) = agent.tmux_session {
+                return Ok(Some(session.clone()));
+            }
+        }
+        Ok(None)
+    }
 }
 
 impl Default for App {
@@ -166,7 +176,13 @@ use crate::tui::{render, poll_event, handle_key, TuiEvent};
 use std::time::Duration;
 
 /// 运行 TUI 主循环
-pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<()> {
+pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppResult<()> {
+    // 初始加载
+    let _ = app.refresh_agents();
+
+    let refresh_interval = Duration::from_millis(refresh_interval_ms);
+    let mut last_full_refresh = std::time::Instant::now();
+
     while !app.should_quit {
         // 渲染
         terminal.draw(|frame| render(app, frame))?;
@@ -174,9 +190,50 @@ pub fn run(terminal: &mut Tui, app: &mut App) -> AppResult<()> {
         // 处理事件（100ms 超时）
         if let Some(event) = poll_event(Duration::from_millis(100))? {
             match event {
-                TuiEvent::Key(key) => handle_key(app, key),
+                TuiEvent::Key(key) => {
+                    // 检查是否是 Enter 键
+                    if key.code == crossterm::event::KeyCode::Enter {
+                        if let Ok(Some(session)) = app.attach_selected_tmux() {
+                            // 暂时恢复终端
+                            restore_terminal(terminal)?;
+
+                            // 执行 tmux attach
+                            let status = std::process::Command::new("tmux")
+                                .args(["attach-session", "-t", &session])
+                                .status();
+
+                            // 重新初始化终端
+                            *terminal = init_terminal()?;
+
+                            // 刷新数据
+                            let _ = app.refresh_agents();
+                            last_full_refresh = std::time::Instant::now();
+
+                            if let Err(e) = status {
+                                eprintln!("tmux attach failed: {}", e);
+                            }
+                            continue;
+                        }
+                    }
+                    let prev_selected = app.selected_index;
+                    handle_key(app, key);
+                    // 如果选择变化，刷新终端预览
+                    if prev_selected != app.selected_index {
+                        let session_to_refresh = app.selected_agent()
+                            .and_then(|agent| agent.tmux_session.clone());
+                        if let Some(session) = session_to_refresh {
+                            let _ = app.refresh_terminal_preview(&session);
+                        }
+                    }
+                }
                 TuiEvent::Tick => {}
             }
+        }
+
+        // 定时全量刷新
+        if last_full_refresh.elapsed() >= refresh_interval {
+            let _ = app.refresh_agents();
+            last_full_refresh = std::time::Instant::now();
         }
     }
     Ok(())
