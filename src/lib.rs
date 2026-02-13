@@ -3,6 +3,7 @@
 pub mod ai;
 pub mod cli;
 pub mod infra;
+pub mod tui;
 #[path = "session_mod/mod.rs"]
 pub mod session;
 #[path = "mcp_mod/mod.rs"]
