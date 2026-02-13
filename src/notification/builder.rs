@@ -61,7 +61,7 @@ impl NotificationBuilder {
             let channels = config.get("channels");
 
             // 1. Telegram
-            if let Some(chat_id) = channels.and_then(|c| Self::extract_telegram_target(c)) {
+            if let Some(chat_id) = channels.and_then(Self::extract_telegram_target) {
                 info!(channel = "telegram", target = %chat_id, "Detected Telegram channel");
                 let channel = OpenclawMessageChannel::new(OpenclawMessageConfig {
                     channel_type: "telegram".to_string(),

@@ -10,7 +10,7 @@ use crate::input_detector::{InputWaitDetector, InputWaitResult};
 use crate::jsonl_parser::{JsonlEvent, JsonlParser};
 use crate::tmux::TmuxManager;
 // Import new watcher module for future migration
-use crate::watcher::{AgentMonitor, EventProcessor, StabilityDetector};
+use crate::watcher::AgentMonitor;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

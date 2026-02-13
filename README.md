@@ -122,12 +122,12 @@ cam reply y [--target <agent_id>]
 
 CAM uses Claude Haiku 4.5 for terminal state detection and question extraction. API configuration is read in the following priority:
 
-1. `~/.config/cam` (recommended)
+1. `~/.config/code-agent-monitor/config.json` (recommended)
 2. Environment variables `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
 3. `~/.anthropic/api_key`
 4. `~/.openclaw/openclaw.json`
 
-**Configuration example** (`~/.config/cam`):
+**Configuration example** (`~/.config/code-agent-monitor/config.json`):
 
 ```json
 {
@@ -279,7 +279,7 @@ src/
 | `~/.config/code-agent-monitor/watcher.pid` | Watcher process PID |
 | `~/.config/code-agent-monitor/hook.log` | Hook logs |
 | `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
-| `~/.config/cam` | Haiku API configuration |
+| `~/.config/code-agent-monitor/config.json` | Haiku API configuration |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | Task lists |
 
@@ -443,12 +443,12 @@ cam reply y [--target <agent_id>]
 
 CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置按以下优先级读取：
 
-1. `~/.config/cam`（推荐）
+1. `~/.config/code-agent-monitor/config.json`（推荐）
 2. 环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
 3. `~/.anthropic/api_key`
 4. `~/.openclaw/openclaw.json`
 
-**配置示例** (`~/.config/cam`):
+**配置示例** (`~/.config/code-agent-monitor/config.json`):
 
 ```json
 {
@@ -600,7 +600,7 @@ src/
 | `~/.config/code-agent-monitor/watcher.pid` | Watcher 进程 PID |
 | `~/.config/code-agent-monitor/hook.log` | Hook 日志 |
 | `~/.config/code-agent-monitor/conversation_state.json` | 对话状态 |
-| `~/.config/cam` | Haiku API 配置 |
+| `~/.config/code-agent-monitor/config.json` | Haiku API 配置 |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | 任务列表 |
 

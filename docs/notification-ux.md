@@ -101,7 +101,7 @@ pub enum ExtractionResult {
 
 AI 提取使用 Claude Haiku 4.5，配置位置：
 
-1. `~/.config/cam` (推荐)
+1. `~/.config/code-agent-monitor/config.json` (推荐)
 2. 环境变量 `ANTHROPIC_API_KEY`
 3. `~/.anthropic/api_key`
 4. `~/.openclaw/openclaw.json`

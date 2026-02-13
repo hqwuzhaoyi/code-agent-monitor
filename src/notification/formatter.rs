@@ -136,7 +136,7 @@ impl MessageFormatter {
 
         // 如果有选项，添加选项列表
         if !extracted.options.is_empty() {
-            result.push_str("\n");
+            result.push('\n');
             for option in &extracted.options {
                 result.push_str(&format!("\n{}", option));
             }
@@ -334,11 +334,11 @@ impl MessageFormatter {
                     if !self.no_ai {
                         match extract_question_with_haiku(snap) {
                             ExtractionResult::Found(extracted) => {
-                                return Self::format_extracted_question(&project_name, &extracted);
+                                return Self::format_extracted_question(project_name, &extracted);
                             }
                             ExtractionResult::NoQuestion(summary) => {
                                 // AI 判断没有问题，显示任务摘要
-                                return Self::format_no_question(&project_name, &summary);
+                                return Self::format_no_question(project_name, &summary);
                             }
                             ExtractionResult::Failed => {
                                 // AI 提取失败，提示用户查看终端
@@ -598,11 +598,11 @@ impl MessageFormatter {
                     if !self.no_ai {
                         match extract_question_with_haiku(snap) {
                             ExtractionResult::Found(extracted) => {
-                                return Self::format_extracted_question(&project_name, &extracted);
+                                return Self::format_extracted_question(project_name, &extracted);
                             }
                             ExtractionResult::NoQuestion(summary) => {
                                 // AI 判断没有问题，显示任务摘要
-                                return Self::format_no_question(&project_name, &summary);
+                                return Self::format_no_question(project_name, &summary);
                             }
                             ExtractionResult::Failed => {
                                 // AI 提取失败，提示用户查看终端

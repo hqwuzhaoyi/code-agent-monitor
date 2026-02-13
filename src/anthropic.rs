@@ -3,7 +3,7 @@
 //! This module is deprecated. Please use `crate::ai` directly.
 //!
 //! API Key 读取优先级：
-//! 1. CAM 配置文件 `~/.config/cam`（JSON 格式，字段 `anthropic_api_key` 和可选 `anthropic_base_url`）
+//! 1. CAM 配置文件 `~/.config/code-agent-monitor/config.json`（JSON 格式，字段 `anthropic_api_key` 和可选 `anthropic_base_url`）
 //! 2. 环境变量 `ANTHROPIC_API_KEY`
 //! 3. 文件 `~/.anthropic/api_key`
 //! 4. OpenClaw 配置 `~/.openclaw/openclaw.json` 的 `models.providers.anthropic.apiKey` 或 `providers.anthropic.apiKey`

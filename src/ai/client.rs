@@ -4,7 +4,7 @@
 //! 主要用于终端问题提取等简单任务，使用 Haiku 模型以获得最低延迟。
 //!
 //! API Key 读取优先级：
-//! 1. CAM 配置文件 `~/.config/cam`（JSON 格式，字段 `anthropic_api_key` 和可选 `anthropic_base_url`）
+//! 1. CAM 配置文件 `~/.config/code-agent-monitor/config.json`（JSON 格式，字段 `anthropic_api_key` 和可选 `anthropic_base_url`）
 //! 2. 环境变量 `ANTHROPIC_API_KEY`
 //! 3. 文件 `~/.anthropic/api_key`
 //! 4. OpenClaw 配置 `~/.openclaw/openclaw.json` 的 `models.providers.anthropic.apiKey` 或 `providers.anthropic.apiKey`
@@ -72,9 +72,9 @@ impl AnthropicConfig {
     fn load_api_config() -> Result<(String, String)> {
         let default_url = ANTHROPIC_API_URL.to_string();
 
-        // 1. CAM 配置文件 ~/.config/cam
+        // 1. CAM 配置文件 ~/.config/code-agent-monitor/config.json
         if let Some(home) = dirs::home_dir() {
-            let config_path = home.join(".config/cam");
+            let config_path = home.join(".config/code-agent-monitor/config.json");
             if config_path.exists() {
                 if let Ok(content) = fs::read_to_string(&config_path) {
                     if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
@@ -96,7 +96,7 @@ impl AnthropicConfig {
                                         }
                                     })
                                     .unwrap_or_else(|| default_url.clone());
-                                debug!("Using API key from ~/.config/cam, base_url: {}", url);
+                                debug!("Using API key from ~/.config/code-agent-monitor/config.json, base_url: {}", url);
                                 return Ok((key.to_string(), url));
                             }
                         }
@@ -180,7 +180,7 @@ impl AnthropicConfig {
         }
 
         Err(anyhow!(
-            "No Anthropic API key found. Create ~/.config/cam with anthropic_api_key, \
+            "No Anthropic API key found. Create ~/.config/code-agent-monitor/config.json with anthropic_api_key, \
              set ANTHROPIC_API_KEY env var, create ~/.anthropic/api_key, \
              or configure in ~/.openclaw/openclaw.json"
         ))
