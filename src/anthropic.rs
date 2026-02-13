@@ -445,11 +445,25 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
         .unwrap_or("等待输入")
         .to_string();
 
+    // Generate reply_hint based on question_type and options
+    let reply_hint = match question_type {
+        QuestionType::Confirmation => "y/n".to_string(),
+        QuestionType::Options => {
+            if options.len() <= 5 {
+                (1..=options.len()).map(|n| n.to_string()).collect::<Vec<_>>().join("/")
+            } else {
+                format!("1-{}", options.len())
+            }
+        }
+        QuestionType::OpenEnded => String::new(),
+    };
+
     let content = NotificationContent {
         question_type,
         question,
         options,
         summary,
+        reply_hint,
     };
 
     // 评估提取质量
@@ -992,6 +1006,7 @@ That's all."#;
             question: "Choose:".to_string(),
             options: vec!["A".to_string(), "B".to_string()],
             summary: "选择".to_string(),
+            reply_hint: "1/2".to_string(),
         };
 
         let json = serde_json::to_string(&content).unwrap();
@@ -999,6 +1014,7 @@ That's all."#;
         assert!(json.contains("\"question\":\"Choose:\""));
         assert!(json.contains("\"options\":[\"A\",\"B\"]"));
         assert!(json.contains("\"summary\":\"选择\""));
+        assert!(json.contains("\"reply_hint\":\"1/2\""));
     }
 
     #[test]
@@ -1035,6 +1051,7 @@ That's all."#;
             question: "你想要实现什么功能？".to_string(),
             options: vec![],
             summary: "等待回复".to_string(),
+            reply_hint: String::new(),
         };
 
         let assessment = assess_question_extraction(&content);
@@ -1047,6 +1064,7 @@ That's all."#;
             question: "".to_string(), // 空问题
             options: vec![],          // 选项类型但没有选项
             summary: "".to_string(),  // 空摘要
+            reply_hint: String::new(),
         };
 
         let invalid_assessment = assess_question_extraction(&invalid_content);

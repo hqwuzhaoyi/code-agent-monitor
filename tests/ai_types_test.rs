@@ -180,6 +180,7 @@ mod notification_content_tests {
         assert!(content.question.is_empty());
         assert!(content.options.is_empty());
         assert_eq!(content.summary, "等待输入");
+        assert!(content.reply_hint.is_empty());
     }
 
     #[test]
@@ -190,6 +191,7 @@ mod notification_content_tests {
         assert_eq!(content.question, "Delete this file?");
         assert!(content.options.is_empty());
         assert_eq!(content.summary, "请求确认");
+        assert_eq!(content.reply_hint, "y/n");
     }
 
     #[test]
@@ -201,6 +203,27 @@ mod notification_content_tests {
         assert_eq!(content.question, "Choose one:");
         assert_eq!(content.options, options);
         assert_eq!(content.summary, "等待选择");
+        assert_eq!(content.reply_hint, "1/2");
+    }
+
+    #[test]
+    fn test_notification_content_options_many() {
+        // Test reply_hint format for many options (> 5)
+        let options: Vec<String> = (1..=7).map(|n| format!("Option {}", n)).collect();
+        let content = NotificationContent::options("Choose one:", options.clone());
+
+        assert_eq!(content.question_type, QuestionType::Options);
+        assert_eq!(content.options.len(), 7);
+        assert_eq!(content.reply_hint, "1-7");
+    }
+
+    #[test]
+    fn test_notification_content_options_five() {
+        // Test reply_hint format for exactly 5 options (boundary case)
+        let options: Vec<String> = (1..=5).map(|n| format!("Option {}", n)).collect();
+        let content = NotificationContent::options("Choose one:", options.clone());
+
+        assert_eq!(content.reply_hint, "1/2/3/4/5");
     }
 
     #[test]
@@ -211,6 +234,7 @@ mod notification_content_tests {
         assert_eq!(content.question, "What feature do you want?");
         assert!(content.options.is_empty());
         assert_eq!(content.summary, "等待回复");
+        assert!(content.reply_hint.is_empty());
     }
 
     #[test]
@@ -220,6 +244,7 @@ mod notification_content_tests {
             question: "Test question".to_string(),
             options: vec!["A".to_string(), "B".to_string()],
             summary: "Test summary".to_string(),
+            reply_hint: "1/2".to_string(),
         };
 
         let cloned = original.clone();
@@ -227,6 +252,7 @@ mod notification_content_tests {
         assert_eq!(original.question, cloned.question);
         assert_eq!(original.options, cloned.options);
         assert_eq!(original.summary, cloned.summary);
+        assert_eq!(original.reply_hint, cloned.reply_hint);
     }
 
     #[test]
@@ -245,6 +271,7 @@ mod notification_content_tests {
             question: "Choose:".to_string(),
             options: vec!["A".to_string(), "B".to_string()],
             summary: "选择".to_string(),
+            reply_hint: "1/2".to_string(),
         };
 
         let json = serde_json::to_string(&content).unwrap();
@@ -253,6 +280,7 @@ mod notification_content_tests {
         assert!(json.contains("\"question\":\"Choose:\""));
         assert!(json.contains("\"options\":[\"A\",\"B\"]"));
         assert!(json.contains("\"summary\":\"选择\""));
+        assert!(json.contains("\"reply_hint\":\"1/2\""));
     }
 
     #[test]
@@ -261,7 +289,8 @@ mod notification_content_tests {
             "question_type": "confirmation",
             "question": "Proceed?",
             "options": [],
-            "summary": "确认"
+            "summary": "确认",
+            "reply_hint": "y/n"
         }"#;
 
         let content: NotificationContent = serde_json::from_str(json).unwrap();
@@ -270,6 +299,7 @@ mod notification_content_tests {
         assert_eq!(content.question, "Proceed?");
         assert!(content.options.is_empty());
         assert_eq!(content.summary, "确认");
+        assert_eq!(content.reply_hint, "y/n");
     }
 
     #[test]
@@ -279,6 +309,7 @@ mod notification_content_tests {
             question: "Select an option:".to_string(),
             options: vec!["1. First".to_string(), "2. Second".to_string()],
             summary: "等待选择".to_string(),
+            reply_hint: "1/2".to_string(),
         };
 
         let json = serde_json::to_string(&original).unwrap();
@@ -288,6 +319,7 @@ mod notification_content_tests {
         assert_eq!(original.question, deserialized.question);
         assert_eq!(original.options, deserialized.options);
         assert_eq!(original.summary, deserialized.summary);
+        assert_eq!(original.reply_hint, deserialized.reply_hint);
     }
 
     #[test]
@@ -297,6 +329,7 @@ mod notification_content_tests {
             question: "What do you want?".to_string(),
             options: vec![],
             summary: "等待回复".to_string(),
+            reply_hint: String::new(),
         };
 
         let json = serde_json::to_string(&content).unwrap();
@@ -313,6 +346,7 @@ mod notification_content_tests {
             question: "你想要实现什么功能？".to_string(),
             options: vec!["选项一".to_string(), "选项二".to_string()],
             summary: "等待回复".to_string(),
+            reply_hint: String::new(),
         };
 
         let json = serde_json::to_string(&content).unwrap();
@@ -321,6 +355,7 @@ mod notification_content_tests {
         assert_eq!(content.question, deserialized.question);
         assert_eq!(content.options, deserialized.options);
         assert_eq!(content.summary, deserialized.summary);
+        assert_eq!(content.reply_hint, deserialized.reply_hint);
     }
 }
 
@@ -346,6 +381,7 @@ mod integration_tests {
                 question: "Test".to_string(),
                 options: vec![],
                 summary: "Test".to_string(),
+                reply_hint: String::new(),
             };
 
             assert_eq!(content.question_type, qt);

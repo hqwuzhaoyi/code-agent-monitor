@@ -255,6 +255,7 @@ mod tests {
             question: "你想要实现什么功能？".to_string(),
             options: vec![],
             summary: "等待回复".to_string(),
+            reply_hint: String::new(),
         };
         let result = assess_question_extraction(&content);
         assert!(result.is_valid);
@@ -268,6 +269,7 @@ mod tests {
             question: "".to_string(),
             options: vec![],
             summary: "".to_string(),
+            reply_hint: String::new(),
         };
         let result = assess_question_extraction(&content);
         assert!(!result.is_valid);
@@ -280,6 +282,7 @@ mod tests {
             question: "请选择一个选项".to_string(),
             options: vec![], // 选项类型但没有选项
             summary: "等待选择".to_string(),
+            reply_hint: String::new(),
         };
         let result = assess_question_extraction(&content);
         assert!(result.confidence < 0.8);

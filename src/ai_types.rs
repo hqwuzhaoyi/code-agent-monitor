@@ -75,6 +75,8 @@ pub struct NotificationContent {
     pub options: Vec<String>,
     /// 简洁摘要（10 字以内）
     pub summary: String,
+    /// 回复提示（如 "y/n"、"1/2/3"）
+    pub reply_hint: String,
 }
 
 impl Default for NotificationContent {
@@ -84,6 +86,7 @@ impl Default for NotificationContent {
             question: String::new(),
             options: Vec::new(),
             summary: "等待输入".to_string(),
+            reply_hint: String::new(),
         }
     }
 }
@@ -96,16 +99,25 @@ impl NotificationContent {
             question: question.to_string(),
             options: Vec::new(),
             summary: "请求确认".to_string(),
+            reply_hint: "y/n".to_string(),
         }
     }
 
     /// 创建默认的选项类型内容
     pub fn options(question: &str, options: Vec<String>) -> Self {
+        let reply_hint = if options.len() <= 5 {
+            // For small number of options, show all: "1/2/3"
+            (1..=options.len()).map(|n| n.to_string()).collect::<Vec<_>>().join("/")
+        } else {
+            // For many options, show range: "1-N"
+            format!("1-{}", options.len())
+        };
         Self {
             question_type: QuestionType::Options,
             question: question.to_string(),
             options,
             summary: "等待选择".to_string(),
+            reply_hint,
         }
     }
 
@@ -116,6 +128,7 @@ impl NotificationContent {
             question: question.to_string(),
             options: Vec::new(),
             summary: "等待回复".to_string(),
+            reply_hint: String::new(),
         }
     }
 }
