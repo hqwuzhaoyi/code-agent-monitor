@@ -18,6 +18,9 @@ use tracing::{debug, info, trace, warn};
 use crate::ai_quality::{assess_question_extraction, assess_status_detection, thresholds};
 use crate::terminal_utils::truncate_for_status;
 
+// Re-export types from ai_types for backward compatibility
+pub use crate::ai_types::{AgentStatus, NotificationContent, QuestionType};
+
 /// Anthropic API 基础 URL
 const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 
@@ -39,80 +42,6 @@ const EXTRACT_TIMEOUT_MS: u64 = 10000;
 // ============================================================================
 // 通知内容提取
 // ============================================================================
-
-/// 问题类型
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum QuestionType {
-    /// 多选项问题
-    Options,
-    /// 是/否确认
-    Confirmation,
-    /// 开放式问题
-    OpenEnded,
-}
-
-impl Default for QuestionType {
-    fn default() -> Self {
-        Self::OpenEnded
-    }
-}
-
-/// 从终端快照提取的通知内容
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotificationContent {
-    /// 问题类型
-    pub question_type: QuestionType,
-    /// 完整问题文本
-    pub question: String,
-    /// 选项列表（仅 Options 类型有值）
-    pub options: Vec<String>,
-    /// 简洁摘要（10 字以内）
-    pub summary: String,
-}
-
-impl Default for NotificationContent {
-    fn default() -> Self {
-        Self {
-            question_type: QuestionType::OpenEnded,
-            question: String::new(),
-            options: Vec::new(),
-            summary: "等待输入".to_string(),
-        }
-    }
-}
-
-impl NotificationContent {
-    /// 创建默认的确认类型内容
-    pub fn confirmation(question: &str) -> Self {
-        Self {
-            question_type: QuestionType::Confirmation,
-            question: question.to_string(),
-            options: Vec::new(),
-            summary: "请求确认".to_string(),
-        }
-    }
-
-    /// 创建默认的选项类型内容
-    pub fn options(question: &str, options: Vec<String>) -> Self {
-        Self {
-            question_type: QuestionType::Options,
-            question: question.to_string(),
-            options,
-            summary: "等待选择".to_string(),
-        }
-    }
-
-    /// 创建默认的开放式问题内容
-    pub fn open_ended(question: &str) -> Self {
-        Self {
-            question_type: QuestionType::OpenEnded,
-            question: question.to_string(),
-            options: Vec::new(),
-            summary: "等待回复".to_string(),
-        }
-    }
-}
 
 /// Anthropic 客户端配置
 #[derive(Debug, Clone)]
@@ -775,17 +704,6 @@ context_complete 判断标准（非常重要）：
         options,
         reply_hint,
     }))
-}
-
-/// Agent 状态
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentStatus {
-    /// Agent 正在处理中（不应发送通知）
-    Processing,
-    /// Agent 空闲，等待用户输入（应发送通知）
-    WaitingForInput,
-    /// 无法确定状态
-    Unknown,
 }
 
 /// 使用 Haiku 判断 Agent 是否正在处理中
