@@ -41,8 +41,10 @@ pub struct App {
     pub logs_state: LogsState,
     /// 搜索模式
     pub search_mode: bool,
-    /// 搜索关键词
+    /// 搜索输入（实时输入）
     pub search_query: String,
+    /// 已确认的搜索词（回车后生效）
+    pub confirmed_query: String,
 }
 
 impl App {
@@ -59,6 +61,7 @@ impl App {
             logs_state: LogsState::new(),
             search_mode: false,
             search_query: String::new(),
+            confirmed_query: String::new(),
         }
     }
 
@@ -99,21 +102,33 @@ impl App {
     /// 进入搜索模式
     pub fn enter_search_mode(&mut self) {
         self.search_mode = true;
-        self.search_query.clear();
+        self.search_query = self.confirmed_query.clone();
     }
 
-    /// 退出搜索模式
+    /// 退出搜索模式（取消）
     pub fn exit_search_mode(&mut self) {
         self.search_mode = false;
         self.search_query.clear();
     }
 
+    /// 确认搜索
+    pub fn confirm_search(&mut self) {
+        self.search_mode = false;
+        self.confirmed_query = self.search_query.clone();
+    }
+
+    /// 清除搜索
+    pub fn clear_search(&mut self) {
+        self.search_query.clear();
+        self.confirmed_query.clear();
+    }
+
     /// 获取过滤后的 agents
     pub fn filtered_agents(&self) -> Vec<&AgentItem> {
-        if self.search_query.is_empty() {
+        if self.confirmed_query.is_empty() {
             self.agents.iter().collect()
         } else {
-            let query = self.search_query.to_lowercase();
+            let query = self.confirmed_query.to_lowercase();
             self.agents
                 .iter()
                 .filter(|a| {

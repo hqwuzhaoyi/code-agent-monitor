@@ -37,13 +37,13 @@ fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
     match key.code {
         KeyCode::Esc => app.exit_search_mode(),
         KeyCode::Enter => {
-            // 确认搜索，保持过滤状态但退出搜索模式
-            app.search_mode = false;
+            // 确认搜索，应用过滤
+            app.confirm_search();
         }
         KeyCode::Backspace => {
             app.search_query.pop();
         }
-        // 允许在搜索模式下用 j/k/方向键 导航
+        // 允许在搜索模式下用方向键导航
         KeyCode::Down => app.next_agent(),
         KeyCode::Up => app.prev_agent(),
         KeyCode::Char(c) => {

@@ -36,10 +36,11 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     // 状态栏
     let status = if app.search_mode {
         format!(" 🔍 {}_", app.search_query)
-    } else if !app.search_query.is_empty() {
+    } else if !app.confirmed_query.is_empty() {
         format!(
-            " CAM TUI │ Agents: {} (filtered) │ ↻ {:?} ago │ [/] search",
+            " CAM TUI │ Agents: {} (filtered: {}) │ ↻ {:?} ago │ [/] search",
             filtered_count,
+            app.confirmed_query,
             app.last_refresh.elapsed()
         )
     } else {
@@ -101,7 +102,7 @@ fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, fil
         })
         .collect();
 
-    let title = if app.search_query.is_empty() {
+    let title = if app.confirmed_query.is_empty() {
         " Agents ".to_string()
     } else {
         format!(" Agents ({}) ", filtered.len())

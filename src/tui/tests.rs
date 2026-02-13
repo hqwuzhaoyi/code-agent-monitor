@@ -116,18 +116,21 @@ mod tests {
         // No filter
         assert_eq!(app.filtered_agents().len(), 2);
 
-        // Filter by ID
+        // Filter by ID (需要确认搜索才生效)
         app.search_query = "123".to_string();
+        app.confirm_search();
         assert_eq!(app.filtered_agents().len(), 1);
         assert_eq!(app.filtered_agents()[0].id, "cam-123");
 
         // Filter by project
         app.search_query = "other".to_string();
+        app.confirm_search();
         assert_eq!(app.filtered_agents().len(), 1);
         assert_eq!(app.filtered_agents()[0].project, "other-project");
 
         // Case insensitive
         app.search_query = "MY-PROJECT".to_string();
+        app.confirm_search();
         assert_eq!(app.filtered_agents().len(), 1);
     }
 
@@ -137,14 +140,22 @@ mod tests {
 
         assert!(!app.search_mode);
         assert!(app.search_query.is_empty());
+        assert!(app.confirmed_query.is_empty());
 
         app.enter_search_mode();
         assert!(app.search_mode);
 
         app.search_query = "test".to_string();
+        app.confirm_search();
+        assert!(!app.search_mode);
+        assert_eq!(app.confirmed_query, "test");
+
+        // Esc 取消搜索不影响已确认的过滤
+        app.enter_search_mode();
+        app.search_query = "new".to_string();
         app.exit_search_mode();
         assert!(!app.search_mode);
-        assert!(app.search_query.is_empty());
+        assert_eq!(app.confirmed_query, "test"); // 保持之前的过滤
     }
 
     #[test]
