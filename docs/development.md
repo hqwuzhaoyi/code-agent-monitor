@@ -78,7 +78,7 @@ openclaw gateway restart
 
 ```bash
 # 重启 watcher
-kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
+kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 # watcher 会在下次 agent 启动时自动启动
 ```
 

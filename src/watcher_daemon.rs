@@ -17,7 +17,7 @@ impl WatcherDaemon {
     pub fn new() -> Self {
         let data_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".claude-monitor");
+            .join(".config/code-agent-monitor");
 
         let _ = fs::create_dir_all(&data_dir);
 
@@ -164,7 +164,7 @@ mod tests {
     fn test_pid_file_path() {
         let daemon = WatcherDaemon::new();
         let path = daemon.pid_file_path();
-        assert!(path.to_string_lossy().contains(".claude-monitor"));
+        assert!(path.to_string_lossy().contains(".config/code-agent-monitor"));
         assert!(path.to_string_lossy().ends_with("watcher.pid"));
     }
 

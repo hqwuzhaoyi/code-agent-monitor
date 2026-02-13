@@ -16,7 +16,7 @@ cam resume <session_id>           # 恢复会话
 
 # 通知调试
 echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id test --dry-run
-tail -f ~/.claude-monitor/hook.log
+tail -f ~/.config/code-agent-monitor/hook.log
 
 # Team 管理
 cam team-create <name>            # 创建 Team
@@ -37,18 +37,18 @@ cp target/release/cam plugins/cam/bin/cam
 openclaw gateway restart
 
 # 重启 watcher（更新后必须）
-kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
+kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 ```
 
 ### 数据存储
 
 | 路径 | 说明 |
 |------|------|
-| `~/.claude-monitor/agents.json` | 运行中的代理 |
-| `~/.claude-monitor/watcher.pid` | Watcher PID |
-| `~/.claude-monitor/hook.log` | Hook 日志 |
-| `~/.claude-monitor/conversation_state.json` | 对话状态 |
-| `~/.claude-monitor/dedup_state.json` | 通知去重状态 |
+| `~/.config/code-agent-monitor/agents.json` | 运行中的代理 |
+| `~/.config/code-agent-monitor/watcher.pid` | Watcher PID |
+| `~/.config/code-agent-monitor/hook.log` | Hook 日志 |
+| `~/.config/code-agent-monitor/conversation_state.json` | 对话状态 |
+| `~/.config/code-agent-monitor/dedup_state.json` | 通知去重状态 |
 | `~/.config/cam` | Haiku API 配置 |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | 任务列表 |

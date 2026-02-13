@@ -30,8 +30,8 @@ for skill in cam agent-teams cam-notify; do
 done
 
 # Kill existing watcher if running
-if [ -f ~/.claude-monitor/watcher.pid ]; then
-    OLD_PID=$(cat ~/.claude-monitor/watcher.pid)
+if [ -f ~/.config/code-agent-monitor/watcher.pid ]; then
+    OLD_PID=$(cat ~/.config/code-agent-monitor/watcher.pid)
     if kill -0 "$OLD_PID" 2>/dev/null; then
         echo "Stopping old watcher (PID: $OLD_PID)..."
         kill "$OLD_PID" 2>/dev/null || true

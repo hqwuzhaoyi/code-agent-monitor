@@ -2,7 +2,7 @@
 //!
 //! 追踪对话上下文，支持快捷回复（y/n/1/2/3）。
 //!
-//! 存储位置：`~/.claude-monitor/conversation_state.json`
+//! 存储位置：`~/.config/code-agent-monitor/conversation_state.json`
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::agent::AgentManager;
 use crate::team::{TeamBridge, InboxMessage};
+use crate::tmux::TmuxManager;
 
 /// 确认类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +103,7 @@ pub struct ConversationStateManager {
     state_file: PathBuf,
     agent_manager: AgentManager,
     team_bridge: TeamBridge,
+    tmux_manager: TmuxManager,
 }
 
 impl ConversationStateManager {
@@ -109,13 +111,14 @@ impl ConversationStateManager {
     pub fn new() -> Self {
         let state_file = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".claude-monitor")
+            .join(".config/code-agent-monitor")
             .join("conversation_state.json");
 
         Self {
             state_file,
             agent_manager: AgentManager::new(),
             team_bridge: TeamBridge::new(),
+            tmux_manager: TmuxManager::new(),
         }
     }
 
@@ -125,6 +128,7 @@ impl ConversationStateManager {
             state_file,
             agent_manager: AgentManager::new_for_test(),
             team_bridge: TeamBridge::new(),
+            tmux_manager: TmuxManager::new(),
         }
     }
 
@@ -329,27 +333,7 @@ impl ConversationStateManager {
 
     /// 发送到 tmux session
     fn send_to_tmux(&self, session: &str, message: &str) -> Result<()> {
-        use std::process::Command;
-
-        // 使用 -l 标志发送字面文本，避免特殊字符被解释
-        let status = Command::new("tmux")
-            .args(["send-keys", "-t", session, "-l", message])
-            .status()?;
-
-        if !status.success() {
-            return Err(anyhow!("发送文本到 tmux 失败"));
-        }
-
-        // 发送回车
-        let status = Command::new("tmux")
-            .args(["send-keys", "-t", session, "Enter"])
-            .status()?;
-
-        if !status.success() {
-            return Err(anyhow!("发送回车到 tmux 失败"));
-        }
-
-        Ok(())
+        self.tmux_manager.send_keys(session, message)
     }
 
     /// 设置当前活跃的 Team

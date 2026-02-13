@@ -236,7 +236,7 @@ fn record_hook_event(agent_id: &str) -> Result<()> {
 
     let hook_file = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".claude-monitor")
+        .join(".config/code-agent-monitor")
         .join("last_hook_events.json");
 
     // Read existing events
@@ -524,7 +524,7 @@ async fn main() -> Result<()> {
 
             let log_dir = dirs::home_dir()
                 .unwrap_or_else(|| std::path::PathBuf::from("."))
-                .join(".claude-monitor");
+                .join(".config/code-agent-monitor");
             let log_path = log_dir.join("hook.log");
 
             // 确保日志目录存在

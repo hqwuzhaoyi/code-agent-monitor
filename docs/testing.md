@@ -80,7 +80,7 @@ openclaw agent --agent main --message "使用 cam_agent_start 在 /tmp 启动 Cl
 # 预期：watcher 检测到 [Y/n] 提示后，clawdbot 应收到通知
 
 # 3. 查看 watcher 是否在运行
-cat ~/.claude-monitor/watcher.pid && echo "Watcher PID: $(cat ~/.claude-monitor/watcher.pid)"
+cat ~/.config/code-agent-monitor/watcher.pid && echo "Watcher PID: $(cat ~/.config/code-agent-monitor/watcher.pid)"
 ```
 
 ### 场景 2: 测试中文等待输入检测
@@ -112,7 +112,7 @@ openclaw agent --agent main --message "使用 cam_agent_start 在 /tmp 启动 Cl
 
 # 3. 验证 watcher 在所有 agent 退出后自动停止
 sleep 10
-cat ~/.claude-monitor/watcher.pid 2>/dev/null || echo "Watcher 已停止（PID 文件不存在）"
+cat ~/.config/code-agent-monitor/watcher.pid 2>/dev/null || echo "Watcher 已停止（PID 文件不存在）"
 ```
 
 ### 场景 4: 测试错误通知
@@ -138,7 +138,7 @@ echo "Continue? [Y/n]" | ./target/release/cam notify --event WaitingForInput --a
 
 ```bash
 # 1. 确保没有残留的 watcher
-kill $(cat ~/.claude-monitor/watcher.pid) 2>/dev/null
+kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 
 # 2. 启动 agent（应自动启动 watcher）
 openclaw agent --agent main --message "使用 cam_agent_start 在 /Users/admin/workspace 启动 Claude Code"
@@ -159,7 +159,7 @@ openclaw agent --agent main --message "使用 cam_agent_stop 停止 cam-xxx"
 
 # 8. 验证 watcher 自动停止（所有 agent 退出后）
 sleep 5
-cat ~/.claude-monitor/watcher.pid 2>/dev/null || echo "Watcher 已自动停止"
+cat ~/.config/code-agent-monitor/watcher.pid 2>/dev/null || echo "Watcher 已自动停止"
 ```
 
 ## 真实 Claude Code 确认场景
@@ -266,7 +266,7 @@ openclaw agent --agent main --message "使用 cam_agent_send 向 cam-xxx 发送�
 
 ```bash
 # 1. 确保有运行中的 CAM agent
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+cat ~/.config/code-agent-monitor/agents.json | jq '.agents[].agent_id'
 
 # 2. 查看 agent 当前终端状态
 command tmux capture-pane -t <agent_id> -p -S -30
@@ -276,7 +276,7 @@ echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
   ./target/release/cam notify --event notification --agent-id <agent_id>
 
 # 4. 查看完整日志（包含终端快照）
-tail -100 ~/.claude-monitor/hook.log
+tail -100 ~/.config/code-agent-monitor/hook.log
 
 # 5. 使用 dry-run 预览通知内容（不实际发送）
 echo '{"notification_type": "idle_prompt", "cwd": "/Users/admin/workspace"}' | \
@@ -311,9 +311,9 @@ openclaw agent --session-id main --message "test"
 
 | 环节 | 检查命令 | 预期结果 |
 |------|---------|---------|
-| Agent 注册 | `cat ~/.claude-monitor/agents.json \| jq '.agents[].agent_id'` | 显示 `cam-xxx` |
+| Agent 注册 | `cat ~/.config/code-agent-monitor/agents.json \| jq '.agents[].agent_id'` | 显示 `cam-xxx` |
 | Watcher 运行 | `ps aux \| grep "cam watch-daemon" \| grep -v grep` | 进程存在 |
-| Hook 触发 | `tail ~/.claude-monitor/hook.log` | 显示事件记录 |
+| Hook 触发 | `tail ~/.config/code-agent-monitor/hook.log` | 显示事件记录 |
 | Urgency 分类 | dry-run 输出 | HIGH/MEDIUM/LOW 正确 |
 | Dashboard payload | dry-run 输出 | JSON 格式正确，包含 terminal_snapshot |
 | Telegram 消息 | dry-run 输出 | 包含问题和选项 |
@@ -330,7 +330,7 @@ echo "=== CAM E2E Test ==="
 
 # 1. 检查 agents
 echo -n "1. Agents: "
-cat ~/.claude-monitor/agents.json 2>/dev/null | jq -r '.agents[].agent_id' | head -1 || echo "None"
+cat ~/.config/code-agent-monitor/agents.json 2>/dev/null | jq -r '.agents[].agent_id' | head -1 || echo "None"
 
 # 2. 检查 watcher
 echo -n "2. Watcher: "
@@ -346,7 +346,7 @@ grep -c "fetch failed" ~/.openclaw/logs/gateway.err.log 2>/dev/null || echo "0"
 
 # 5. 最近 hook 事件
 echo "5. Recent hooks:"
-tail -5 ~/.claude-monitor/hook.log 2>/dev/null | grep -E "Hook triggered|Notification" || echo "None"
+tail -5 ~/.config/code-agent-monitor/hook.log 2>/dev/null | grep -E "Hook triggered|Notification" || echo "None"
 ```
 
 ## 已知问题

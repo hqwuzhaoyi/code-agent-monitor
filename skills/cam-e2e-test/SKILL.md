@@ -36,17 +36,17 @@ openclaw agent --agent main --message "在 /tmp/cam-test 使用 claude code 创�
 
 ```bash
 # 检查 agents.json
-cat ~/.claude-monitor/agents.json | jq '.agents[] | {agent_id, cwd, status}'
+cat ~/.config/code-agent-monitor/agents.json | jq '.agents[] | {agent_id, cwd, status}'
 
 # 检查 watcher 是否运行
-cat ~/.claude-monitor/watcher.pid && ps aux | grep "cam watch-daemon" | grep -v grep
+cat ~/.config/code-agent-monitor/watcher.pid && ps aux | grep "cam watch-daemon" | grep -v grep
 ```
 
 ### 4. 监控通知链路
 
 ```bash
 # 实时监控 hook 日志
-tail -f ~/.claude-monitor/hook.log
+tail -f ~/.config/code-agent-monitor/hook.log
 
 # 检查 gateway 日志
 tail -f ~/.openclaw/logs/gateway.log | grep -E "system event|notification"
@@ -91,9 +91,9 @@ openclaw agent --agent main --message "使用 cam_agent_stop 停止 <agent_id>"
 
 | 环节 | 检查命令 | 预期结果 |
 |------|---------|---------|
-| Agent 注册 | `cat ~/.claude-monitor/agents.json \| jq '.agents[].agent_id'` | 显示 cam-xxx |
+| Agent 注册 | `cat ~/.config/code-agent-monitor/agents.json \| jq '.agents[].agent_id'` | 显示 cam-xxx |
 | Watcher 运行 | `ps aux \| grep "cam watch-daemon"` | 进程存在 |
-| Hook 触发 | `tail ~/.claude-monitor/hook.log` | 显示事件记录 |
+| Hook 触发 | `tail ~/.config/code-agent-monitor/hook.log` | 显示事件记录 |
 | Urgency 分类 | dry-run 输出 | HIGH/MEDIUM/LOW 正确 |
 | Dashboard payload | dry-run 输出 | JSON 格式正确 |
 | Telegram 消息 | dry-run 输出 | 包含问题和选项 |

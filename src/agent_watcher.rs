@@ -404,7 +404,7 @@ impl AgentWatcher {
     fn load_hook_events(&mut self) {
         let hook_file = dirs::home_dir()
             .unwrap_or_else(|| std::path::PathBuf::from("."))
-            .join(".claude-monitor")
+            .join(".config/code-agent-monitor")
             .join("last_hook_events.json");
 
         if hook_file.exists() {

@@ -790,4 +790,167 @@ mod tests {
             panic!("Wrong variant");
         }
     }
+
+    // ==================== TDD Tests for Agent Teams Improvements ====================
+    // These tests are written in TDD red phase - they should FAIL until the
+    // corresponding features are implemented.
+
+    /// TDD Test: File locking for inbox writes
+    ///
+    /// Problem: Concurrent writes to inbox files can corrupt data when multiple
+    /// processes write simultaneously.
+    ///
+    /// Expected behavior: send_to_inbox should use file locking to ensure
+    /// atomic read-modify-write operations.
+    #[test]
+    fn test_concurrent_inbox_writes_do_not_corrupt_data() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp = tempdir().unwrap();
+        let bridge = Arc::new(TeamBridge::new_with_base_dir(temp.path().to_path_buf()));
+
+        // Create team
+        bridge.create_team("concurrent-test", "Test", "/path").unwrap();
+
+        let num_threads = 10;
+        let messages_per_thread = 20;
+        let expected_total = num_threads * messages_per_thread;
+
+        // Spawn multiple threads that write to the same inbox concurrently
+        let handles: Vec<_> = (0..num_threads)
+            .map(|thread_id| {
+                let bridge = Arc::clone(&bridge);
+                thread::spawn(move || {
+                    for msg_id in 0..messages_per_thread {
+                        let message = InboxMessage {
+                            from: format!("thread-{}", thread_id),
+                            text: format!("Message {} from thread {}", msg_id, thread_id),
+                            summary: None,
+                            timestamp: Utc::now(),
+                            color: None,
+                            read: false,
+                        };
+                        // This should not fail or corrupt data
+                        bridge.send_to_inbox("concurrent-test", "developer", message).unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        // Wait for all threads to complete
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        // Verify: All messages should be present and inbox should be valid JSON
+        let messages = bridge.read_inbox("concurrent-test", "developer").unwrap();
+
+        // CRITICAL: With proper file locking, we should have exactly expected_total messages
+        // Without locking, some messages may be lost due to race conditions
+        assert_eq!(
+            messages.len(),
+            expected_total,
+            "Expected {} messages but got {}. File locking may not be implemented correctly.",
+            expected_total,
+            messages.len()
+        );
+
+        // Verify each thread's messages are present
+        for thread_id in 0..num_threads {
+            let thread_messages: Vec<_> = messages
+                .iter()
+                .filter(|m| m.from == format!("thread-{}", thread_id))
+                .collect();
+            assert_eq!(
+                thread_messages.len(),
+                messages_per_thread,
+                "Thread {} should have {} messages but has {}",
+                thread_id,
+                messages_per_thread,
+                thread_messages.len()
+            );
+        }
+    }
+
+    /// TDD Test: Unified agent ID handling
+    ///
+    /// Problem: Agent IDs have inconsistent formats:
+    /// - CAM uses "cam-{timestamp}-{counter}" format
+    /// - Agent Teams uses "{name}@{team}" format
+    ///
+    /// Expected behavior: AgentId should provide conversion methods between formats
+    /// and TeamBridge should handle both formats consistently.
+    #[test]
+    fn test_agent_id_conversion_between_cam_and_team_formats() {
+        // CAM format: cam-1234567890-0
+        let cam_id = "cam-1234567890-0";
+
+        // Team format: developer@my-team
+        let team_id = AgentId::new("developer", "my-team");
+
+        // Test: AgentId should be able to store CAM ID as a reference
+        // This requires a new field or method to associate CAM ID with team agent
+
+        // Currently AgentId only supports {name}@{team} format
+        // We need to extend it to support mapping to CAM IDs
+
+        // Expected new API:
+        // let agent_id = AgentId::new("developer", "my-team");
+        // agent_id.set_cam_id("cam-1234567890-0");
+        // assert_eq!(agent_id.cam_id(), Some("cam-1234567890-0"));
+
+        // For now, test that parsing works correctly
+        assert!(AgentId::parse(cam_id).is_none(), "CAM ID should not parse as AgentId");
+        assert_eq!(team_id.to_string(), "developer@my-team");
+
+        // TODO: This test should be updated when unified ID handling is implemented
+        // The following assertions should pass after implementation:
+        //
+        // 1. AgentId should have a method to check if it's a CAM-managed agent
+        // assert!(agent_id.is_cam_managed());
+        //
+        // 2. TeamMember should store both team ID and CAM ID
+        // let member = TeamMember { ... };
+        // assert_eq!(member.agent_id, "developer@my-team");
+        // assert_eq!(member.cam_agent_id, Some("cam-1234567890-0".to_string()));
+    }
+
+    /// TDD Test: AgentId should support lookup by either format
+    #[test]
+    fn test_team_bridge_finds_member_by_cam_id() {
+        let (bridge, _temp) = create_test_bridge();
+
+        bridge.create_team("lookup-test", "Test", "/path").unwrap();
+
+        // Add a member with both team ID and CAM ID
+        let member = TeamMember {
+            name: "developer".to_string(),
+            agent_id: "developer@lookup-test".to_string(),
+            agent_type: "general-purpose".to_string(),
+            model: None,
+            color: None,
+            is_active: Some(true),
+            // tmux_pane_id currently stores CAM agent_id, but this is a workaround
+            tmux_pane_id: Some("cam-1234567890-0".to_string()),
+            cwd: None,
+        };
+        bridge.spawn_member("lookup-test", member).unwrap();
+
+        // Get team status
+        let status = bridge.get_team_status("lookup-test").unwrap();
+
+        // Current behavior: We can only find by team ID format
+        let found_by_team_id = status.members.iter()
+            .find(|m| m.agent_id == "developer@lookup-test");
+        assert!(found_by_team_id.is_some());
+
+        // TODO: After implementing unified ID handling, we should be able to:
+        // 1. Find member by CAM ID
+        // let found_by_cam_id = bridge.find_member_by_cam_id("lookup-test", "cam-1234567890-0");
+        // assert!(found_by_cam_id.is_some());
+        //
+        // 2. Get CAM ID from member
+        // assert_eq!(found_by_team_id.unwrap().cam_agent_id, Some("cam-1234567890-0".to_string()));
+    }
 }

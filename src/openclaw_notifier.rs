@@ -19,6 +19,7 @@ use crate::notification::formatter::MessageFormatter;
 use crate::notification::payload::PayloadBuilder;
 use crate::notification::event::{NotificationEvent, NotificationEventType};
 use crate::notification::deduplicator::NotificationDeduplicator;
+use crate::notification::channel::SendResult;
 use std::sync::Mutex;
 
 /// Channel 配置
@@ -28,15 +29,6 @@ pub struct ChannelConfig {
     pub channel: String,
     /// 目标: chat_id, phone number, channel id 等
     pub target: String,
-}
-
-/// 通知发送结果
-#[derive(Debug, Clone, PartialEq)]
-pub enum SendResult {
-    /// 通知已发送
-    Sent,
-    /// 静默跳过（LOW urgency 或外部会话）
-    Skipped(String),
 }
 
 /// OpenClaw notifier - 门面模式，委托给子模块处理
@@ -242,7 +234,7 @@ impl OpenclawNotifier {
         use std::io::Write;
 
         if let Some(home) = dirs::home_dir() {
-            let log_path = home.join(".claude-monitor/hook.log");
+            let log_path = home.join(".config/code-agent-monitor/hook.log");
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
                 let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
                 let _ = writeln!(

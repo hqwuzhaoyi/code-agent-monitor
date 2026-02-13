@@ -8,6 +8,8 @@ use std::io::{BufRead, BufReader};
 use std::process::Command;
 use chrono::{DateTime, Utc, Duration};
 
+use crate::tmux::TmuxManager;
+
 /// 会话信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionInfo {
@@ -91,14 +93,18 @@ pub struct SessionFilter {
 /// 会话管理器
 pub struct SessionManager {
     claude_projects_dir: PathBuf,
+    tmux_manager: TmuxManager,
 }
 
 impl SessionManager {
     pub fn new() -> Self {
         let home = dirs::home_dir().unwrap_or_else(|| PathBuf::from("."));
         let claude_projects_dir = home.join(".claude").join("projects");
-        
-        Self { claude_projects_dir }
+
+        Self {
+            claude_projects_dir,
+            tmux_manager: TmuxManager::new(),
+        }
     }
 
     /// 列出所有 Claude Code 会话
@@ -235,17 +241,7 @@ impl SessionManager {
 
     /// 向 tmux 会话发送输入
     pub fn send_to_tmux(&self, tmux_session: &str, input: &str) -> Result<()> {
-        // 使用 -l 标志发送字面文本，避免特殊字符被解释
-        // 文本和 Enter 必须分开发送，否则 Enter 可能不生效
-        Command::new("tmux")
-            .args(["send-keys", "-t", tmux_session, "-l", input])
-            .status()?;
-
-        Command::new("tmux")
-            .args(["send-keys", "-t", tmux_session, "Enter"])
-            .status()?;
-
-        Ok(())
+        self.tmux_manager.send_keys(tmux_session, input)
     }
 
     /// 获取 tmux 会话列表

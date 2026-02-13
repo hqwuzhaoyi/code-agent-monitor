@@ -131,4 +131,71 @@ mod tests {
         assert_eq!(msg.urgency, Urgency::High);
         assert!(msg.payload.is_some());
     }
+
+    // =========================================================================
+    // TDD Tests for Channel Health Check
+    // =========================================================================
+    // These tests define the expected behavior for channel health checking.
+    // Channels should be able to report their availability status.
+
+    /// Channel health status
+    #[derive(Debug, Clone, PartialEq)]
+    pub enum ChannelHealth {
+        /// Channel is healthy and ready to send
+        Healthy,
+        /// Channel is degraded but may still work
+        Degraded(String),
+        /// Channel is unavailable
+        Unavailable(String),
+    }
+
+    #[test]
+    #[ignore = "TDD: needs implementation of health_check() method on NotificationChannel trait"]
+    fn test_channel_health_check_returns_healthy_when_available() {
+        // A healthy channel should return ChannelHealth::Healthy
+        // when its underlying service is reachable and configured correctly.
+        //
+        // Expected trait method:
+        //   fn health_check(&self) -> ChannelHealth;
+        //
+        // Implementation should:
+        // - For Telegram: verify bot token is valid (optional API call)
+        // - For Dashboard: verify WebSocket connection is alive
+        // - For OpenClaw: verify command exists and is executable
+        todo!("Implement health_check() on NotificationChannel trait")
+    }
+
+    #[test]
+    #[ignore = "TDD: needs implementation of health_check() method on NotificationChannel trait"]
+    fn test_channel_health_check_returns_unavailable_when_misconfigured() {
+        // A channel with invalid configuration should return ChannelHealth::Unavailable
+        // with a descriptive error message.
+        //
+        // Example: TelegramChannel with empty chat_id should be Unavailable
+        todo!("Implement health_check() on NotificationChannel trait")
+    }
+
+    #[test]
+    #[ignore = "TDD: needs implementation of health_check() method on NotificationChannel trait"]
+    fn test_channel_health_check_returns_degraded_on_transient_issues() {
+        // A channel experiencing transient issues (e.g., rate limiting, slow response)
+        // should return ChannelHealth::Degraded with details.
+        todo!("Implement health_check() on NotificationChannel trait")
+    }
+
+    #[test]
+    #[ignore = "TDD: needs implementation of check_all_channels() on NotificationDispatcher"]
+    fn test_dispatcher_check_all_channels_health() {
+        // The dispatcher should be able to check health of all registered channels
+        // and return a summary.
+        //
+        // Expected method:
+        //   fn check_all_channels(&self) -> Vec<(String, ChannelHealth)>;
+        //
+        // This enables:
+        // - `cam status` command to show channel health
+        // - Automatic failover to healthy channels
+        // - Alerting when channels become unavailable
+        todo!("Implement check_all_channels() on NotificationDispatcher")
+    }
 }

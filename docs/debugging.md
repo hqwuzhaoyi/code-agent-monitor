@@ -31,13 +31,13 @@ echo '{"cwd": "/workspace"}' | ./target/release/cam notify --event session_start
 
 ```bash
 # 查看最近的 hook 触发记录
-tail -50 ~/.claude-monitor/hook.log
+tail -50 ~/.config/code-agent-monitor/hook.log
 
 # 实时监控 hook 日志
-tail -f ~/.claude-monitor/hook.log
+tail -f ~/.config/code-agent-monitor/hook.log
 
 # 查看特定 agent 的日志
-grep "cam-xxxxxxx" ~/.claude-monitor/hook.log
+grep "cam-xxxxxxx" ~/.config/code-agent-monitor/hook.log
 ```
 
 ## 验证 Channel 检测
@@ -54,7 +54,7 @@ echo '{}' | ./target/release/cam notify --event stop --agent-id test --dry-run 2
 
 | 问题 | 排查方法 |
 |------|---------|
-| 通知没有发送 | 检查 `~/.claude-monitor/hook.log` 是否有记录 |
+| 通知没有发送 | 检查 `~/.config/code-agent-monitor/hook.log` 是否有记录 |
 | 发送失败 | 查看 stderr 输出，可能是网络问题或 API 限流 |
 | 路由错误 | 使用 `--dry-run` 确认 urgency 分类是否正确 |
 | Channel 检测失败 | 检查 `~/.openclaw/openclaw.json` 配置 |
@@ -70,7 +70,7 @@ echo '{}' | ./target/release/cam notify --event stop --agent-id test --dry-run 2
 
 ```bash
 # 1. 检查 agents.json 中是否有该 agent
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+cat ~/.config/code-agent-monitor/agents.json | jq '.agents[].agent_id'
 
 # 2. 检查 tmux session 是否存在
 command tmux list-sessions | grep cam
@@ -79,7 +79,7 @@ command tmux list-sessions | grep cam
 tail -5000 ~/.openclaw/logs/gateway.log | grep "Agent ID"
 
 # 4. 检查 hook 日志中的注册情况
-grep "Registered\|Auto-registered" ~/.claude-monitor/hook.log | tail -20
+grep "Registered\|Auto-registered" ~/.config/code-agent-monitor/hook.log | tail -20
 ```
 
 **常见原因**：
@@ -148,10 +148,10 @@ Watcher Daemon → input_detector → notifier.send_event → openclaw system ev
 ps aux | grep "cam watch-daemon" | grep -v grep
 
 # 检查 watcher PID 文件
-cat ~/.claude-monitor/watcher.pid
+cat ~/.config/code-agent-monitor/watcher.pid
 
 # 检查 agent 是否在列表
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+cat ~/.config/code-agent-monitor/agents.json | jq '.agents[].agent_id'
 
 # 检查特定 agent 状态
 echo '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"agent_status","arguments":{"agent_id":"<AGENT_ID>"}}}' | ./target/release/cam serve 2>/dev/null | jq -r '.result.content[0].text'
@@ -203,7 +203,7 @@ openclaw message send --channel telegram --target <CHAT_ID> --message "test"
 ps aux | grep "cam watch-daemon"
 
 # 2. 确认 agent 在列表中
-cat ~/.claude-monitor/agents.json | jq '.agents[].agent_id'
+cat ~/.config/code-agent-monitor/agents.json | jq '.agents[].agent_id'
 
 # 3. 查看 agent 终端内容
 command tmux capture-pane -t cam-xxxxxxx -p -S -15

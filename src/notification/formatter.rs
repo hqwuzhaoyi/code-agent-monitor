@@ -90,7 +90,7 @@ impl MessageFormatter {
     pub fn get_project_name_for_agent(agent_id: &str) -> String {
         // 尝试从 agents.json 读取项目路径
         if let Some(home) = dirs::home_dir() {
-            let agents_path = home.join(".claude-monitor/agents.json");
+            let agents_path = home.join(".config/code-agent-monitor/agents.json");
             if let Ok(content) = fs::read_to_string(&agents_path) {
                 if let Ok(data) = serde_json::from_str::<serde_json::Value>(&content) {
                     if let Some(agents) = data.get("agents").and_then(|a| a.as_array()) {

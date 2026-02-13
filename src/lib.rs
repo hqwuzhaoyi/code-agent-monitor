@@ -31,7 +31,8 @@ pub use jsonl_parser::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_ta
 pub use input_detector::{InputWaitDetector, InputWaitResult, InputWaitPattern};
 pub use agent_watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
-pub use openclaw_notifier::{OpenclawNotifier, SendResult};
+pub use openclaw_notifier::OpenclawNotifier;
+pub use notification::SendResult;
 pub use watcher_daemon::WatcherDaemon;
 pub use team::{TeamConfig, TeamMember, TeamBridge, InboxMessage, SpecialMessage, AgentId, InboxWatcher, NotifyDecision, TeamOrchestrator, SpawnResult, TeamProgress, discover_teams, get_team_members, get_active_team_members};
 pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};

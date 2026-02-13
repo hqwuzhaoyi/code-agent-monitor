@@ -102,7 +102,7 @@ assert!(!dedup.should_send("cam-123", "你想要实现什么功能"));
 - 提取核心问题内容（忽略 reply_hint 变化）
 - 120 秒时间窗口
 - 相似度 > 80% 视为重复
-- 状态持久化到 `~/.claude-monitor/dedup_state.json`
+- 状态持久化到 `~/.config/code-agent-monitor/dedup_state.json`
 
 ### 5. 渠道系统 (`channel.rs`, `channels/`)
 

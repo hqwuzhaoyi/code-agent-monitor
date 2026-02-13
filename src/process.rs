@@ -1,32 +1,9 @@
 //! 进程扫描模块 - 扫描系统中的 AI 编码代理进程
 
+use crate::agent::AgentType;
 use serde::{Deserialize, Serialize};
 use sysinfo::{System, Process, Pid};
 use anyhow::Result;
-
-/// 代理类型
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-pub enum AgentType {
-    ClaudeCode,
-    OpenCode,
-    Codex,
-    GeminiCli,
-    MistralVibe,
-    Unknown,
-}
-
-impl std::fmt::Display for AgentType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            AgentType::ClaudeCode => write!(f, "Claude Code"),
-            AgentType::OpenCode => write!(f, "OpenCode"),
-            AgentType::Codex => write!(f, "Codex"),
-            AgentType::GeminiCli => write!(f, "Gemini CLI"),
-            AgentType::MistralVibe => write!(f, "Mistral Vibe"),
-            AgentType::Unknown => write!(f, "Unknown"),
-        }
-    }
-}
 
 /// 代理进程信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,7 +80,7 @@ impl ProcessScanner {
 
         // 检测代理类型
         let agent_type = if name.contains("claude") || cmd_str.contains("claude") {
-            AgentType::ClaudeCode
+            AgentType::Claude
         } else if name.contains("opencode") || cmd_str.contains("opencode") {
             AgentType::OpenCode
         } else if name.contains("codex") || cmd_str.contains("codex") {

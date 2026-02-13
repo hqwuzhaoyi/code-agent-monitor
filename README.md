@@ -1,5 +1,332 @@
 # Code Agent Monitor (CAM)
 
+[English](#english) | [中文](#中文)
+
+---
+
+<a name="english"></a>
+
+Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex).
+
+## Features
+
+- **Process Monitoring** - Scan all running AI coding agents in the system
+- **Session Management** - List and resume Claude Code historical sessions
+- **Agent Lifecycle** - Start, stop, and send input to agents
+- **Smart Notifications** - Route notifications based on urgency (HIGH/MEDIUM/LOW)
+- **Terminal Snapshots** - Include recent terminal output in notifications for remote context
+- **MCP Server** - Provide MCP protocol interface for other tools
+- **OpenClaw Integration** - Manage agents via natural language
+- **Agent Teams** - Multi-agent collaboration with remote management and quick replies
+- **Risk Assessment** - Automatically evaluate permission request risk levels
+
+## Installation
+
+### Prerequisites
+
+- Rust 1.70+
+- tmux
+- Claude Code CLI (optional, for agent management)
+
+### Build from Source
+
+```bash
+# Clone the repository
+git clone https://github.com/hqwuzhaoyi/code-agent-monitor.git
+cd code-agent-monitor
+
+# Build release binary
+cargo build --release
+
+# Binary location
+./target/release/cam
+
+# Optional: Install to PATH
+cp target/release/cam /usr/local/bin/
+```
+
+### OpenClaw Plugin Installation
+
+```bash
+# Install as OpenClaw plugin
+openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
+openclaw gateway restart
+```
+
+## Usage
+
+### Basic Commands
+
+```bash
+# List all agent processes
+cam list
+
+# List historical sessions
+cam sessions
+
+# Resume a session to tmux
+cam resume <session_id>
+
+# View session logs
+cam logs <session_id> --limit 10
+
+# Kill a process
+cam kill <pid>
+
+# Start MCP server
+cam serve
+
+# Start background watcher daemon
+cam watch-daemon -i 3
+```
+
+### Notification Commands
+
+```bash
+# Send notification event
+cam notify --event stop --agent-id cam-xxx
+
+# Preview notification (dry-run)
+echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id cam-xxx --dry-run
+```
+
+### Team Commands
+
+```bash
+# Create a team
+cam team-create my-project --description "My project"
+
+# Spawn an agent in team
+cam team-spawn my-project developer --prompt "Analyze project structure"
+
+# View team progress
+cam team-progress my-project
+
+# Shutdown team
+cam team-shutdown my-project
+```
+
+### Quick Reply Commands
+
+```bash
+# View pending confirmations
+cam pending-confirmations
+
+# Reply to pending confirmation
+cam reply y [--target <agent_id>]
+```
+
+## Configuration
+
+### Haiku API Configuration
+
+CAM uses Claude Haiku 4.5 for terminal state detection and question extraction. API configuration is read in the following priority:
+
+1. `~/.config/cam` (recommended)
+2. Environment variables `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
+3. `~/.anthropic/api_key`
+4. `~/.openclaw/openclaw.json`
+
+**Configuration example** (`~/.config/cam`):
+
+```json
+{
+  "anthropic_api_key": "sk-xxx",
+  "anthropic_base_url": "http://localhost:23000/"
+}
+```
+
+### Claude Code Hooks Configuration
+
+To enable automatic notifications when Claude Code is idle:
+
+**Automatic configuration (recommended)**:
+
+```bash
+# Get CAM plugin path
+CAM_BIN=$(openclaw plugins list --json | jq -r '.[] | select(.name == "cam") | .path')/bin/cam
+
+# Add hooks to Claude Code config
+cat ~/.claude/settings.json | jq --arg cam "$CAM_BIN" '.hooks = {
+  "Notification": [{
+    "matcher": "idle_prompt",
+    "hooks": [{
+      "type": "command",
+      "command": ($cam + " notify --event idle_prompt --agent-id $SESSION_ID")
+    }]
+  }]
+}' > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+```
+
+**Manual configuration**:
+
+Add to `~/.claude/settings.json`:
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      {
+        "matcher": "idle_prompt",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "<CAM_PLUGIN_PATH>/bin/cam notify --event idle_prompt --agent-id $SESSION_ID"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+## Debugging
+
+### View Logs
+
+```bash
+# View hook logs
+tail -f ~/.config/code-agent-monitor/hook.log
+
+# View watcher logs
+tail -f ~/.config/code-agent-monitor/watcher.log
+
+# Check watcher status
+cat ~/.config/code-agent-monitor/watcher.pid
+```
+
+### Dry-Run Testing
+
+```bash
+# Preview HIGH urgency notification
+echo '{"cwd": "/workspace"}' | cam notify --event permission_request --agent-id cam-test --dry-run
+
+# Preview MEDIUM urgency notification
+echo '{"cwd": "/workspace"}' | cam notify --event stop --agent-id cam-test --dry-run
+```
+
+### Verify Channel Detection
+
+```bash
+# Check OpenClaw channel configuration
+cat ~/.openclaw/openclaw.json | jq '.channels'
+
+# Test channel detection
+echo '{}' | cam notify --event stop --agent-id test --dry-run 2>&1 | grep "channel="
+```
+
+### Common Issues
+
+| Issue | Solution |
+|-------|----------|
+| Notifications not sending | Check `~/.config/code-agent-monitor/hook.log` for records |
+| Send failures | Check stderr output, may be network or API rate limiting |
+| Wrong routing | Use `--dry-run` to verify urgency classification |
+| Channel detection failed | Check `~/.openclaw/openclaw.json` configuration |
+| New format not applied | Restart watcher daemon |
+
+### Restart Watcher
+
+After code changes, restart the watcher:
+
+```bash
+kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
+# Watcher will auto-start on next agent launch
+```
+
+## Architecture
+
+### Module Structure
+
+```
+src/
+├── main.rs              # CLI entry point
+├── lib.rs               # Library exports
+├── process.rs           # Process scanning
+├── session.rs           # Session management
+├── agent.rs             # Agent lifecycle
+├── mcp.rs               # MCP server
+├── agent_watcher.rs     # Agent state monitoring
+├── anthropic.rs         # Haiku API integration
+├── notification/        # Notification module
+│   ├── channel.rs       # NotificationChannel trait
+│   ├── dispatcher.rs    # Multi-channel dispatcher
+│   ├── builder.rs       # Auto-configuration builder
+│   ├── urgency.rs       # Urgency classification
+│   ├── payload.rs       # Payload construction
+│   ├── formatter.rs     # Message formatting
+│   └── channels/        # Channel implementations
+└── team/                # Agent Teams module
+    ├── discovery.rs     # Team discovery
+    ├── bridge.rs        # Team bridge
+    ├── orchestrator.rs  # Team orchestration
+    └── inbox_watcher.rs # Inbox monitoring
+```
+
+### Notification Routing
+
+| Urgency | Events | Behavior |
+|---------|--------|----------|
+| HIGH | permission_request, Error, WaitingForInput | Send immediately |
+| MEDIUM | AgentExited, idle_prompt | Send notification |
+| LOW | session_start, stop | Silent |
+
+### Data Storage
+
+| Path | Description |
+|------|-------------|
+| `~/.config/code-agent-monitor/agents.json` | Running agent records |
+| `~/.config/code-agent-monitor/watcher.pid` | Watcher process PID |
+| `~/.config/code-agent-monitor/hook.log` | Hook logs |
+| `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
+| `~/.config/cam` | Haiku API configuration |
+| `~/.claude/teams/` | Agent Teams |
+| `~/.claude/tasks/` | Task lists |
+
+## Development
+
+### Build
+
+```bash
+# Debug build
+cargo build
+
+# Release build
+cargo build --release
+```
+
+### Run Tests
+
+```bash
+# Run all tests
+cargo test
+
+# Run tests sequentially (avoid tmux conflicts)
+cargo test -- --test-threads=1
+
+# Run specific module tests
+cargo test --lib notification
+cargo test --lib team
+```
+
+### Update Plugin Binary
+
+```bash
+cargo build --release
+cp target/release/cam plugins/cam/bin/cam
+openclaw gateway restart
+```
+
+## License
+
+MIT
+
+---
+
+<a name="中文"></a>
+
+# Code Agent Monitor (CAM)
+
 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)。
 
 ## 功能
@@ -7,7 +334,6 @@
 - **进程监控** - 扫描系统中所有运行的 AI 编码代理
 - **会话管理** - 列出、恢复 Claude Code 历史会话
 - **Agent 生命周期** - 启动、停止、发送输入到代理
-- **状态检测** - 检测代理是否等待用户输入（支持中英文）
 - **智能通知路由** - 根据 urgency 自动选择直接发送或通过 Agent 转发
 - **终端快照** - 通知中包含最近终端输出，方便远程了解上下文
 - **MCP 服务器** - 提供 MCP 协议接口供其他工具调用
@@ -17,15 +343,40 @@
 
 ## 安装
 
+### 前置要求
+
+- Rust 1.70+
+- tmux
+- Claude Code CLI（可选，用于 agent 管理）
+
+### 从源码构建
+
 ```bash
-# 编译
+# 克隆仓库
+git clone https://github.com/hqwuzhaoyi/code-agent-monitor.git
+cd code-agent-monitor
+
+# 编译 release 版本
 cargo build --release
 
 # 二进制位置
 ./target/release/cam
+
+# 可选：安装到 PATH
+cp target/release/cam /usr/local/bin/
 ```
 
-## CLI 使用
+### OpenClaw 插件安装
+
+```bash
+# 安装为 OpenClaw 插件
+openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
+openclaw gateway restart
+```
+
+## 使用方法
+
+### 基础命令
 
 ```bash
 # 列出所有代理进程
@@ -48,83 +399,65 @@ cam serve
 
 # 启动后台监控 daemon
 cam watch-daemon -i 3
+```
 
+### 通知命令
+
+```bash
 # 发送通知事件
 cam notify --event stop --agent-id cam-xxx
 
 # 预览通知（不实际发送）
 echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id cam-xxx --dry-run
+```
 
-# Team 编排命令
-cam team-spawn <team> <name> [--type <type>] [--prompt <prompt>]
-cam team-progress <team>
-cam team-shutdown <team>
+### Team 命令
 
-# 快捷回复
+```bash
+# 创建 Team
+cam team-create my-project --description "我的项目"
+
+# 在 Team 中启动 Agent
+cam team-spawn my-project developer --prompt "分析项目结构"
+
+# 查看 Team 进度
+cam team-progress my-project
+
+# 关闭 Team
+cam team-shutdown my-project
+```
+
+### 快捷回复命令
+
+```bash
+# 查看待处理确认
 cam pending-confirmations
+
+# 回复待处理确认
 cam reply y [--target <agent_id>]
 ```
 
-## 通知系统
+## 配置
 
-CAM 支持智能通知路由，根据事件紧急程度选择发送方式：
+### Haiku API 配置
 
-### 通知路由策略
+CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置按以下优先级读取：
 
-| Urgency | 事件类型 | 发送方式 | 说明 |
-|---------|---------|---------|------|
-| **HIGH** | permission_request, Error, WaitingForInput, notification(permission_prompt) | 直接发送到 channel | 需要立即响应，阻塞任务进度 |
-| **MEDIUM** | stop, session_end, AgentExited, notification(idle_prompt) | 直接发送到 channel | 需要知道，可以分配新任务 |
-| **LOW** | session_start, 其他 notification | 发给 OpenClaw Agent | 可选，Agent 可汇总或选择性转发 |
+1. `~/.config/cam`（推荐）
+2. 环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
+3. `~/.anthropic/api_key`
+4. `~/.openclaw/openclaw.json`
 
-### Channel 自动检测
+**配置示例** (`~/.config/cam`):
 
-从 `~/.openclaw/openclaw.json` 按优先级检测：
-1. telegram > whatsapp > discord > slack > signal
-
-### 终端快照
-
-HIGH/MEDIUM urgency 通知会自动包含最近 15 行终端输出：
-
-```
-✅ [CAM] cam-123 已停止
-
-目录: /workspace/myapp
-
-📸 终端快照:
-```
-$ cargo test
-   Compiling myapp v0.1.0
-    Finished release target
+```json
+{
+  "anthropic_api_key": "sk-xxx",
+  "anthropic_base_url": "http://localhost:23000/"
+}
 ```
 
-📡 via direct
-```
-
-### 调试通知
-
-```bash
-# 使用 --dry-run 预览通知路由
-echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id test --dry-run
-
-# 查看 hook 日志
-tail -f ~/.claude-monitor/hook.log
-
-# 验证 channel 检测
-cat ~/.openclaw/openclaw.json | jq '.channels'
-```
-
-### 支持的输入等待模式
-
-| 模式 | 示例 |
-|------|------|
-| Claude Code 确认 | `[Y]es / [N]o / [A]lways` |
-| 标准确认 | `[Y/n]`, `[y/N]`, `[yes/no]` |
-| 中文确认 | `[是/否]`, `确认？`, `是否继续？` |
-| 权限请求 | `allow this action`, `是否授权` |
-| 冒号提示 | `请输入文件名:`, `Enter your name:` |
-
-### 配置 Claude Code Hooks
+### Claude Code Hooks 配置
 
 为了让 Claude Code 在空闲时自动通知 CAM，需要配置 hooks。
 
@@ -168,255 +501,141 @@ cat ~/.claude/settings.json | jq --arg cam "$CAM_BIN" '.hooks = {
 }
 ```
 
-将 `<CAM_PLUGIN_PATH>` 替换为你的 CAM plugin 安装路径，例如：
-- 通过 `openclaw plugins install --link` 安装：使用链接的源目录路径
-- 查看安装路径：`openclaw plugins list`
+## 调试
 
-### 手动控制 Watcher
+### 查看日志
 
 ```bash
-# 查看 watcher 状态
-cat ~/.claude-monitor/watcher.pid
+# 查看 hook 日志
+tail -f ~/.config/code-agent-monitor/hook.log
 
 # 查看 watcher 日志
-tail -f ~/.claude-monitor/watcher.log
+tail -f ~/.config/code-agent-monitor/watcher.log
 
-# 手动停止 watcher
-kill $(cat ~/.claude-monitor/watcher.pid)
+# 检查 watcher 状态
+cat ~/.config/code-agent-monitor/watcher.pid
 ```
 
-## OpenClaw 集成
-
-通过 OpenClaw 使用自然语言管理代理：
+### Dry-Run 测试
 
 ```bash
-# 安装 plugin
-openclaw plugins install --link /Users/admin/workspace/code-agent-monitor/plugins/cam
+# 预览 HIGH urgency 通知
+echo '{"cwd": "/workspace"}' | cam notify --event permission_request --agent-id cam-test --dry-run
 
-# 使用自然语言
-openclaw agent --agent main --message "现在跑着什么"
-openclaw agent --agent main --message "在 /tmp 启动一个 Claude"
-openclaw agent --agent main --message "什么情况"
-openclaw agent --agent main --message "停掉"
+# 预览 MEDIUM urgency 通知
+echo '{"cwd": "/workspace"}' | cam notify --event stop --agent-id cam-test --dry-run
 ```
 
-详见 [plugins/cam/README.md](plugins/cam/README.md)
-
-## Agent Teams
-
-CAM 支持 Claude Code Agent Teams 多 Agent 协作，可通过 Telegram/WhatsApp 远程管理。
-
-### 快速开始
+### 验证 Channel 检测
 
 ```bash
-# 创建 Team 并启动 Agent
-cam team-create my-project --description "我的项目"
-cam team-spawn my-project developer --prompt "分析项目结构"
+# 检查 OpenClaw channel 配置
+cat ~/.openclaw/openclaw.json | jq '.channels'
 
-# 查看进度
-cam team-progress my-project
-
-# 快捷回复权限请求
-cam pending-confirmations
-cam reply y
+# 测试 channel 检测
+echo '{}' | cam notify --event stop --agent-id test --dry-run 2>&1 | grep "channel="
 ```
 
-### 风险评估
+### 常见问题
 
-权限请求自动评估风险等级：
+| 问题 | 解决方案 |
+|------|---------|
+| 通知没有发送 | 检查 `~/.config/code-agent-monitor/hook.log` 是否有记录 |
+| 发送失败 | 查看 stderr 输出，可能是网络问题或 API 限流 |
+| 路由错误 | 使用 `--dry-run` 确认 urgency 分类是否正确 |
+| Channel 检测失败 | 检查 `~/.openclaw/openclaw.json` 配置 |
+| 新格式未生效 | 重启 watcher daemon |
 
-| 风险 | 示例 | 显示 |
-|------|------|------|
-| ✅ 低 | `ls`, `cat`, `/tmp` 文件 | 安全操作 |
-| ⚠️ 中 | `npm install`, 项目文件 | 请确认 |
-| 🔴 高 | `rm -rf`, `sudo`, 系统文件 | 高风险警告 |
+### 重启 Watcher
 
-### 远程管理
+修改代码后，需要重启 watcher：
 
-通过 Telegram 收到通知后，可直接回复：
-- `y` / `是` - 批准操作
-- `n` / `否` - 拒绝操作
-- `1` / `2` / `3` - 选择选项
-
-详见 [skills/agent-teams/SKILL.md](skills/agent-teams/SKILL.md)
-
-## Haiku API 配置
-
-CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置按以下优先级读取：
-
-1. **`~/.config/cam`**（推荐）
-2. 环境变量 `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
-3. `~/.anthropic/api_key`
-4. `~/.openclaw/openclaw.json`
-
-**配置示例** (`~/.config/cam`):
-
-```json
-{
-  "anthropic_api_key": "sk-xxx",
-  "anthropic_base_url": "http://localhost:23000/"
-}
+```bash
+kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
+# watcher 会在下次 agent 启动时自动启动
 ```
-
-**模型**: `claude-haiku-4-5-20251001`
-
-## MCP 工具
-
-### Agent 管理工具
-
-| 工具 | 描述 |
-|------|------|
-| `list_agents` | 列出系统中所有代理进程 |
-| `list_sessions` | 列出 Claude Code 会话 |
-| `resume_session` | 恢复会话到 tmux |
-| `send_input` | 向 tmux 会话发送输入 |
-| `kill_agent` | 终止进程 |
-| `agent_start` | 启动新代理（自动启动 watcher） |
-| `agent_stop` | 停止代理 |
-| `agent_list` | 列出 CAM 管理的代理 |
-| `agent_send` | 向代理发送消息 |
-| `agent_logs` | 获取代理日志 |
-| `agent_status` | 获取代理状态 |
-
-### Team 管理工具
-
-| 工具 | 描述 |
-|------|------|
-| `team_create` | 创建新 Team |
-| `team_delete` | 删除 Team |
-| `team_status` | 获取 Team 状态 |
-| `inbox_read` | 读取成员收件箱 |
-| `inbox_send` | 发送消息到成员收件箱 |
-| `team_pending_requests` | 获取待处理的权限请求 |
-
-### Team 编排工具
-
-| 工具 | 描述 |
-|------|------|
-| `team_spawn_agent` | 在 Team 中启动 Agent |
-| `team_progress` | 获取 Team 聚合进度 |
-| `team_shutdown` | 优雅关闭 Team |
-| `team_orchestrate` | 根据任务描述创建 Team |
-| `team_assign_task` | 分配任务给成员 |
-
-### 快捷回复工具
-
-| 工具 | 描述 |
-|------|------|
-| `get_pending_confirmations` | 获取待处理确认 |
-| `reply_pending` | 回复待处理确认（支持 y/n/1/2/3） |
-| `handle_user_reply` | 处理自然语言回复 |
-
-## 数据存储
-
-| 路径 | 说明 |
-|------|------|
-| `~/.claude-monitor/agents.json` | 运行中的代理记录 |
-| `~/.claude-monitor/watcher.pid` | Watcher 进程 PID |
-| `~/.claude-monitor/watcher.log` | Watcher 日志 |
-| `~/.claude-monitor/conversation_state.json` | 对话状态（pending confirmations） |
-| `~/.claude/projects/` | Claude Code 会话数据 |
-| `~/.claude/settings.json` | Claude Code 配置（含 hooks） |
-| `~/.claude/teams/` | Agent Teams 配置和 inbox |
-| `~/.claude/tasks/` | Agent Teams 任务列表 |
-| `~/.config/cam` | Haiku API 配置（JSON） |
 
 ## 架构
 
-### 通知模块架构
-
-CAM 使用模块化的通知系统，支持多渠道发送：
+### 模块结构
 
 ```
-src/notification/
-├── mod.rs              # 模块导出
-├── channel.rs          # NotificationChannel trait 定义
-├── dispatcher.rs       # 多渠道分发器
-├── builder.rs          # 自动配置构建器
-├── urgency.rs          # Urgency 分类
-├── payload.rs          # Payload 构建
-├── terminal_cleaner.rs # 终端输出清理
-├── formatter.rs        # 消息格式化
-└── channels/
-    ├── mod.rs
-    ├── openclaw_message.rs  # 通用 OpenClaw 渠道
-    └── dashboard.rs         # Dashboard 渠道
+src/
+├── main.rs              # CLI 入口
+├── lib.rs               # 库导出
+├── process.rs           # 进程扫描
+├── session.rs           # 会话管理
+├── agent.rs             # Agent 生命周期
+├── mcp.rs               # MCP 服务器
+├── agent_watcher.rs     # Agent 状态监控
+├── anthropic.rs         # Haiku API 集成
+├── notification/        # 通知模块
+│   ├── channel.rs       # NotificationChannel trait
+│   ├── dispatcher.rs    # 多渠道分发器
+│   ├── builder.rs       # 自动配置构建器
+│   ├── urgency.rs       # Urgency 分类
+│   ├── payload.rs       # Payload 构建
+│   ├── formatter.rs     # 消息格式化
+│   └── channels/        # 渠道实现
+└── team/                # Agent Teams 模块
+    ├── discovery.rs     # Team 发现
+    ├── bridge.rs        # Team 桥接
+    ├── orchestrator.rs  # Team 编排
+    └── inbox_watcher.rs # Inbox 监控
 ```
 
-**核心组件**：
+### 通知路由
 
-| 组件 | 职责 |
+| Urgency | 事件类型 | 行为 |
+|---------|---------|------|
+| HIGH | permission_request, Error, WaitingForInput | 立即发送 |
+| MEDIUM | AgentExited, idle_prompt | 发送通知 |
+| LOW | session_start, stop | 静默 |
+
+### 数据存储
+
+| 路径 | 说明 |
 |------|------|
-| `NotificationChannel` | 渠道 trait，定义 `send()` / `send_async()` |
-| `NotificationDispatcher` | 管理多渠道，路由消息 |
-| `NotificationBuilder` | 从配置自动检测并注册渠道 |
-| `MessageFormatter` | 格式化不同事件类型的消息 |
-| `PayloadBuilder` | 构建结构化 JSON payload |
-
-**扩展新渠道**：
-
-```rust
-use crate::notification::{NotificationChannel, NotificationMessage, SendResult};
-
-pub struct MyChannel { /* ... */ }
-
-impl NotificationChannel for MyChannel {
-    fn name(&self) -> &str { "my-channel" }
-    fn should_send(&self, msg: &NotificationMessage) -> bool { true }
-    fn send(&self, msg: &NotificationMessage) -> Result<SendResult> { /* ... */ }
-    fn send_async(&self, msg: &NotificationMessage) -> Result<()> { /* ... */ }
-}
-```
-
-### 目录结构
-
-```
-code-agent-monitor/
-├── src/
-│   ├── main.rs            # CLI 入口
-│   ├── lib.rs             # 库入口
-│   ├── process.rs         # 进程扫描
-│   ├── session.rs         # 会话管理
-│   ├── agent.rs           # Agent 生命周期
-│   ├── mcp.rs             # MCP 服务器
-│   ├── agent_watcher.rs   # Agent 状态监控
-│   ├── input_detector.rs  # 输入等待检测
-│   ├── jsonl_parser.rs    # JSONL 解析
-│   ├── watcher_daemon.rs  # Watcher 后台进程管理
-│   ├── openclaw_notifier.rs # 通知系统门面
-│   ├── notification/      # 通知模块（见上方架构图）
-│   ├── team_discovery.rs  # Agent Teams 发现
-│   ├── team_bridge.rs     # Agent Teams 桥接
-│   ├── inbox_watcher.rs   # Inbox 监控
-│   ├── team_orchestrator.rs # Team 编排
-│   ├── conversation_state.rs # 对话状态管理
-│   └── notification_summarizer.rs # 智能通知汇总
-├── plugins/
-│   └── cam/               # OpenClaw plugin
-├── skills/
-│   ├── cam/               # 主 Skill（OpenClaw 集成）
-│   ├── agent-teams/       # Agent Teams 专家 Skill
-│   ├── cam-notify/        # 通知处理 Skill
-│   └── cam-e2e-test/      # 端到端测试 Skill（开发用）
-├── tests/
-│   ├── e2e.rs             # 端到端测试
-│   ├── input_detector_test.rs # 输入检测测试
-│   └── integration_test.rs # 集成测试
-└── docs/
-    └── plans/             # 设计文档
-```
+| `~/.config/code-agent-monitor/agents.json` | 运行中的代理记录 |
+| `~/.config/code-agent-monitor/watcher.pid` | Watcher 进程 PID |
+| `~/.config/code-agent-monitor/hook.log` | Hook 日志 |
+| `~/.config/code-agent-monitor/conversation_state.json` | 对话状态 |
+| `~/.config/cam` | Haiku API 配置 |
+| `~/.claude/teams/` | Agent Teams |
+| `~/.claude/tasks/` | 任务列表 |
 
 ## 开发
 
+### 构建
+
 ```bash
-# 运行测试
+# Debug 构建
+cargo build
+
+# Release 构建
+cargo build --release
+```
+
+### 运行测试
+
+```bash
+# 运行所有测试
 cargo test
 
 # 运行测试（顺序执行，避免 tmux 冲突）
 cargo test -- --test-threads=1
 
-# 编译 release
+# 运行特定模块测试
+cargo test --lib notification
+cargo test --lib team
+```
+
+### 更新插件二进制
+
+```bash
 cargo build --release
+cp target/release/cam plugins/cam/bin/cam
+openclaw gateway restart
 ```
 
 ## License

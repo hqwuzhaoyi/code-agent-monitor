@@ -9,7 +9,7 @@
 //! 3. 相似度 > 80% 视为重复
 //!
 //! ## 持久化
-//! 去重状态持久化到 `~/.claude-monitor/dedup_state.json`，
+//! 去重状态持久化到 `~/.config/code-agent-monitor/dedup_state.json`，
 //! 确保跨进程调用（如 `cam notify` 命令）也能正确去重。
 
 use std::collections::HashMap;
@@ -87,7 +87,7 @@ impl NotificationDeduplicator {
 
     /// 获取状态文件路径
     fn state_file_path() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".claude-monitor/dedup_state.json"))
+        dirs::home_dir().map(|h| h.join(".config/code-agent-monitor/dedup_state.json"))
     }
 
     /// 从磁盘加载状态
@@ -519,7 +519,7 @@ mod tests {
         let path = NotificationDeduplicator::state_file_path();
         assert!(path.is_some());
         let path = path.unwrap();
-        assert!(path.to_string_lossy().contains(".claude-monitor"));
+        assert!(path.to_string_lossy().contains(".config/code-agent-monitor"));
         assert!(path.to_string_lossy().contains("dedup_state.json"));
     }
 

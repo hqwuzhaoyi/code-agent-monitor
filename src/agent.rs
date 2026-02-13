@@ -21,7 +21,10 @@ pub enum AgentType {
     Claude,
     OpenCode,
     Codex,
-    Mock,  // 用于测试
+    GeminiCli,
+    MistralVibe,
+    Mock,     // 用于测试
+    Unknown,  // 未知类型（进程扫描时使用）
 }
 
 impl std::fmt::Display for AgentType {
@@ -30,7 +33,10 @@ impl std::fmt::Display for AgentType {
             AgentType::Claude => write!(f, "claude"),
             AgentType::OpenCode => write!(f, "opencode"),
             AgentType::Codex => write!(f, "codex"),
+            AgentType::GeminiCli => write!(f, "gemini-cli"),
+            AgentType::MistralVibe => write!(f, "mistral-vibe"),
             AgentType::Mock => write!(f, "mock"),
+            AgentType::Unknown => write!(f, "unknown"),
         }
     }
 }
@@ -40,10 +46,13 @@ impl std::str::FromStr for AgentType {
 
     fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
-            "claude" => Ok(AgentType::Claude),
+            "claude" | "claude-code" | "claudecode" => Ok(AgentType::Claude),
             "opencode" => Ok(AgentType::OpenCode),
             "codex" => Ok(AgentType::Codex),
+            "gemini" | "gemini-cli" | "geminicli" => Ok(AgentType::GeminiCli),
+            "mistral" | "mistral-vibe" | "mistralvibe" => Ok(AgentType::MistralVibe),
             "mock" => Ok(AgentType::Mock),
+            "unknown" => Ok(AgentType::Unknown),
             _ => Err(anyhow!("Unknown agent type: {}", s)),
         }
     }
@@ -118,7 +127,7 @@ impl AgentManager {
     pub fn new() -> Self {
         let data_dir = dirs::home_dir()
             .unwrap_or_else(|| PathBuf::from("."))
-            .join(".claude-monitor");
+            .join(".config/code-agent-monitor");
 
         // 确保目录存在
         let _ = fs::create_dir_all(&data_dir);
@@ -253,7 +262,10 @@ impl AgentManager {
             }
             AgentType::OpenCode => "opencode".to_string(),
             AgentType::Codex => "codex".to_string(),
+            AgentType::GeminiCli => "gemini".to_string(),
+            AgentType::MistralVibe => "mistral-vibe".to_string(),
             AgentType::Mock => "sleep 3600".to_string(),  // 测试用
+            AgentType::Unknown => "echo 'Unknown agent type'".to_string(),
         }
     }
 
