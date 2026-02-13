@@ -325,6 +325,12 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                     {
                         if !app.filter_mode && app.view == View::Dashboard {
                             let _ = app.close_selected_agent();
+                            // 清空终端预览，避免显示已关闭 agent 的内容
+                            app.terminal_preview.clear();
+                            // 切换到新选中的 agent 的流
+                            app.switch_agent_stream();
+                            // 强制完整重绘
+                            terminal.clear()?;
                             last_full_refresh = std::time::Instant::now();
                             continue;
                         }
