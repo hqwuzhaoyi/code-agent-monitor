@@ -12,12 +12,24 @@ pub enum AgentState {
 }
 
 impl AgentState {
-    pub fn icon(&self) -> &'static str {
+    pub fn icon(&self, tick: usize) -> &'static str {
         match self {
-            AgentState::Running => "●",
-            AgentState::Waiting => "◉",
-            AgentState::Idle => "○",
-            AgentState::Error => "✗",
+            AgentState::Running => {
+                const FRAMES: &[&str] = &["◐", "◓", "◑", "◒"];
+                FRAMES[tick % FRAMES.len()]
+            }
+            AgentState::Waiting => {
+                const FRAMES: &[&str] = &["◉", "◎"];
+                FRAMES[tick % FRAMES.len()]
+            }
+            AgentState::Idle => {
+                const FRAMES: &[&str] = &["○", "◌"];
+                FRAMES[tick % FRAMES.len()]
+            }
+            AgentState::Error => {
+                const FRAMES: &[&str] = &["✗", "⚠"];
+                FRAMES[tick % FRAMES.len()]
+            }
         }
     }
 }

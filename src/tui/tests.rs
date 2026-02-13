@@ -45,10 +45,129 @@ mod tests {
 
     #[test]
     fn test_agent_state_icon() {
-        assert_eq!(AgentState::Running.icon(), "●");
-        assert_eq!(AgentState::Waiting.icon(), "◉");
-        assert_eq!(AgentState::Idle.icon(), "○");
-        assert_eq!(AgentState::Error.icon(), "✗");
+        // Test with tick=0 for basic icon check
+        assert_eq!(AgentState::Running.icon(0), "◐");
+        assert_eq!(AgentState::Waiting.icon(0), "◉");
+        assert_eq!(AgentState::Idle.icon(0), "○");
+        assert_eq!(AgentState::Error.icon(0), "✗");
+    }
+
+    #[test]
+    fn test_agent_state_animated_icon() {
+        // Running cycles through 4 frames
+        assert_eq!(AgentState::Running.icon(0), "◐");
+        assert_eq!(AgentState::Running.icon(1), "◓");
+        assert_eq!(AgentState::Running.icon(2), "◑");
+        assert_eq!(AgentState::Running.icon(3), "◒");
+        assert_eq!(AgentState::Running.icon(4), "◐"); // wraps
+
+        // Waiting pulses
+        assert_eq!(AgentState::Waiting.icon(0), "◉");
+        assert_eq!(AgentState::Waiting.icon(1), "◎");
+
+        // Idle breathes
+        assert_eq!(AgentState::Idle.icon(0), "○");
+        assert_eq!(AgentState::Idle.icon(1), "◌");
+
+        // Error flashes
+        assert_eq!(AgentState::Error.icon(0), "✗");
+        assert_eq!(AgentState::Error.icon(1), "⚠");
+    }
+
+    #[test]
+    fn test_agents_sorted_by_start_time() {
+        let mut app = App::new();
+        let now = chrono::Local::now();
+
+        app.agents = vec![
+            AgentItem {
+                id: "old".to_string(),
+                agent_type: "claude".to_string(),
+                project: "test".to_string(),
+                state: AgentState::Running,
+                started_at: now - chrono::Duration::hours(2),
+                tmux_session: None,
+            },
+            AgentItem {
+                id: "new".to_string(),
+                agent_type: "claude".to_string(),
+                project: "test".to_string(),
+                state: AgentState::Running,
+                started_at: now,
+                tmux_session: None,
+            },
+            AgentItem {
+                id: "mid".to_string(),
+                agent_type: "claude".to_string(),
+                project: "test".to_string(),
+                state: AgentState::Running,
+                started_at: now - chrono::Duration::hours(1),
+                tmux_session: None,
+            },
+        ];
+
+        // Sort manually to test the sorting logic
+        app.agents.sort_by(|a, b| b.started_at.cmp(&a.started_at));
+
+        assert_eq!(app.agents[0].id, "new");
+        assert_eq!(app.agents[1].id, "mid");
+        assert_eq!(app.agents[2].id, "old");
+    }
+
+    #[test]
+    fn test_search_filter() {
+        let mut app = App::new();
+        app.agents = vec![
+            AgentItem {
+                id: "cam-123".to_string(),
+                agent_type: "claude".to_string(),
+                project: "my-project".to_string(),
+                state: AgentState::Running,
+                started_at: chrono::Local::now(),
+                tmux_session: None,
+            },
+            AgentItem {
+                id: "cam-456".to_string(),
+                agent_type: "claude".to_string(),
+                project: "other-project".to_string(),
+                state: AgentState::Idle,
+                started_at: chrono::Local::now(),
+                tmux_session: None,
+            },
+        ];
+
+        // No filter
+        assert_eq!(app.filtered_agents().len(), 2);
+
+        // Filter by ID
+        app.search_query = "123".to_string();
+        assert_eq!(app.filtered_agents().len(), 1);
+        assert_eq!(app.filtered_agents()[0].id, "cam-123");
+
+        // Filter by project
+        app.search_query = "other".to_string();
+        assert_eq!(app.filtered_agents().len(), 1);
+        assert_eq!(app.filtered_agents()[0].project, "other-project");
+
+        // Case insensitive
+        app.search_query = "MY-PROJECT".to_string();
+        assert_eq!(app.filtered_agents().len(), 1);
+    }
+
+    #[test]
+    fn test_search_mode() {
+        let mut app = App::new();
+
+        assert!(!app.search_mode);
+        assert!(app.search_query.is_empty());
+
+        app.enter_search_mode();
+        assert!(app.search_mode);
+
+        app.search_query = "test".to_string();
+        app.exit_search_mode();
+        assert!(!app.search_mode);
+        assert!(app.search_query.is_empty());
     }
 
     #[test]

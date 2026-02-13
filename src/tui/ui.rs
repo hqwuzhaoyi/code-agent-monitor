@@ -30,12 +30,27 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         .split(area);
 
     // 状态栏
-    let status = format!(
-        " CAM TUI │ Agents: {} │ ↻ {:?} ago",
-        app.agents.len(),
-        app.last_refresh.elapsed()
-    );
-    let status_bar = Paragraph::new(status).style(Style::default().bg(Color::Blue).fg(Color::White));
+    let status = if app.search_mode {
+        format!(" 🔍 {}_", app.search_query)
+    } else if !app.search_query.is_empty() {
+        format!(
+            " CAM TUI │ Agents: {} (filtered) │ ↻ {:?} ago │ [/] search",
+            app.filtered_agents().len(),
+            app.last_refresh.elapsed()
+        )
+    } else {
+        format!(
+            " CAM TUI │ Agents: {} │ ↻ {:?} ago │ [/] search",
+            app.agents.len(),
+            app.last_refresh.elapsed()
+        )
+    };
+    let status_style = if app.search_mode {
+        Style::default().bg(Color::Yellow).fg(Color::Black)
+    } else {
+        Style::default().bg(Color::Blue).fg(Color::White)
+    };
+    let status_bar = Paragraph::new(status).style(status_style);
     frame.render_widget(status_bar, vertical[0]);
 
     // 主区域: 左右分割
@@ -64,27 +79,33 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
 
 /// 渲染 Agent 列表
 fn render_agent_list(app: &App, frame: &mut Frame, area: Rect) {
-    let items: Vec<ListItem> = app
-        .agents
+    let filtered = app.filtered_agents();
+    let items: Vec<ListItem> = filtered
         .iter()
         .enumerate()
         .map(|(i, agent)| {
-            let icon = agent.state.icon();
+            let icon = agent.state.icon(app.animation_tick);
             let selected = if i == app.selected_index { "→ " } else { "  " };
             let duration = chrono::Local::now()
                 .signed_duration_since(agent.started_at)
                 .num_minutes();
             let text = format!(
-                "{}{} {} \n   {} \n   [{:?}] {}m",
-                selected, icon, agent.agent_type, agent.project,
+                "{}{} {}\n   {} | {}\n   [{:?}] {}m",
+                selected, icon, agent.id, agent.agent_type, agent.project,
                 agent.state, duration
             );
             ListItem::new(text)
         })
         .collect();
 
+    let title = if app.search_query.is_empty() {
+        " Agents ".to_string()
+    } else {
+        format!(" Agents ({}) ", filtered.len())
+    };
+
     let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Agents "));
+        .block(Block::default().borders(Borders::ALL).title(title));
     frame.render_widget(list, area);
 }
 

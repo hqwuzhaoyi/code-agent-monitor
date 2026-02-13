@@ -23,9 +23,30 @@ pub fn poll_event(timeout: Duration) -> Result<Option<TuiEvent>> {
 
 /// 处理按键事件
 pub fn handle_key(app: &mut crate::tui::App, key: KeyEvent) {
+    if app.search_mode {
+        handle_search_key(app, key);
+        return;
+    }
     match app.view {
         crate::tui::View::Dashboard => handle_dashboard_key(app, key),
         crate::tui::View::Logs => handle_logs_key(app, key),
+    }
+}
+
+fn handle_search_key(app: &mut crate::tui::App, key: KeyEvent) {
+    match key.code {
+        KeyCode::Esc => app.exit_search_mode(),
+        KeyCode::Enter => {
+            // 确认搜索，保持过滤状态但退出搜索模式
+            app.search_mode = false;
+        }
+        KeyCode::Backspace => {
+            app.search_query.pop();
+        }
+        KeyCode::Char(c) => {
+            app.search_query.push(c);
+        }
+        _ => {}
     }
 }
 
@@ -35,6 +56,7 @@ fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Char('j') | KeyCode::Down => app.next_agent(),
         KeyCode::Char('k') | KeyCode::Up => app.prev_agent(),
         KeyCode::Char('l') => app.toggle_view(),
+        KeyCode::Char('/') => app.enter_search_mode(),
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         KeyCode::Enter => {
             // 跳转到 tmux 将在后续 task 实现

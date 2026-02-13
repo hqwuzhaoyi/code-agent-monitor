@@ -39,6 +39,12 @@ pub struct App {
     pub terminal_stream: TerminalStream,
     /// 日志状态
     pub logs_state: LogsState,
+    /// 动画帧计数器
+    pub animation_tick: usize,
+    /// 搜索模式
+    pub search_mode: bool,
+    /// 搜索关键词
+    pub search_query: String,
 }
 
 impl App {
@@ -53,6 +59,9 @@ impl App {
             last_refresh: std::time::Instant::now(),
             terminal_stream: TerminalStream::new(),
             logs_state: LogsState::new(),
+            animation_tick: 0,
+            search_mode: false,
+            search_query: String::new(),
         }
     }
 
@@ -88,6 +97,34 @@ impl App {
             }
             View::Logs => View::Dashboard,
         };
+    }
+
+    /// 进入搜索模式
+    pub fn enter_search_mode(&mut self) {
+        self.search_mode = true;
+        self.search_query.clear();
+    }
+
+    /// 退出搜索模式
+    pub fn exit_search_mode(&mut self) {
+        self.search_mode = false;
+        self.search_query.clear();
+    }
+
+    /// 获取过滤后的 agents
+    pub fn filtered_agents(&self) -> Vec<&AgentItem> {
+        if self.search_query.is_empty() {
+            self.agents.iter().collect()
+        } else {
+            let query = self.search_query.to_lowercase();
+            self.agents
+                .iter()
+                .filter(|a| {
+                    a.id.to_lowercase().contains(&query)
+                        || a.project.to_lowercase().contains(&query)
+                })
+                .collect()
+        }
     }
 
     /// 刷新 agent 列表
@@ -126,6 +163,9 @@ impl App {
                 });
             }
         }
+
+        // 按启动时间降序排序（最新在前）
+        items.sort_by(|a, b| b.started_at.cmp(&a.started_at));
 
         self.agents = items;
         self.last_refresh = std::time::Instant::now();
@@ -219,6 +259,9 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
     while !app.should_quit {
         // 渲染
         terminal.draw(|frame| render(app, frame))?;
+
+        // 递增动画帧
+        app.animation_tick = app.animation_tick.wrapping_add(1);
 
         // 处理事件（100ms 超时）
         if let Some(event) = poll_event(Duration::from_millis(100))? {
