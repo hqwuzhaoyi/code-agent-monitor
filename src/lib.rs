@@ -2,6 +2,7 @@
 
 pub mod ai;
 pub mod ai_types;
+pub mod cli;
 pub mod process;
 pub mod session;
 pub mod mcp;
