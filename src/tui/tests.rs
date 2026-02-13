@@ -226,4 +226,32 @@ mod tests {
         assert_eq!(agent.id, "test-1");
         assert_eq!(agent.tmux_session, Some("cam-test".to_string()));
     }
+
+    #[test]
+    fn test_close_selected_agent_returns_id() {
+        let mut app = App::new();
+        app.agents = vec![
+            AgentItem {
+                id: "cam-test-close".to_string(),
+                agent_type: "claude".to_string(),
+                project: "test".to_string(),
+                state: AgentState::Running,
+                started_at: chrono::Local::now(),
+                tmux_session: Some("cam-test-close".to_string()),
+            },
+        ];
+
+        // close_selected_agent should return the agent ID
+        let result = app.close_selected_agent();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), Some("cam-test-close".to_string()));
+    }
+
+    #[test]
+    fn test_close_selected_agent_empty_list() {
+        let mut app = App::new();
+        let result = app.close_selected_agent();
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), None);
+    }
 }
