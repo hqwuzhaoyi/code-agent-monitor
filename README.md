@@ -10,6 +10,7 @@ Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex).
 
 ## Features
 
+- **TUI Dashboard** - Terminal UI for monitoring agents with real-time status, filtering, and tmux integration
 - **Process Monitoring** - Scan all running AI coding agents in the system
 - **Session Management** - List and resume Claude Code historical sessions
 - **Agent Lifecycle** - Start, stop, and send input to agents
@@ -78,6 +79,25 @@ cam serve
 
 # Start background watcher daemon
 cam watch-daemon -i 3
+
+# Launch TUI dashboard
+cam tui
+```
+
+### TUI Dashboard
+
+```bash
+# Launch TUI
+cam tui
+
+# Key bindings:
+# j/k or ↑/↓  - Navigate agents
+# /           - Enter filter mode (type to filter by ID or project)
+# Enter       - Attach to selected agent's tmux session
+# l           - Switch to logs view
+# f           - Toggle log level filter (in logs view)
+# Esc         - Clear filter / Return to dashboard
+# q           - Quit
 ```
 
 ### Notification Commands
@@ -384,6 +404,7 @@ MIT
 
 ## 功能
 
+- **TUI 仪表盘** - 终端 UI 监控代理，支持实时状态、过滤和 tmux 集成
 - **进程监控** - 扫描系统中所有运行的 AI 编码代理
 - **会话管理** - 列出、恢复 Claude Code 历史会话
 - **Agent 生命周期** - 启动、停止、发送输入到代理
@@ -452,6 +473,25 @@ cam serve
 
 # 启动后台监控 daemon
 cam watch-daemon -i 3
+
+# 启动 TUI 仪表盘
+cam tui
+```
+
+### TUI 仪表盘
+
+```bash
+# 启动 TUI
+cam tui
+
+# 快捷键:
+# j/k 或 ↑/↓  - 导航 agents
+# /           - 进入过滤模式（输入过滤 ID 或项目名）
+# Enter       - 连接到选中 agent 的 tmux 会话
+# l           - 切换到日志视图
+# f           - 切换日志级别过滤（日志视图中）
+# Esc         - 清除过滤 / 返回仪表盘
+# q           - 退出
 ```
 
 ### 通知命令
