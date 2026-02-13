@@ -8,6 +8,7 @@
 //! - `bridge` - Team 文件系统操作（创建/删除/inbox 读写）
 //! - `orchestrator` - Agent 编排和任务分配
 //! - `inbox_watcher` - Inbox 目录监控和通知触发
+//! - `task_list` - 任务列表管理
 //!
 //! ## 数据存储
 //!
@@ -19,9 +20,11 @@ pub mod discovery;
 pub mod bridge;
 pub mod orchestrator;
 pub mod inbox_watcher;
+pub mod task_list;
 
 // Re-export commonly used types
 pub use discovery::{TeamConfig, TeamMember, discover_teams, get_team_members, get_active_team_members};
 pub use bridge::{TeamBridge, InboxMessage, SpecialMessage, AgentId};
 pub use orchestrator::{TeamOrchestrator, SpawnResult, TeamProgress};
 pub use inbox_watcher::{InboxWatcher, Urgency, NotifyDecision};
+pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};

@@ -10,7 +10,6 @@ pub mod mcp;
 #[path = "agent_mod/mod.rs"]
 pub mod agent;
 pub mod team;
-pub mod task_list;
 pub mod anthropic;
 pub mod notification;
 
@@ -41,6 +40,8 @@ pub use notification::{NotificationSummarizer, RiskLevel, PermissionSummary, Err
 pub use notification::event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
 pub use notification::deduplicator::NotificationDeduplicator;
 
+// Re-exports from team (backwards compatibility)
 pub use team::{TeamConfig, TeamMember, TeamBridge, InboxMessage, SpecialMessage, AgentId, InboxWatcher, NotifyDecision, TeamOrchestrator, SpawnResult, TeamProgress, discover_teams, get_team_members, get_active_team_members};
-pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
+pub use team::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
+
 pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};

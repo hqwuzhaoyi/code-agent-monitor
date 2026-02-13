@@ -7,7 +7,7 @@ use crate::{ProcessScanner, SessionManager, AgentManager, StartAgentRequest};
 use crate::infra::jsonl::{JsonlParser, JsonlEvent, format_tool_use};
 use crate::infra::input::InputWaitDetector;
 use crate::team;
-use crate::task_list;
+use crate::team::task_list;
 use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
 use crate::notification::openclaw::OpenclawNotifier;
 use crate::session::state::{ConversationStateManager, ReplyResult};

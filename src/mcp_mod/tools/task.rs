@@ -6,7 +6,7 @@ use anyhow::Result;
 use serde_json::Value;
 
 use crate::session::state::{ConversationStateManager, ReplyResult};
-use crate::task_list::{self, TaskStatus};
+use crate::team::task_list::{self, TaskStatus};
 
 /// Handle task_list request
 pub fn handle_task_list(params: Option<Value>) -> Result<Value> {
