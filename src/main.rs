@@ -227,6 +227,15 @@ enum Commands {
         #[arg(long, short)]
         target: Option<String>,
     },
+    /// 启动 TUI 仪表盘
+    Tui {
+        /// 空闲刷新间隔（毫秒）
+        #[arg(long, default_value = "10000")]
+        refresh_interval: u64,
+        /// 不显示通知流
+        #[arg(long)]
+        no_notifications: bool,
+    },
 }
 
 /// Record hook event timestamp for cross-process coordination with watcher
@@ -1191,6 +1200,18 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        Commands::Tui { refresh_interval, no_notifications: _ } => {
+            use code_agent_monitor::tui::{App, init_terminal, restore_terminal, run};
+
+            let mut terminal = init_terminal()?;
+            let mut app = App::new();
+
+            let result = run(&mut terminal, &mut app, refresh_interval);
+
+            restore_terminal(&mut terminal)?;
+
+            result?;
         }
     }
 
