@@ -6,7 +6,7 @@
 //! - 内容合理性评估
 //! - 置信度计算
 
-use crate::anthropic::{AgentStatus, NotificationContent, QuestionType};
+use crate::ai_types::{AgentStatus, NotificationContent, QuestionType};
 use tracing::warn;
 
 /// 质量评估结果
