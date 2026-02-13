@@ -236,32 +236,85 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 
 ## Architecture
 
+CAM uses a layered architecture with clear separation of concerns:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        CLI / MCP                            │
+│                   (User interaction layer)                  │
+├─────────────────────────────────────────────────────────────┤
+│     agent_mod    │   session_mod   │    team    │    ai     │
+│   (Agent mgmt)   │   (Session mgmt) │  (Teams)  │  (AI API) │
+├─────────────────────────────────────────────────────────────┤
+│                      notification                           │
+│                 (Multi-channel notifications)               │
+├─────────────────────────────────────────────────────────────┤
+│                        infra                                │
+│              (tmux, process scanning, jsonl)                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### OpenClaw Plugin Integration
+
+```
+OpenClaw Gateway → CAM Plugin (TypeScript) → cam serve (MCP) → Rust Backend
+                        ↓
+                  spawn + stdin/stdout
+                        ↓
+                  JSON-RPC 2.0 Protocol
+```
+
+The plugin calls `cam serve` as a subprocess, communicating via JSON-RPC over stdin/stdout.
+
 ### Module Structure
 
 ```
 src/
 ├── main.rs              # CLI entry point
 ├── lib.rs               # Library exports
-├── process.rs           # Process scanning
-├── session.rs           # Session management
-├── agent.rs             # Agent lifecycle
-├── mcp.rs               # MCP server
-├── agent_watcher.rs     # Agent state monitoring
-├── anthropic.rs         # Haiku API integration
-├── notification/        # Notification module
+├── infra/               # Infrastructure layer
+│   ├── tmux.rs          # tmux session management
+│   ├── process.rs       # Process scanning
+│   ├── jsonl.rs         # JSONL log parsing
+│   └── input.rs         # Input wait detection
+├── agent_mod/           # Agent lifecycle management
+│   ├── manager.rs       # Start/stop/list agents
+│   ├── watcher.rs       # State monitoring
+│   └── daemon.rs        # Background watcher daemon
+├── session_mod/         # Session management
+│   ├── manager.rs       # Claude Code session listing
+│   └── state.rs         # Conversation state, quick replies
+├── mcp_mod/             # MCP Server
+│   ├── server.rs        # JSON-RPC request handling
+│   ├── types.rs         # Protocol types
+│   └── tools/           # MCP tool implementations
+├── notification/        # Notification system
 │   ├── channel.rs       # NotificationChannel trait
 │   ├── dispatcher.rs    # Multi-channel dispatcher
-│   ├── builder.rs       # Auto-configuration builder
 │   ├── urgency.rs       # Urgency classification
-│   ├── payload.rs       # Payload construction
-│   ├── formatter.rs     # Message formatting
-│   └── channels/        # Channel implementations
-└── team/                # Agent Teams module
-    ├── discovery.rs     # Team discovery
-    ├── bridge.rs        # Team bridge
-    ├── orchestrator.rs  # Team orchestration
-    └── inbox_watcher.rs # Inbox monitoring
+│   ├── formatter.rs     # AI-powered message formatting
+│   ├── deduplicator.rs  # 120s deduplication window
+│   └── channels/        # Telegram, WhatsApp, Dashboard, etc.
+├── team/                # Agent Teams
+│   ├── discovery.rs     # Team config discovery
+│   ├── bridge.rs        # File system bridge
+│   ├── orchestrator.rs  # Agent orchestration
+│   ├── task_list.rs     # Task management
+│   └── inbox_watcher.rs # Inbox monitoring
+├── ai/                  # AI integration
+│   ├── client.rs        # Anthropic API client
+│   └── extractor.rs     # Terminal content extraction
+└── anthropic.rs         # Haiku API convenience wrapper
 ```
+
+### Architecture Documentation
+
+For detailed architecture documentation, see:
+
+- [Core Modules](docs/architecture/core-modules.md) - Module responsibilities and dependencies
+- [Plugin Integration](docs/architecture/plugin-integration.md) - OpenClaw plugin architecture
+- [Notification System](docs/architecture/notification-system.md) - Multi-channel notification routing
+- [Agent Teams](docs/architecture/agent-teams.md) - Multi-agent collaboration system
 
 ### Notification Routing
 
@@ -557,32 +610,85 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 
 ## 架构
 
+CAM 采用分层架构，职责清晰：
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                        CLI / MCP                            │
+│                   (用户交互入口层)                            │
+├─────────────────────────────────────────────────────────────┤
+│     agent_mod    │   session_mod   │    team    │    ai     │
+│   (Agent 管理)   │   (会话管理)     │  (团队编排) │  (AI 集成) │
+├─────────────────────────────────────────────────────────────┤
+│                      notification                           │
+│                    (多渠道通知系统)                           │
+├─────────────────────────────────────────────────────────────┤
+│                        infra                                │
+│              (基础设施: tmux, 进程扫描, jsonl)               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### OpenClaw Plugin 集成
+
+```
+OpenClaw Gateway → CAM Plugin (TypeScript) → cam serve (MCP) → Rust 后端
+                        ↓
+                  spawn + stdin/stdout
+                        ↓
+                  JSON-RPC 2.0 协议
+```
+
+Plugin 通过 spawn 子进程调用 `cam serve`，使用 JSON-RPC 协议通过 stdin/stdout 通信。
+
 ### 模块结构
 
 ```
 src/
 ├── main.rs              # CLI 入口
 ├── lib.rs               # 库导出
-├── process.rs           # 进程扫描
-├── session.rs           # 会话管理
-├── agent.rs             # Agent 生命周期
-├── mcp.rs               # MCP 服务器
-├── agent_watcher.rs     # Agent 状态监控
-├── anthropic.rs         # Haiku API 集成
-├── notification/        # 通知模块
+├── infra/               # 基础设施层
+│   ├── tmux.rs          # tmux 会话管理
+│   ├── process.rs       # 进程扫描
+│   ├── jsonl.rs         # JSONL 日志解析
+│   └── input.rs         # 输入等待检测
+├── agent_mod/           # Agent 生命周期管理
+│   ├── manager.rs       # 启动/停止/列表
+│   ├── watcher.rs       # 状态监控
+│   └── daemon.rs        # 后台 watcher 守护进程
+├── session_mod/         # 会话管理
+│   ├── manager.rs       # Claude Code 会话列表
+│   └── state.rs         # 对话状态、快捷回复
+├── mcp_mod/             # MCP Server
+│   ├── server.rs        # JSON-RPC 请求处理
+│   ├── types.rs         # 协议类型
+│   └── tools/           # MCP 工具实现
+├── notification/        # 通知系统
 │   ├── channel.rs       # NotificationChannel trait
 │   ├── dispatcher.rs    # 多渠道分发器
-│   ├── builder.rs       # 自动配置构建器
-│   ├── urgency.rs       # Urgency 分类
-│   ├── payload.rs       # Payload 构建
-│   ├── formatter.rs     # 消息格式化
-│   └── channels/        # 渠道实现
-└── team/                # Agent Teams 模块
-    ├── discovery.rs     # Team 发现
-    ├── bridge.rs        # Team 桥接
-    ├── orchestrator.rs  # Team 编排
-    └── inbox_watcher.rs # Inbox 监控
+│   ├── urgency.rs       # 紧急程度分类
+│   ├── formatter.rs     # AI 驱动的消息格式化
+│   ├── deduplicator.rs  # 120 秒去重窗口
+│   └── channels/        # Telegram, WhatsApp, Dashboard 等
+├── team/                # Agent Teams
+│   ├── discovery.rs     # Team 配置发现
+│   ├── bridge.rs        # 文件系统桥接
+│   ├── orchestrator.rs  # Agent 编排
+│   ├── task_list.rs     # 任务管理
+│   └── inbox_watcher.rs # Inbox 监控
+├── ai/                  # AI 集成
+│   ├── client.rs        # Anthropic API 客户端
+│   └── extractor.rs     # 终端内容提取
+└── anthropic.rs         # Haiku API 便捷封装
 ```
+
+### 架构文档
+
+详细架构文档请参阅：
+
+- [核心模块](docs/architecture/core-modules.md) - 模块职责和依赖关系
+- [Plugin 集成](docs/architecture/plugin-integration.md) - OpenClaw Plugin 架构
+- [通知系统](docs/architecture/notification-system.md) - 多渠道通知路由
+- [Agent Teams](docs/architecture/agent-teams.md) - 多 Agent 协作系统
 
 ### 通知路由
 
