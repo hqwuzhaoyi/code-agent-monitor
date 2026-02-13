@@ -9,7 +9,10 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use crate::tui::state::{AgentItem, NotificationItem, View};
+use chrono::{DateTime, Local};
+
+use crate::tui::state::{AgentItem, AgentState, NotificationItem, View};
+use crate::{AgentManager, AgentStatus, TmuxManager};
 
 pub type AppResult<T> = Result<T>;
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
@@ -74,6 +77,65 @@ impl App {
             View::Dashboard => View::Logs,
             View::Logs => View::Dashboard,
         };
+    }
+
+    /// 刷新 agent 列表
+    pub fn refresh_agents(&mut self) -> AppResult<()> {
+        let agent_manager = AgentManager::new();
+
+        let mut items = Vec::new();
+
+        // 从 AgentManager 获取已注册的 agents
+        if let Ok(agents) = agent_manager.list_agents() {
+            for agent in agents {
+                // 根据 AgentRecord 的 status 字段确定状态
+                let state = match agent.status {
+                    AgentStatus::Running => AgentState::Running,
+                    AgentStatus::Waiting => AgentState::Waiting,
+                    AgentStatus::Stopped => AgentState::Idle,
+                };
+
+                // 解析 RFC3339 格式的时间字符串
+                let started_at = DateTime::parse_from_rfc3339(&agent.started_at)
+                    .map(|dt| dt.with_timezone(&Local))
+                    .unwrap_or_else(|_| Local::now());
+
+                items.push(AgentItem {
+                    id: agent.agent_id.clone(),
+                    agent_type: format!("{:?}", agent.agent_type),
+                    project: agent
+                        .project_path
+                        .split('/')
+                        .last()
+                        .unwrap_or(&agent.project_path)
+                        .to_string(),
+                    state,
+                    started_at,
+                    tmux_session: Some(agent.tmux_session.clone()),
+                });
+            }
+        }
+
+        self.agents = items;
+        self.last_refresh = std::time::Instant::now();
+
+        // 更新终端预览
+        let session_to_refresh = self.selected_agent()
+            .and_then(|agent| agent.tmux_session.clone());
+        if let Some(session) = session_to_refresh {
+            self.refresh_terminal_preview(&session)?;
+        }
+
+        Ok(())
+    }
+
+    /// 刷新终端预览
+    pub fn refresh_terminal_preview(&mut self, tmux_session: &str) -> AppResult<()> {
+        let tmux = TmuxManager::new();
+        if let Ok(output) = tmux.capture_pane(tmux_session, 30) {
+            self.terminal_preview = output;
+        }
+        Ok(())
     }
 }
 
