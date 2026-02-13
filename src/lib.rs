@@ -1,5 +1,6 @@
 //! Code Agent Monitor - 监控和管理 AI 编码代理进程
 
+pub mod ai;
 pub mod ai_types;
 pub mod process;
 pub mod session;
