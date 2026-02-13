@@ -9,7 +9,7 @@
 //! - QuestionType: Options, Confirmation, OpenEnded
 //! - NotificationContent: question_type, question, options, summary
 
-use cam::ai_types::{AgentStatus, NotificationContent, QuestionType};
+use code_agent_monitor::ai_types::{AgentStatus, NotificationContent, QuestionType};
 
 // ============================================================================
 // QuestionType Tests

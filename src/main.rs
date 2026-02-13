@@ -764,6 +764,12 @@ async fn main() -> Result<()> {
                                 eprintln!("[DRY-RUN] 通知已跳过: {} - {} ({})", resolved_agent_id, event, reason);
                             }
                         }
+                        SendResult::Failed(error) => {
+                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                let _ = writeln!(file, "[{}] ❌ Notification failed: {} {} ({})", end_timestamp, event, resolved_agent_id, error);
+                            }
+                            eprintln!("通知发送失败: {} - {} ({})", resolved_agent_id, event, error);
+                        }
                     }
 
                     // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
