@@ -39,8 +39,6 @@ pub struct App {
     pub terminal_stream: TerminalStream,
     /// 日志状态
     pub logs_state: LogsState,
-    /// 动画帧计数器
-    pub animation_tick: usize,
     /// 搜索模式
     pub search_mode: bool,
     /// 搜索关键词
@@ -59,7 +57,6 @@ impl App {
             last_refresh: std::time::Instant::now(),
             terminal_stream: TerminalStream::new(),
             logs_state: LogsState::new(),
-            animation_tick: 0,
             search_mode: false,
             search_query: String::new(),
         }
@@ -259,9 +256,6 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
     while !app.should_quit {
         // 渲染
         terminal.draw(|frame| render(app, frame))?;
-
-        // 递增动画帧（每5帧更新一次，降低渲染频率）
-        app.animation_tick = app.animation_tick.wrapping_add(1);
 
         // 处理事件（100ms 超时）
         if let Some(event) = poll_event(Duration::from_millis(100))? {

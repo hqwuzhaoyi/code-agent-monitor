@@ -87,7 +87,7 @@ fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, fil
         .iter()
         .enumerate()
         .map(|(i, agent)| {
-            let icon = agent.state.icon(app.animation_tick);
+            let icon = agent.state.icon();
             let selected = if i == app.selected_index { "→ " } else { "  " };
             let duration = chrono::Local::now()
                 .signed_duration_since(agent.started_at)

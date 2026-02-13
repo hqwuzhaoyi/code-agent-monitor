@@ -12,26 +12,13 @@ pub enum AgentState {
 }
 
 impl AgentState {
-    /// 返回动画图标，tick 除以 5 来降低动画速度
-    pub fn icon(&self, tick: usize) -> &'static str {
-        let frame = tick / 5; // 每5帧切换一次动画
+    /// 返回状态图标
+    pub fn icon(&self) -> &'static str {
         match self {
-            AgentState::Running => {
-                const FRAMES: &[&str] = &["◐", "◓", "◑", "◒"];
-                FRAMES[frame % FRAMES.len()]
-            }
-            AgentState::Waiting => {
-                const FRAMES: &[&str] = &["◉", "◎"];
-                FRAMES[frame % FRAMES.len()]
-            }
-            AgentState::Idle => {
-                const FRAMES: &[&str] = &["○", "◌"];
-                FRAMES[frame % FRAMES.len()]
-            }
-            AgentState::Error => {
-                const FRAMES: &[&str] = &["✗", "⚠"];
-                FRAMES[frame % FRAMES.len()]
-            }
+            AgentState::Running => "●",
+            AgentState::Waiting => "◉",
+            AgentState::Idle => "○",
+            AgentState::Error => "✗",
         }
     }
 }
