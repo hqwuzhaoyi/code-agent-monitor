@@ -496,12 +496,22 @@ impl OpenclawNotifier {
                 // 去重检查
                 {
                     let mut dedup = self.deduplicator.lock().unwrap();
-                    if !dedup.should_send(agent_id, &message) {
-                        if self.dry_run {
-                            eprintln!("[DRY-RUN] Duplicate notification, skipping: {}", agent_id);
+                    let action = dedup.should_send(agent_id, &message);
+                    match action {
+                        crate::notification::NotifyAction::Send => {
+                            // 继续发送
                         }
-                        debug!(agent_id = %agent_id, "Notification deduplicated");
-                        return Ok(SendResult::Skipped("duplicate".to_string()));
+                        crate::notification::NotifyAction::SendReminder => {
+                            // 发送提醒（可以在消息中添加提醒标记）
+                            // 继续发送
+                        }
+                        crate::notification::NotifyAction::Suppressed(reason) => {
+                            if self.dry_run {
+                                eprintln!("[DRY-RUN] Duplicate notification, skipping: {} ({})", agent_id, reason);
+                            }
+                            debug!(agent_id = %agent_id, reason = %reason, "Notification deduplicated");
+                            return Ok(SendResult::Skipped("duplicate".to_string()));
+                        }
                     }
                 }
 
