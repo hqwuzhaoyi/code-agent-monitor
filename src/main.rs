@@ -7,7 +7,7 @@ use tracing::{info, warn, error, debug};
 use tracing_subscriber::{fmt, EnvFilter};
 use code_agent_monitor::{
     ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
-    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult,
+    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult, TmuxManager,
     discover_teams, get_team_members,
     list_tasks, list_team_names,
     TeamBridge, InboxMessage, TeamOrchestrator,
@@ -354,9 +354,8 @@ async fn main() -> Result<()> {
             // 如果用户指定了自定义名称，重命名 tmux session
             let final_tmux_session = if let Some(custom_name) = name {
                 // 重命名 tmux session
-                let _ = std::process::Command::new("tmux")
-                    .args(["rename-session", "-t", &response.tmux_session, &custom_name])
-                    .output();
+                let tmux_manager = TmuxManager::new();
+                let _ = tmux_manager.rename_session(&response.tmux_session, &custom_name);
                 custom_name
             } else {
                 response.tmux_session

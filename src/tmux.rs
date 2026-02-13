@@ -44,6 +44,23 @@ impl TmuxManager {
             .unwrap_or(false)
     }
 
+    /// 重命名 session
+    pub fn rename_session(&self, old_name: &str, new_name: &str) -> Result<()> {
+        debug!(old = %old_name, new = %new_name, "Renaming tmux session");
+
+        let status = Command::new("tmux")
+            .args(["rename-session", "-t", old_name, new_name])
+            .status()?;
+
+        if status.success() {
+            info!(old = %old_name, new = %new_name, "Tmux session renamed");
+            Ok(())
+        } else {
+            error!(old = %old_name, new = %new_name, "Failed to rename tmux session");
+            Err(anyhow!("Failed to rename session {} to {}", old_name, new_name))
+        }
+    }
+
     /// 向 session 发送按键
     /// 使用 -l 标志确保文本被字面解释，避免 "Enter" 等特殊字符串被解释为按键
     pub fn send_keys(&self, session_name: &str, keys: &str) -> Result<()> {
@@ -121,6 +138,24 @@ impl TmuxManager {
         } else {
             error!(session = %session_name, "Failed to kill tmux session");
             Err(anyhow!("Failed to kill session: {}", session_name))
+        }
+    }
+
+    /// 列出所有 tmux sessions
+    pub fn list_sessions(&self) -> Result<Vec<String>> {
+        let output = Command::new("tmux")
+            .args(["list-sessions", "-F", "#{session_name}"])
+            .output()?;
+
+        if output.status.success() {
+            let sessions: Vec<String> = String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .map(|s| s.to_string())
+                .collect();
+            Ok(sessions)
+        } else {
+            // tmux list-sessions fails if no sessions exist
+            Ok(Vec::new())
         }
     }
 

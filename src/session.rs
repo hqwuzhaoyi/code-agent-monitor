@@ -5,7 +5,6 @@ use anyhow::Result;
 use std::path::PathBuf;
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use std::process::Command;
 use chrono::{DateTime, Utc, Duration};
 
 use crate::tmux::TmuxManager;
@@ -224,14 +223,8 @@ impl SessionManager {
                 .unwrap_or_else(|| format!("cam-{}", &session_id[..8]));
 
             // 创建 tmux 会话并运行 claude --resume
-            let cmd = format!(
-                "cd {} && claude --resume {}",
-                project_path, session_id
-            );
-
-            Command::new("tmux")
-                .args(["new-session", "-d", "-s", &tmux_name, &cmd])
-                .spawn()?;
+            let cmd = format!("claude --resume {}", session_id);
+            self.tmux_manager.create_session(&tmux_name, &project_path, &cmd)?;
 
             Ok(tmux_name)
         } else {
@@ -246,19 +239,7 @@ impl SessionManager {
 
     /// 获取 tmux 会话列表
     pub fn list_tmux_sessions(&self) -> Result<Vec<String>> {
-        let output = Command::new("tmux")
-            .args(["list-sessions", "-F", "#{session_name}"])
-            .output()?;
-
-        if output.status.success() {
-            let sessions: Vec<String> = String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .map(|s| s.to_string())
-                .collect();
-            Ok(sessions)
-        } else {
-            Ok(Vec::new())
-        }
+        self.tmux_manager.list_sessions()
     }
 
     /// 获取会话的最近消息
