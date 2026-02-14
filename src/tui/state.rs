@@ -1,27 +1,7 @@
 //! TUI 状态数据结构
 
 use chrono::{DateTime, Local};
-
-/// Agent 状态
-#[derive(Debug, Clone, PartialEq)]
-pub enum AgentState {
-    Running,
-    Waiting,
-    Idle,
-    Error,
-}
-
-impl AgentState {
-    /// 返回状态图标
-    pub fn icon(&self) -> &'static str {
-        match self {
-            AgentState::Running => "🟢",
-            AgentState::Waiting => "🟡",
-            AgentState::Idle => "⚪",
-            AgentState::Error => "🔴",
-        }
-    }
-}
+use crate::AgentStatus;
 
 /// Agent 信息（TUI 显示用）
 #[derive(Debug, Clone)]
@@ -29,7 +9,7 @@ pub struct AgentItem {
     pub id: String,
     pub agent_type: String,
     pub project: String,
-    pub state: AgentState,
+    pub state: AgentStatus,
     pub started_at: DateTime<Local>,
     pub tmux_session: Option<String>,
 }
