@@ -58,13 +58,48 @@ impl std::str::FromStr for AgentType {
     }
 }
 
-/// Agent 状态
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+/// Agent 统一状态
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum AgentStatus {
-    Running,
-    Waiting,
-    Stopped,
+    /// 正在处理中 - agent 正在执行任务
+    Processing,
+    /// 等待输入 - agent 空闲，等待用户响应
+    WaitingForInput,
+    /// 未知 - 无法确定状态
+    Unknown,
+}
+
+impl Default for AgentStatus {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+impl AgentStatus {
+    /// 是否应该发送通知
+    pub fn should_notify(&self) -> bool {
+        matches!(self, Self::WaitingForInput | Self::Unknown)
+    }
+
+    /// 获取 TUI 显示图标
+    pub fn icon(&self) -> &'static str {
+        match self {
+            Self::Processing => "🟢",
+            Self::WaitingForInput => "🟡",
+            Self::Unknown => "❓",
+        }
+    }
+
+    /// 是否正在处理
+    pub fn is_processing(&self) -> bool {
+        matches!(self, Self::Processing)
+    }
+
+    /// 是否在等待输入
+    pub fn is_waiting(&self) -> bool {
+        matches!(self, Self::WaitingForInput)
+    }
 }
 
 /// Agent 记录
@@ -318,7 +353,7 @@ impl AgentManager {
             jsonl_offset: 0,
             last_output_hash: None,
             started_at: chrono::Utc::now().to_rfc3339(),
-            status: AgentStatus::Running,
+            status: AgentStatus::Processing,
         };
 
         self.with_locked_agents_file(|file| {
@@ -390,7 +425,7 @@ impl AgentManager {
             jsonl_offset: 0,
             last_output_hash: None,
             started_at: chrono::Utc::now().to_rfc3339(),
-            status: AgentStatus::Running,
+            status: AgentStatus::Processing,
         };
 
         self.with_locked_agents_file(|file| {
@@ -534,7 +569,7 @@ impl AgentManager {
             jsonl_offset: 0,
             last_output_hash: None,
             started_at: chrono::Utc::now().to_rfc3339(),
-            status: AgentStatus::Running,
+            status: AgentStatus::Processing,
         };
 
         self.with_locked_agents_file(|file| {
