@@ -28,39 +28,6 @@ impl Default for QuestionType {
 }
 
 // ============================================================================
-// AgentStatus - Agent 状态
-// ============================================================================
-
-/// Agent 状态
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum AgentStatus {
-    /// Agent 正在处理中（不应发送通知）
-    Processing,
-    /// Agent 空闲，等待用户输入（应发送通知）
-    WaitingForInput,
-    /// 无法确定状态
-    Unknown,
-}
-
-impl Default for AgentStatus {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-impl AgentStatus {
-    /// 检查 agent 是否正在处理中
-    pub fn is_processing(&self) -> bool {
-        matches!(self, Self::Processing)
-    }
-
-    /// 检查 agent 是否在等待输入
-    pub fn is_waiting(&self) -> bool {
-        matches!(self, Self::WaitingForInput)
-    }
-}
-
-// ============================================================================
 // NotificationContent - 通知内容
 // ============================================================================
 
