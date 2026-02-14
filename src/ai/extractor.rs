@@ -7,7 +7,8 @@ use tracing::{debug, info, trace, warn};
 
 use crate::ai::client::{AnthropicClient, AnthropicConfig};
 use crate::ai::quality::{assess_question_extraction, assess_status_detection, thresholds};
-use crate::ai::types::{AgentStatus, NotificationContent, QuestionType};
+use crate::ai::types::{NotificationContent, QuestionType};
+use crate::agent::manager::AgentStatus;
 use crate::infra::terminal::truncate_for_status;
 
 /// 内容提取超时（毫秒）- 10 秒（本地代理可能需要更长时间）
