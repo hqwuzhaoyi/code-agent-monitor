@@ -14,7 +14,7 @@ use chrono::{DateTime, Local};
 
 use crate::tui::logs::LogsState;
 use crate::tui::search::SearchInput;
-use crate::tui::state::{AgentItem, AgentState, NotificationItem, View};
+use crate::tui::state::{AgentItem, NotificationItem, View};
 use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, AgentStatus, TmuxManager};
 
@@ -152,12 +152,8 @@ impl App {
         // 从 AgentManager 获取已注册的 agents
         if let Ok(agents) = agent_manager.list_agents() {
             for agent in agents {
-                // 根据 AgentRecord 的 status 字段确定状态
-                let state = match agent.status {
-                    AgentStatus::Running => AgentState::Running,
-                    AgentStatus::Waiting => AgentState::Waiting,
-                    AgentStatus::Stopped => AgentState::Idle,
-                };
+                // 直接使用 AgentStatus
+                let state = agent.status.clone();
 
                 // 解析 RFC3339 格式的时间字符串
                 let started_at = DateTime::parse_from_rfc3339(&agent.started_at)
