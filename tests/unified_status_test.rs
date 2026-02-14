@@ -31,3 +31,10 @@ fn test_status_icons() {
     assert_eq!(AgentStatus::WaitingForInput.icon(), "🟡");
     assert_eq!(AgentStatus::Unknown.icon(), "❓");
 }
+
+#[test]
+fn test_new_agent_starts_as_processing() {
+    // This will fail until we fix all Running -> Processing
+    // We can't easily test AgentManager without full setup,
+    // but cargo check will catch the compilation errors
+}

@@ -593,6 +593,20 @@ impl AgentManager {
             Ok(())
         })
     }
+
+    /// 更新 agent 状态
+    pub fn update_agent_status(&self, agent_id: &str, status: AgentStatus) -> Result<bool> {
+        self.with_locked_agents_file(|agents_file| {
+            if let Some(agent) = agents_file.agents.iter_mut().find(|a| a.agent_id == agent_id) {
+                if agent.status != status {
+                    debug!(agent_id = %agent_id, old_status = ?agent.status, new_status = ?status, "Updating agent status");
+                    agent.status = status;
+                    return true;
+                }
+            }
+            false
+        })
+    }
 }
 
 /// 规范化路径，解析符号链接
