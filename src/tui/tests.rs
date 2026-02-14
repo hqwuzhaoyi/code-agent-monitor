@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests {
-    use crate::tui::{App, AgentItem, AgentState, View, LogLevel, LogsState};
+    use crate::tui::{App, AgentItem, View, LogLevel, LogsState};
+    use crate::AgentStatus;
 
     #[test]
     fn test_app_navigation() {
@@ -10,7 +11,7 @@ mod tests {
                 id: "1".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: chrono::Local::now(),
                 tmux_session: None,
             },
@@ -18,7 +19,7 @@ mod tests {
                 id: "2".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test2".to_string(),
-                state: AgentState::Idle,
+                state: AgentStatus::Unknown,
                 started_at: chrono::Local::now(),
                 tmux_session: None,
             },
@@ -45,10 +46,9 @@ mod tests {
 
     #[test]
     fn test_agent_state_icon() {
-        assert_eq!(AgentState::Running.icon(), "🟢");
-        assert_eq!(AgentState::Waiting.icon(), "🟡");
-        assert_eq!(AgentState::Idle.icon(), "⚪");
-        assert_eq!(AgentState::Error.icon(), "🔴");
+        assert_eq!(AgentStatus::Processing.icon(), "🟢");
+        assert_eq!(AgentStatus::WaitingForInput.icon(), "🟡");
+        assert_eq!(AgentStatus::Unknown.icon(), "❓");
     }
 
     #[test]
@@ -61,7 +61,7 @@ mod tests {
                 id: "old".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: now - chrono::Duration::hours(2),
                 tmux_session: None,
             },
@@ -69,7 +69,7 @@ mod tests {
                 id: "new".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: now,
                 tmux_session: None,
             },
@@ -77,7 +77,7 @@ mod tests {
                 id: "mid".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: now - chrono::Duration::hours(1),
                 tmux_session: None,
             },
@@ -99,7 +99,7 @@ mod tests {
                 id: "cam-123".to_string(),
                 agent_type: "claude".to_string(),
                 project: "my-project".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: chrono::Local::now(),
                 tmux_session: None,
             },
@@ -107,7 +107,7 @@ mod tests {
                 id: "cam-456".to_string(),
                 agent_type: "claude".to_string(),
                 project: "other-project".to_string(),
-                state: AgentState::Idle,
+                state: AgentStatus::Unknown,
                 started_at: chrono::Local::now(),
                 tmux_session: None,
             },
@@ -216,7 +216,7 @@ mod tests {
                 id: "test-1".to_string(),
                 agent_type: "claude".to_string(),
                 project: "project".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: chrono::Local::now(),
                 tmux_session: Some("cam-test".to_string()),
             },
@@ -235,7 +235,7 @@ mod tests {
                 id: "cam-test-close".to_string(),
                 agent_type: "claude".to_string(),
                 project: "test".to_string(),
-                state: AgentState::Running,
+                state: AgentStatus::Processing,
                 started_at: chrono::Local::now(),
                 tmux_session: Some("cam-test-close".to_string()),
             },
