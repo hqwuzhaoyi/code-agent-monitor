@@ -6,7 +6,9 @@
 //! See `crate::agent::watcher::StabilityDetector` for terminal stability detection.
 
 use crate::agent::{AgentManager, AgentRecord};
+use crate::agent::manager::AgentStatus;
 use crate::agent::monitor::AgentMonitor;
+use crate::ai::is_agent_processing;
 use crate::infra::input::{InputWaitDetector, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
@@ -442,6 +444,25 @@ impl AgentWatcher {
                     was_waiting = was_waiting,
                     "Input wait detection (AI called)"
                 );
+
+                // Update agent status based on AI detection
+                use crate::agent::manager::AgentStatus;
+                let new_status = if wait_result.is_waiting {
+                    AgentStatus::WaitingForInput
+                } else {
+                    AgentStatus::Processing
+                };
+
+                // Sync status to agents.json if changed
+                if let Some(current_agent) = agent {
+                    if current_agent.status != new_status {
+                        if let Err(e) = self.agent_manager.update_agent_status(&agent_id, new_status.clone()) {
+                            error!(agent_id = %agent_id, error = %e, "Failed to update agent status");
+                        } else {
+                            debug!(agent_id = %agent_id, old_status = ?current_agent.status, new_status = ?new_status, "Agent status updated");
+                        }
+                    }
+                }
 
                 if wait_result.is_waiting {
                     // 检查是否应该发送通知（使用统一去重器）
