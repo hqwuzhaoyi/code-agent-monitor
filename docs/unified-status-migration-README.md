@@ -103,10 +103,10 @@ pub fn update_agent_status(&self, agent_id: &str, status: AgentStatus) -> Result
             if agent.status != status {
                 debug!(agent_id = %agent_id, old_status = ?agent.status, new_status = ?status, "Updating agent status");
                 agent.status = status;
-                return true;
+                return Ok(true);
             }
         }
-        false
+        Ok(false)
     })
 }
 ```

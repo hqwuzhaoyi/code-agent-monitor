@@ -41,6 +41,8 @@ pub enum InputWaitPattern {
     PermissionRequest,
     /// 其他等待模式（AI 判断时使用此类型）
     Other,
+    /// AI 无法识别状态
+    Unknown,
 }
 
 /// 输入等待检测器
@@ -126,9 +128,14 @@ impl InputWaitDetector {
                 pattern_type: Some(InputWaitPattern::Other),
                 context,
             },
-            AgentStatus::Processing | AgentStatus::Unknown => InputWaitResult {
+            AgentStatus::Processing => InputWaitResult {
                 is_waiting: false,
                 pattern_type: None,
+                context,
+            },
+            AgentStatus::Unknown => InputWaitResult {
+                is_waiting: false,
+                pattern_type: Some(InputWaitPattern::Unknown),
                 context,
             },
         }

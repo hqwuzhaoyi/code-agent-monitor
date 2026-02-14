@@ -8,7 +8,7 @@
 use crate::agent::{AgentManager, AgentRecord};
 use crate::agent::manager::AgentStatus;
 use crate::agent::monitor::AgentMonitor;
-use crate::infra::input::{InputWaitDetector, InputWaitResult};
+use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
 use crate::notification::{NotificationDeduplicator, NotifyAction};
@@ -447,6 +447,8 @@ impl AgentWatcher {
                 // Update agent status based on AI detection
                 let new_status = if wait_result.is_waiting {
                     AgentStatus::WaitingForInput
+                } else if wait_result.pattern_type == Some(InputWaitPattern::Unknown) {
+                    AgentStatus::Unknown
                 } else {
                     AgentStatus::Processing
                 };
