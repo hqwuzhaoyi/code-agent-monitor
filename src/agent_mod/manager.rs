@@ -601,10 +601,10 @@ impl AgentManager {
                 if agent.status != status {
                     debug!(agent_id = %agent_id, old_status = ?agent.status, new_status = ?status, "Updating agent status");
                     agent.status = status;
-                    return true;
+                    return Ok(true);
                 }
             }
-            false
+            Ok(false)
         })
     }
 }
