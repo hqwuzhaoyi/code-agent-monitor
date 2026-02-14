@@ -16,7 +16,7 @@ use crate::tui::logs::LogsState;
 use crate::tui::search::SearchInput;
 use crate::tui::state::{AgentItem, NotificationItem, View};
 use crate::tui::terminal_stream::TerminalStream;
-use crate::{AgentManager, AgentStatus, TmuxManager};
+use crate::{AgentManager, TmuxManager};
 
 pub type AppResult<T> = Result<T>;
 pub type Tui = Terminal<CrosstermBackend<Stdout>>;
