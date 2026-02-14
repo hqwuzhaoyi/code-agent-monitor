@@ -236,6 +236,28 @@ impl App {
         }
         Ok(None)
     }
+
+    /// 关闭选中的 agent
+    pub fn close_selected_agent(&mut self) -> AppResult<Option<String>> {
+        let agent_id = match self.selected_agent() {
+            Some(agent) => agent.id.clone(),
+            None => return Ok(None),
+        };
+
+        let agent_manager = AgentManager::new();
+        // 忽略错误（agent 可能已不存在）
+        let _ = agent_manager.stop_agent(&agent_id);
+
+        // 刷新列表
+        let _ = self.refresh_agents();
+
+        // 调整选中索引
+        if self.selected_index > 0 && self.selected_index >= self.agents.len() {
+            self.selected_index = self.agents.len().saturating_sub(1);
+        }
+
+        Ok(Some(agent_id))
+    }
 }
 
 impl Default for App {
@@ -301,6 +323,22 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                             if let Err(e) = status {
                                 eprintln!("tmux attach failed: {}", e);
                             }
+                            continue;
+                        }
+                    }
+                    // 检查是否是 x 或 d 键（关闭 agent）
+                    if key.code == crossterm::event::KeyCode::Char('x')
+                        || key.code == crossterm::event::KeyCode::Char('d')
+                    {
+                        if !app.filter_mode && app.view == View::Dashboard {
+                            let _ = app.close_selected_agent();
+                            // 清空终端预览，避免显示已关闭 agent 的内容
+                            app.terminal_preview.clear();
+                            // 切换到新选中的 agent 的流
+                            app.switch_agent_stream();
+                            // 强制完整重绘
+                            terminal.clear()?;
+                            last_full_refresh = std::time::Instant::now();
                             continue;
                         }
                     }
