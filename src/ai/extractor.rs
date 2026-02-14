@@ -591,7 +591,9 @@ pub fn detect_waiting_question(terminal_snapshot: &str) -> Option<NotificationCo
 #[derive(Debug, Clone, PartialEq)]
 pub enum SimpleExtractionResult {
     /// 成功提取到格式化消息
-    Message(String),
+    /// - message: 格式化的通知消息
+    /// - fingerprint: 问题的语义指纹（用于去重，如 "react-todo-enhance-or-fresh"）
+    Message { message: String, fingerprint: String },
     /// Agent 空闲，无问题需要回答
     Idle { status: String, last_action: Option<String> },
     /// 提取失败
@@ -702,10 +704,20 @@ fn extract_formatted_message_with_context(
 返回 JSON：
 - has_question: boolean
 - message: string（问题内容，格式化后）
+- fingerprint: string（问题的语义指纹，用于去重）
 - context_complete: boolean（只要能看到完整的问题和选项就是 true）
 - agent_status: "completed" | "idle" | "waiting"
 - last_action: string | null
 </output_format>
+
+<fingerprint_rule>
+fingerprint 是问题的唯一标识符，用于判断两次通知是否是同一个问题。
+规则：
+- 用英文短横线连接的关键词，如 "react-todo-enhance-or-fresh"
+- 只包含问题的核心语义，忽略措辞差异
+- 相同问题的不同表述应该生成相同的 fingerprint
+- 例如："你想增强还是重新开始？" 和 "What would you like to do?" 如果选项相同，fingerprint 应该相同
+</fingerprint_rule>
 
 <context_complete_rule>
 context_complete = true 的条件：能看到完整的问题文本和所有选项
@@ -715,7 +727,7 @@ context_complete = false 的条件：问题或选项被截断，无法完整显�
 
 <message_rules>
 has_question=true 时：提取问题+选项，加"回复字母/数字"提示，不超过500字符
-has_question=false 时：message 留空
+has_question=false 时：message 和 fingerprint 留空
 </message_rules>
 
 只返回 JSON。"#
@@ -780,7 +792,13 @@ has_question=false 时：message 留空
             return Err(ExtractionFailed);
         }
 
-        Ok(SimpleExtractionResult::Message(message))
+        let fingerprint = parsed
+            .get("fingerprint")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string();
+
+        Ok(SimpleExtractionResult::Message { message, fingerprint })
     } else {
         // 无问题，返回空闲状态
         let status = parsed

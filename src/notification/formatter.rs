@@ -18,6 +18,30 @@ use super::event::{NotificationEvent, NotificationEventType};
 use crate::anthropic::{extract_formatted_message, SimpleExtractionResult};
 use super::summarizer::NotificationSummarizer;
 
+/// 格式化结果，包含消息和用于去重的指纹
+#[derive(Debug, Clone)]
+pub struct FormatResult {
+    /// 格式化后的消息
+    pub message: String,
+    /// 问题的语义指纹（用于去重），如果没有问题则为 None
+    pub fingerprint: Option<String>,
+}
+
+impl FormatResult {
+    /// 创建只有消息的结果（无指纹）
+    pub fn message_only(message: String) -> Self {
+        Self { message, fingerprint: None }
+    }
+
+    /// 创建带指纹的结果
+    pub fn with_fingerprint(message: String, fingerprint: String) -> Self {
+        Self {
+            message,
+            fingerprint: if fingerprint.is_empty() { None } else { Some(fingerprint) },
+        }
+    }
+}
+
 /// Notification message constants (Chinese)
 pub mod msg {
     // Reply hints
@@ -304,7 +328,7 @@ impl MessageFormatter {
                     // 尝试使用简化版 AI 提取
                     if !self.no_ai {
                         match extract_formatted_message(snap) {
-                            SimpleExtractionResult::Message(msg) => {
+                            SimpleExtractionResult::Message { message: msg, .. } => {
                                 return Self::format_ai_message(project_name, &msg);
                             }
                             SimpleExtractionResult::Idle { status, last_action } => {
@@ -336,7 +360,7 @@ impl MessageFormatter {
                 if !self.no_ai {
                     if let Some(snap) = snapshot {
                         if !snap.trim().is_empty() {
-                            if let SimpleExtractionResult::Message(msg) = extract_formatted_message(snap) {
+                            if let SimpleExtractionResult::Message { message: msg, .. } = extract_formatted_message(snap) {
                                 return format!(
                                     "🔐 {} {}\n\n{}\n\n{}",
                                     project_name, msg::NEED_CONFIRM, msg, msg::REPLY_YN
@@ -386,7 +410,7 @@ impl MessageFormatter {
         // 使用简化版 AI 提取
         if !self.no_ai {
             match extract_formatted_message(context) {
-                SimpleExtractionResult::Message(message) => {
+                SimpleExtractionResult::Message { message, .. } => {
                     return Self::format_ai_message(project_name, &message);
                 }
                 SimpleExtractionResult::Idle { status, last_action } => {
@@ -440,57 +464,85 @@ impl MessageFormatter {
     /// 2. 终端快照从 event.terminal_snapshot 获取，数据来源清晰
     /// 3. 类型安全，避免参数混淆
     pub fn format_notification_event(&self, event: &NotificationEvent) -> String {
+        self.format_notification_event_with_fingerprint(event).message
+    }
+
+    /// 格式化通知事件，返回消息和指纹
+    ///
+    /// 指纹用于去重：相同问题的不同表述应该生成相同的指纹。
+    /// 只有 WaitingForInput 和 Notification 类型的事件会返回指纹。
+    pub fn format_notification_event_with_fingerprint(&self, event: &NotificationEvent) -> FormatResult {
         let project_name = event.project_name().to_string();
         let snapshot = event.terminal_snapshot.clone();
 
         match &event.event_type {
             NotificationEventType::WaitingForInput { pattern_type } => {
-                self.format_waiting_for_input_event(&project_name, pattern_type, &snapshot)
+                self.format_waiting_for_input_event_with_fingerprint(&project_name, pattern_type, &snapshot)
             }
             NotificationEventType::PermissionRequest { tool_name, tool_input } => {
-                self.format_permission_request_event(&project_name, tool_name, tool_input)
+                FormatResult::message_only(
+                    self.format_permission_request_event(&project_name, tool_name, tool_input)
+                )
             }
             NotificationEventType::Notification { notification_type, message } => {
-                self.format_notification_type_event(&project_name, notification_type, message, &snapshot)
+                self.format_notification_type_event_with_fingerprint(&project_name, notification_type, message, &snapshot)
             }
             NotificationEventType::AgentExited => {
-                format!("✅ {} {}", project_name, msg::COMPLETED)
+                FormatResult::message_only(format!("✅ {} {}", project_name, msg::COMPLETED))
             }
             NotificationEventType::Error { message } => {
-                self.format_error_event(&project_name, message)
+                FormatResult::message_only(self.format_error_event(&project_name, message))
             }
             NotificationEventType::Stop => {
-                format!("⏹️ {} {}", project_name, msg::STOPPED)
+                FormatResult::message_only(format!("⏹️ {} {}", project_name, msg::STOPPED))
             }
             NotificationEventType::SessionStart => {
-                format!("🚀 {} 已启动", project_name)
+                FormatResult::message_only(format!("🚀 {} 已启动", project_name))
             }
             NotificationEventType::SessionEnd => {
-                format!("🔚 {} {}", project_name, msg::SESSION_ENDED)
+                FormatResult::message_only(format!("🔚 {} {}", project_name, msg::SESSION_ENDED))
             }
         }
     }
 
     /// 格式化等待输入事件（新 API 内部方法）
+    #[allow(dead_code)]
     fn format_waiting_for_input_event(
+        &self,
+        project_name: &str,
+        pattern_type: &str,
+        snapshot: &Option<String>,
+    ) -> String {
+        self.format_waiting_for_input_event_with_fingerprint(project_name, pattern_type, snapshot).message
+    }
+
+    /// 格式化等待输入事件，返回消息和指纹
+    fn format_waiting_for_input_event_with_fingerprint(
         &self,
         project_name: &str,
         _pattern_type: &str,
         snapshot: &Option<String>,
-    ) -> String {
+    ) -> FormatResult {
         if let Some(snap) = snapshot {
             if snap.trim().is_empty() {
-                return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
+                return FormatResult::message_only(
+                    format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+                );
             }
 
             // 尝试使用简化版 AI 提取
             if !self.no_ai {
                 match extract_formatted_message(snap) {
-                    SimpleExtractionResult::Message(message) => {
-                        return Self::format_ai_message(project_name, &message);
+                    SimpleExtractionResult::Message { message, fingerprint } => {
+                        return FormatResult::with_fingerprint(
+                            Self::format_ai_message(project_name, &message),
+                            fingerprint,
+                        );
                     }
                     SimpleExtractionResult::Idle { status, last_action } => {
-                        return Self::format_idle_status(project_name, &status, &last_action);
+                        return FormatResult::message_only(
+                            Self::format_idle_status(project_name, &status, &last_action)
+                        );
                     }
                     SimpleExtractionResult::Failed => {
                         // AI 提取失败，提示用户查看终端
@@ -499,9 +551,13 @@ impl MessageFormatter {
             }
 
             // AI 提取失败或禁用，显示简洁提示
-            format!("⏸️ {} {}\n\n无法解析通知内容，请查看终端", project_name, msg::WAITING_INPUT)
+            FormatResult::message_only(
+                format!("⏸️ {} {}\n\n无法解析通知内容，请查看终端", project_name, msg::WAITING_INPUT)
+            )
         } else {
-            format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+            FormatResult::message_only(
+                format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+            )
         }
     }
 
@@ -548,6 +604,7 @@ impl MessageFormatter {
     }
 
     /// 格式化通知类型事件（新 API 内部方法）
+    #[allow(dead_code)]
     fn format_notification_type_event(
         &self,
         project_name: &str,
@@ -555,21 +612,39 @@ impl MessageFormatter {
         message: &str,
         snapshot: &Option<String>,
     ) -> String {
+        self.format_notification_type_event_with_fingerprint(project_name, notification_type, message, snapshot).message
+    }
+
+    /// 格式化通知类型事件，返回消息和指纹
+    fn format_notification_type_event_with_fingerprint(
+        &self,
+        project_name: &str,
+        notification_type: &str,
+        message: &str,
+        snapshot: &Option<String>,
+    ) -> FormatResult {
         match notification_type {
             "idle_prompt" => {
                 if let Some(snap) = snapshot {
                     if snap.trim().is_empty() {
-                        return format!("⏸️ {} {}", project_name, msg::WAITING_INPUT);
+                        return FormatResult::message_only(
+                            format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+                        );
                     }
 
                     // 尝试使用简化版 AI 提取
                     if !self.no_ai {
                         match extract_formatted_message(snap) {
-                            SimpleExtractionResult::Message(msg) => {
-                                return Self::format_ai_message(project_name, &msg);
+                            SimpleExtractionResult::Message { message: msg, fingerprint } => {
+                                return FormatResult::with_fingerprint(
+                                    Self::format_ai_message(project_name, &msg),
+                                    fingerprint,
+                                );
                             }
                             SimpleExtractionResult::Idle { status, last_action } => {
-                                return Self::format_idle_status(project_name, &status, &last_action);
+                                return FormatResult::message_only(
+                                    Self::format_idle_status(project_name, &status, &last_action)
+                                );
                             }
                             SimpleExtractionResult::Failed => {
                                 // AI 提取失败，提示用户查看终端
@@ -578,14 +653,18 @@ impl MessageFormatter {
                     }
 
                     // AI 提取失败或禁用
-                    format!(
+                    FormatResult::message_only(format!(
                         "⏸️ {} {}\n\n无法解析通知内容，请查看终端",
                         project_name, msg::WAITING_INPUT
-                    )
+                    ))
                 } else if !message.is_empty() {
-                    format!("⏸️ {} {}\n\n{}", project_name, msg::WAITING_INPUT, message)
+                    FormatResult::message_only(
+                        format!("⏸️ {} {}\n\n{}", project_name, msg::WAITING_INPUT, message)
+                    )
                 } else {
-                    format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+                    FormatResult::message_only(
+                        format!("⏸️ {} {}", project_name, msg::WAITING_INPUT)
+                    )
                 }
             }
             "permission_prompt" => {
@@ -593,10 +672,13 @@ impl MessageFormatter {
                 if !self.no_ai {
                     if let Some(snap) = snapshot {
                         if !snap.trim().is_empty() {
-                            if let SimpleExtractionResult::Message(msg) = extract_formatted_message(snap) {
-                                return format!(
-                                    "🔐 {} {}\n\n{}\n\n{}",
-                                    project_name, msg::NEED_CONFIRM, msg, msg::REPLY_YN
+                            if let SimpleExtractionResult::Message { message: msg, fingerprint } = extract_formatted_message(snap) {
+                                return FormatResult::with_fingerprint(
+                                    format!(
+                                        "🔐 {} {}\n\n{}\n\n{}",
+                                        project_name, msg::NEED_CONFIRM, msg, msg::REPLY_YN
+                                    ),
+                                    fingerprint,
                                 );
                             }
                         }
@@ -605,22 +687,22 @@ impl MessageFormatter {
 
                 // AI 提取失败，使用 message 或简洁提示
                 if !message.is_empty() {
-                    format!(
+                    FormatResult::message_only(format!(
                         "🔐 {} {}\n\n{}\n\n{}",
                         project_name, msg::NEED_CONFIRM, message, msg::REPLY_YN
-                    )
+                    ))
                 } else {
-                    format!(
+                    FormatResult::message_only(format!(
                         "🔐 {} {}\n\n{}",
                         project_name, msg::NEED_CONFIRM, msg::REPLY_YN
-                    )
+                    ))
                 }
             }
             _ => {
                 if !message.is_empty() {
-                    format!("📢 {} {}", project_name, message)
+                    FormatResult::message_only(format!("📢 {} {}", project_name, message))
                 } else {
-                    format!("📢 {} 通知", project_name)
+                    FormatResult::message_only(format!("📢 {} 通知", project_name))
                 }
             }
         }

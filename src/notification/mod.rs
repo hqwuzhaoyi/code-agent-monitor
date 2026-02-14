@@ -39,7 +39,7 @@ pub use builder::NotificationBuilder;
 pub use urgency::{Urgency, get_urgency};
 pub use payload::PayloadBuilder;
 pub use terminal_cleaner::is_processing;
-pub use formatter::{MessageFormatter, msg};
+pub use formatter::{MessageFormatter, FormatResult, msg};
 pub use deduplicator::{NotificationDeduplicator, NotifyAction};
 pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
 pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};

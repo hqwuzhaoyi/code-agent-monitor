@@ -482,8 +482,10 @@ impl OpenclawNotifier {
         match urgency {
             Urgency::High | Urgency::Medium => {
                 let format_start = std::time::Instant::now();
-                let message = self.formatter.format_notification_event(final_event);
+                let format_result = self.formatter.format_notification_event_with_fingerprint(final_event);
                 Self::log_timing("format_notification_event", event_type_str, format_start.elapsed());
+
+                let message = &format_result.message;
 
                 // 如果消息为空，跳过
                 if message.is_empty() {
@@ -493,10 +495,11 @@ impl OpenclawNotifier {
                     return Ok(SendResult::Skipped("empty message".to_string()));
                 }
 
-                // 去重检查
+                // 去重检查：优先使用 AI 提取的 fingerprint，否则使用 message
+                let dedup_content = format_result.fingerprint.as_deref().unwrap_or(message);
                 {
                     let mut dedup = self.deduplicator.lock().unwrap();
-                    let action = dedup.should_send(agent_id, &message);
+                    let action = dedup.should_send(agent_id, dedup_content);
                     match action {
                         crate::notification::NotifyAction::Send => {
                             // 继续发送
@@ -522,9 +525,9 @@ impl OpenclawNotifier {
 
                     let send_start = std::time::Instant::now();
                     if needs_reply {
-                        self.send_direct(&message, agent_id)?;
+                        self.send_direct(message, agent_id)?;
                     } else {
-                        self.send_direct_text(&message)?;
+                        self.send_direct_text(message)?;
                     }
                     Self::log_timing("send_direct", &channel_name, send_start.elapsed());
                 }
