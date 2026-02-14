@@ -9,7 +9,8 @@
 //! - QuestionType: Options, Confirmation, OpenEnded
 //! - NotificationContent: question_type, question, options, summary
 
-use code_agent_monitor::ai::{AgentStatus, NotificationContent, QuestionType};
+use code_agent_monitor::ai::{NotificationContent, QuestionType};
+use code_agent_monitor::agent::manager::AgentStatus;
 
 // ============================================================================
 // QuestionType Tests

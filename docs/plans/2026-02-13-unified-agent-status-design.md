@@ -36,6 +36,15 @@
 3. 语义清晰，无歧义
 4. 支持 TUI 显示需求
 
+## 兼容性策略
+
+本次状态统一迁移**不兼容**历史 `agents.json` 状态值：
+
+- 旧值：`running` / `waiting` / `stopped`（`lowercase`）
+- 新值：`processing` / `waiting_for_input` / `unknown`（`snake_case`）
+
+迁移策略为直接切换到新格式，不增加反序列化兼容分支（如 alias/custom deserialize）。发布或本地执行迁移前，先删除旧 `~/.config/code-agent-monitor/agents.json`，由新版本自动重建。
+
 ## 统一状态设计
 
 ### 枚举定义
@@ -149,6 +158,14 @@ impl Default for AgentStatus {
 ```
 
 ## 迁移方案
+
+### 阶段 0：清理旧 agents.json（不做向后兼容）
+
+```bash
+rm -f ~/.config/code-agent-monitor/agents.json
+```
+
+说明：清理后由新版本按统一状态定义写入新文件。
 
 ### 阶段 1：替换 manager.rs 中的 AgentStatus
 
