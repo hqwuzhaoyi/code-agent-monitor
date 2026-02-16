@@ -27,6 +27,7 @@ pub mod payload;
 pub mod terminal_cleaner;
 pub mod formatter;
 pub mod deduplicator;
+pub mod dedup_key;
 pub mod event;
 pub mod summarizer;
 pub mod throttle;
@@ -46,3 +47,4 @@ pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, Error
 pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use watcher::{Watcher, Notifier, NotifyEvent};
 pub use openclaw::OpenclawNotifier;
+pub use dedup_key::{generate_dedup_key, normalize_terminal_content};

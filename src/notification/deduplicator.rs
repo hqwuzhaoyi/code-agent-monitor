@@ -55,6 +55,9 @@ pub struct NotificationDeduplicator {
     locks: HashMap<String, NotificationLock>,
     /// 是否启用持久化
     persist: bool,
+    /// 自定义状态文件路径（用于测试）
+    #[cfg(test)]
+    custom_state_path: Option<PathBuf>,
 }
 
 impl NotificationDeduplicator {
@@ -70,6 +73,8 @@ impl NotificationDeduplicator {
         let mut dedup = Self {
             locks: HashMap::new(),
             persist: true,
+            #[cfg(test)]
+            custom_state_path: None,
         };
         dedup.load_state();
         dedup
@@ -81,12 +86,34 @@ impl NotificationDeduplicator {
         Self {
             locks: HashMap::new(),
             persist: false,
+            custom_state_path: None,
         }
+    }
+
+    /// 创建使用自定义状态文件路径的去重器（用于测试跨进程行为）
+    #[cfg(test)]
+    pub fn new_with_state_path(path: PathBuf) -> Self {
+        let mut dedup = Self {
+            locks: HashMap::new(),
+            persist: true,
+            custom_state_path: Some(path),
+        };
+        dedup.load_state();
+        dedup
     }
 
     /// 获取状态文件路径
     fn state_file_path() -> Option<PathBuf> {
         dirs::home_dir().map(|h| h.join(".config/code-agent-monitor/dedup_state.json"))
+    }
+
+    /// 获取实例的状态文件路径（支持自定义路径用于测试）
+    fn get_state_path(&self) -> Option<PathBuf> {
+        #[cfg(test)]
+        if let Some(ref path) = self.custom_state_path {
+            return Some(path.clone());
+        }
+        Self::state_file_path()
     }
 
     /// 从磁盘加载状态（带共享锁）
@@ -95,7 +122,7 @@ impl NotificationDeduplicator {
             return;
         }
 
-        let Some(path) = Self::state_file_path() else {
+        let Some(path) = self.get_state_path() else {
             return;
         };
 
@@ -132,7 +159,7 @@ impl NotificationDeduplicator {
             return;
         }
 
-        let Some(path) = Self::state_file_path() else {
+        let Some(path) = self.get_state_path() else {
             return;
         };
 
@@ -177,31 +204,13 @@ impl NotificationDeduplicator {
     }
 
     /// 计算内容指纹
+    ///
+    /// Uses the unified dedup_key module for consistent normalization across
+    /// all notification paths (watcher, hook).
     fn content_fingerprint(content: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
-        use std::collections::hash_map::DefaultHasher;
-
-        let normalized = Self::normalize_content(content);
-        let mut hasher = DefaultHasher::new();
-        normalized.hash(&mut hasher);
-        hasher.finish()
-    }
-
-    /// 规范化内容（移除噪声）
-    fn normalize_content(content: &str) -> String {
-        content
-            .lines()
-            .filter(|line| {
-                !line.contains("Flowing")
-                    && !line.contains("Brewing")
-                    && !line.contains("Thinking")
-                    && !line.contains("Running…")
-                    && !line.contains("tokens")
-            })
-            .collect::<Vec<_>>()
-            .join("\n")
-            .trim()
-            .to_string()
+        use super::dedup_key::{normalize_terminal_content, hash_content};
+        let normalized = normalize_terminal_content(content);
+        hash_content(&normalized)
     }
 
     /// 清理过期记录（超过 2 小时的）
@@ -212,7 +221,13 @@ impl NotificationDeduplicator {
     }
 
     /// 检查是否应该发送通知
+    ///
+    /// IMPORTANT: Reloads state from disk before checking to enable cross-process deduplication.
+    /// Multiple cam processes (watcher, hook) share state via the persisted file.
     pub fn should_send(&mut self, agent_id: &str, content: &str) -> NotifyAction {
+        // Reload state from disk to see updates from other processes
+        self.load_state();
+
         let now = Self::current_timestamp();
         let fingerprint = Self::content_fingerprint(content);
 
@@ -343,9 +358,23 @@ mod tests {
     }
 
     #[test]
-    fn test_content_fingerprint_ignores_animation() {
+    fn test_content_fingerprint_tool_agnostic() {
+        // Tool-specific patterns (Flowing, Brewing, etc.) are NOT filtered
+        // per CLAUDE.md guidelines - CAM must be compatible with multiple AI tools
+        // Noise filtering is done by AI extraction layer (src/anthropic.rs)
         let content1 = "Question?\nFlowing...\nMore text";
         let content2 = "Question?\nBrewing...\nMore text";
+        let fp1 = NotificationDeduplicator::content_fingerprint(content1);
+        let fp2 = NotificationDeduplicator::content_fingerprint(content2);
+        // Different tool-specific content should produce different fingerprints
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn test_content_fingerprint_ignores_ansi_and_timestamps() {
+        // ANSI codes and timestamps ARE filtered (tool-agnostic)
+        let content1 = "\x1b[32m[10:30:00]\x1b[0m Question?";
+        let content2 = "\x1b[31m[11:45:30]\x1b[0m Question?";
         let fp1 = NotificationDeduplicator::content_fingerprint(content1);
         let fp2 = NotificationDeduplicator::content_fingerprint(content2);
         assert_eq!(fp1, fp2);
@@ -513,5 +542,188 @@ mod tests {
         let path = path.unwrap();
         assert!(path.to_string_lossy().contains(".config/code-agent-monitor"));
         assert!(path.to_string_lossy().contains("dedup_state.json"));
+    }
+
+    // ==================== Cross-process state sync tests ====================
+
+    #[test]
+    fn test_cross_process_state_sync() {
+        use tempfile::tempdir;
+        use std::env;
+
+        // Create a temp directory for test state
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        // Simulate process 1: creates a lock
+        let mut locks1 = HashMap::new();
+        locks1.insert("agent-1".to_string(), NotificationLock {
+            first_notified_at: NotificationDeduplicator::current_timestamp(),
+            locked_at: NotificationDeduplicator::current_timestamp(),
+            content_fingerprint: NotificationDeduplicator::content_fingerprint("Question?"),
+            reminder_sent: false,
+        });
+        let state1 = DedupState { locks: locks1 };
+        let content = serde_json::to_string(&state1).unwrap();
+        std::fs::write(&state_path, &content).unwrap();
+
+        // Simulate process 2: reads the state and should see the lock
+        let loaded_content = std::fs::read_to_string(&state_path).unwrap();
+        let loaded_state: DedupState = serde_json::from_str(&loaded_content).unwrap();
+
+        assert!(loaded_state.locks.contains_key("agent-1"));
+        assert_eq!(
+            loaded_state.locks.get("agent-1").unwrap().content_fingerprint,
+            NotificationDeduplicator::content_fingerprint("Question?")
+        );
+    }
+
+    #[test]
+    fn test_should_send_reloads_state() {
+        // This test verifies that should_send() calls load_state() internally.
+        // We can't easily test cross-process behavior in unit tests, but we can
+        // verify the method signature and that it doesn't panic with persistence enabled.
+        let mut dedup = NotificationDeduplicator::new();
+
+        // First call should work (creates lock)
+        let action1 = dedup.should_send("test-agent", "Test question?");
+        assert_eq!(action1, NotifyAction::Send);
+
+        // Second call should be suppressed (lock exists)
+        let action2 = dedup.should_send("test-agent", "Test question?");
+        assert!(matches!(action2, NotifyAction::Suppressed(_)));
+
+        // Clean up
+        dedup.clear_lock("test-agent");
+    }
+
+    // ==================== Enhanced cross-process deduplication tests ====================
+
+    #[test]
+    fn test_cross_process_dedup_watcher_then_hook() {
+        use tempfile::tempdir;
+
+        // Create a temp directory for isolated test state
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        // === Simulate WATCHER process ===
+        // Watcher detects a question and creates a lock
+        {
+            let mut watcher_dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+
+            // First notification from watcher - should send
+            let action = watcher_dedup.should_send("agent-1", "Do you want to proceed?");
+            assert_eq!(action, NotifyAction::Send, "Watcher should send first notification");
+
+            // Verify state file was created
+            assert!(state_path.exists(), "State file should be created after first notification");
+        }
+        // Watcher dedup instance dropped here, simulating process end
+
+        // === Simulate HOOK process (new instance) ===
+        // Hook receives same event and should see the existing lock
+        {
+            let mut hook_dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+
+            // Same notification from hook - should be suppressed
+            let action = hook_dedup.should_send("agent-1", "Do you want to proceed?");
+            assert!(
+                matches!(action, NotifyAction::Suppressed(_)),
+                "Hook should suppress duplicate notification, got: {:?}",
+                action
+            );
+        }
+    }
+
+    #[test]
+    fn test_cross_process_dedup_different_content_resets() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        // === Process 1: Creates initial lock ===
+        {
+            let mut dedup1 = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup1.should_send("agent-1", "Question A?");
+            assert_eq!(action, NotifyAction::Send);
+        }
+
+        // === Process 2: Different content should send and reset lock ===
+        {
+            let mut dedup2 = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup2.should_send("agent-1", "Question B?");
+            assert_eq!(action, NotifyAction::Send, "Different content should send");
+        }
+
+        // === Process 3: Original content should now be suppressed (lock was reset to B) ===
+        {
+            let mut dedup3 = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup3.should_send("agent-1", "Question B?");
+            assert!(
+                matches!(action, NotifyAction::Suppressed(_)),
+                "Same content as last should be suppressed"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cross_process_dedup_multiple_agents_independent() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        // === Process 1: Lock agent-1 ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup.should_send("agent-1", "Question for agent 1?");
+            assert_eq!(action, NotifyAction::Send);
+        }
+
+        // === Process 2: agent-2 should not be affected by agent-1's lock ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup.should_send("agent-2", "Question for agent 2?");
+            assert_eq!(action, NotifyAction::Send, "Different agent should not be affected");
+        }
+
+        // === Process 3: agent-1 still locked ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup.should_send("agent-1", "Question for agent 1?");
+            assert!(
+                matches!(action, NotifyAction::Suppressed(_)),
+                "agent-1 should still be locked"
+            );
+        }
+    }
+
+    #[test]
+    fn test_cross_process_clear_lock_propagates() {
+        use tempfile::tempdir;
+
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        // === Process 1: Create lock ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            dedup.should_send("agent-1", "Question?");
+        }
+
+        // === Process 2: Clear the lock ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            dedup.clear_lock("agent-1");
+        }
+
+        // === Process 3: Should be able to send again ===
+        {
+            let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let action = dedup.should_send("agent-1", "Question?");
+            assert_eq!(action, NotifyAction::Send, "Should send after lock cleared");
+        }
     }
 }

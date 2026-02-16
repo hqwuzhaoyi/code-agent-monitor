@@ -19,6 +19,8 @@ pub struct NotificationEvent {
     pub terminal_snapshot: Option<String>,
     /// 时间戳
     pub timestamp: DateTime<Utc>,
+    /// 去重键（由 watcher 生成，用于通知去重）
+    pub dedup_key: Option<String>,
 }
 
 /// 事件类型枚举
@@ -62,6 +64,7 @@ impl NotificationEvent {
             project_path: None,
             terminal_snapshot: None,
             timestamp: Utc::now(),
+            dedup_key: None,
         }
     }
 
@@ -94,6 +97,7 @@ pub struct NotificationEventBuilder {
     project_path: Option<String>,
     terminal_snapshot: Option<String>,
     timestamp: Option<DateTime<Utc>>,
+    dedup_key: Option<String>,
 }
 
 impl NotificationEventBuilder {
@@ -132,6 +136,12 @@ impl NotificationEventBuilder {
         self
     }
 
+    /// 设置去重键
+    pub fn dedup_key(mut self, key: impl Into<String>) -> Self {
+        self.dedup_key = Some(key.into());
+        self
+    }
+
     /// 构建事件
     pub fn build(self) -> Result<NotificationEvent, &'static str> {
         let agent_id = self.agent_id.ok_or("agent_id is required")?;
@@ -143,6 +153,7 @@ impl NotificationEventBuilder {
             project_path: self.project_path,
             terminal_snapshot: self.terminal_snapshot,
             timestamp: self.timestamp.unwrap_or_else(Utc::now),
+            dedup_key: self.dedup_key,
         })
     }
 }
@@ -228,6 +239,12 @@ impl NotificationEvent {
     /// 设置终端快照（链式调用）
     pub fn with_terminal_snapshot(mut self, snapshot: impl Into<String>) -> Self {
         self.terminal_snapshot = Some(snapshot.into());
+        self
+    }
+
+    /// 设置去重键（链式调用）
+    pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
+        self.dedup_key = Some(key.into());
         self
     }
 }
@@ -370,6 +387,26 @@ mod tests {
             event.terminal_snapshot,
             Some("$ cargo build\n   Compiling...".to_string())
         );
+    }
+
+    #[test]
+    fn test_with_dedup_key() {
+        let event = NotificationEvent::waiting_for_input("cam-123", "Confirmation")
+            .with_dedup_key("abc123");
+
+        assert_eq!(event.dedup_key, Some("abc123".to_string()));
+    }
+
+    #[test]
+    fn test_builder_with_dedup_key() {
+        let event = NotificationEventBuilder::new()
+            .agent_id("cam-builder")
+            .event_type(NotificationEventType::AgentExited)
+            .dedup_key("dedup-key-123")
+            .build()
+            .unwrap();
+
+        assert_eq!(event.dedup_key, Some("dedup-key-123".to_string()));
     }
 
     #[test]

@@ -11,7 +11,7 @@ use crate::agent::monitor::AgentMonitor;
 use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
-use crate::notification::{NotificationDeduplicator, NotifyAction};
+use crate::notification::{NotificationDeduplicator, NotifyAction, generate_dedup_key};
 // Import new watcher module for future migration
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
@@ -51,6 +51,8 @@ pub enum WatchEvent {
         agent_id: String,
         pattern_type: String,
         context: String,
+        /// 去重键（由 watcher 生成，用于跨进程一致性）
+        dedup_key: String,
     },
     /// Agent 恢复运行（从等待状态）
     AgentResumed {
@@ -464,7 +466,10 @@ impl AgentWatcher {
 
                 if wait_result.is_waiting {
                     // 检查是否应该发送通知（使用统一去重器）
-                    let action = self.deduplicator.should_send(&agent_id, &wait_result.context);
+                    // 使用 truncated context 生成 dedup key，确保 watcher 和 hook 路径一致
+                    // wait_result.context 已经是 truncate_for_status() 处理过的 30 行内容
+                    let dedup_key = generate_dedup_key(&wait_result.context);
+                    let action = self.deduplicator.should_send(&agent_id, &dedup_key);
 
                     match action {
                         NotifyAction::Send => {
@@ -483,6 +488,7 @@ impl AgentWatcher {
                                 agent_id: agent_id.clone(),
                                 pattern_type,
                                 context: wait_result.context.clone(),
+                                dedup_key: dedup_key.clone(),
                             });
                         }
                         NotifyAction::SendReminder => {
@@ -501,6 +507,7 @@ impl AgentWatcher {
                                 agent_id: agent_id.clone(),
                                 pattern_type: format!("{} (提醒)", pattern_type),
                                 context: wait_result.context.clone(),
+                                dedup_key: dedup_key.clone(),
                             });
                         }
                         NotifyAction::Suppressed(reason) => {
@@ -664,13 +671,13 @@ pub fn format_watch_event(event: &WatchEvent) -> String {
             };
             format!("❌ {} 错误: {}", agent_id, preview)
         }
-        WatchEvent::WaitingForInput { agent_id, pattern_type, context } => {
+        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key } => {
             let preview = if context.len() > 200 {
                 format!("{}...", &context[..197])
             } else {
                 context.clone()
             };
-            format!("⏸️ {} 等待输入 ({}):\n{}", agent_id, pattern_type, preview)
+            format!("⏸️ {} 等待输入 ({}) [key:{}]:\n{}", agent_id, pattern_type, &dedup_key[..8.min(dedup_key.len())], preview)
         }
         WatchEvent::AgentResumed { agent_id } => {
             format!("▶️ {} 继续执行", agent_id)
@@ -714,6 +721,7 @@ mod tests {
             agent_id: "cam-123".to_string(),
             pattern_type: "Confirmation".to_string(),
             context: "Continue? [Y/n]".to_string(),
+            dedup_key: "abc12345".to_string(),
         };
 
         let formatted = format_watch_event(&event);

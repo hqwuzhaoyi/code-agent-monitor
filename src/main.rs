@@ -489,7 +489,7 @@ async fn main() -> Result<()> {
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
-                        WatchEvent::WaitingForInput { agent_id, pattern_type, context } => {
+                        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key } => {
                             info!(
                                 agent_id = %agent_id,
                                 pattern_type = %pattern_type,
@@ -505,7 +505,8 @@ async fn main() -> Result<()> {
                                 .unwrap_or_default();
                             let notification_event = NotificationEvent::waiting_for_input(agent_id, pattern_type)
                                 .with_project_path(project_path)
-                                .with_terminal_snapshot(context.clone());
+                                .with_terminal_snapshot(context.clone())
+                                .with_dedup_key(dedup_key.clone());
                             match notifier.send_notification_event(&notification_event) {
                                 Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),

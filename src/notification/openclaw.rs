@@ -19,8 +19,31 @@ use crate::notification::formatter::MessageFormatter;
 use crate::notification::payload::PayloadBuilder;
 use crate::notification::event::{NotificationEvent, NotificationEventType};
 use crate::notification::deduplicator::NotificationDeduplicator;
+use crate::notification::dedup_key::generate_dedup_key;
 use crate::notification::channel::SendResult;
+use crate::infra::terminal::truncate_for_status;
 use std::sync::Mutex;
+
+/// Convert NotificationEventType to a string for dedup key generation
+/// Used when terminal_snapshot is not available
+fn event_type_to_string(event_type: &NotificationEventType) -> String {
+    match event_type {
+        NotificationEventType::WaitingForInput { pattern_type } => {
+            format!("waiting_for_input:{}", pattern_type)
+        }
+        NotificationEventType::PermissionRequest { tool_name, .. } => {
+            format!("permission_request:{}", tool_name)
+        }
+        NotificationEventType::Notification { notification_type, message } => {
+            format!("notification:{}:{}", notification_type, message)
+        }
+        NotificationEventType::AgentExited => "agent_exited".to_string(),
+        NotificationEventType::Error { message } => format!("error:{}", message),
+        NotificationEventType::Stop => "stop".to_string(),
+        NotificationEventType::SessionStart => "session_start".to_string(),
+        NotificationEventType::SessionEnd => "session_end".to_string(),
+    }
+}
 
 /// Channel 配置
 #[derive(Debug, Clone)]
@@ -495,11 +518,24 @@ impl OpenclawNotifier {
                     return Ok(SendResult::Skipped("empty message".to_string()));
                 }
 
-                // 去重检查：优先使用 AI 提取的 fingerprint，否则使用 message
-                let dedup_content = format_result.fingerprint.as_deref().unwrap_or(message);
+                // 去重检查：优先使用事件中传递的 dedup_key（由 watcher 生成）
+                // 如果没有传递，则基于 truncated terminal_snapshot 生成 key
+                // 使用 truncate_for_status (30 lines) 与 watcher 中的 wait_result.context 保持一致
+                let dedup_key = if let Some(ref key) = final_event.dedup_key {
+                    // 使用 watcher 传递的 key，确保跨进程一致性
+                    key.clone()
+                } else if let Some(snapshot) = final_event.terminal_snapshot.as_deref() {
+                    let truncated = truncate_for_status(snapshot);
+                    generate_dedup_key(&truncated)
+                } else {
+                    // No snapshot: use event type + message content as fallback
+                    // This ensures different events get different keys even without snapshots
+                    let fallback_content = format!("{}:{}", event_type_to_string(&final_event.event_type), message);
+                    generate_dedup_key(&fallback_content)
+                };
                 {
                     let mut dedup = self.deduplicator.lock().unwrap();
-                    let action = dedup.should_send(agent_id, dedup_content);
+                    let action = dedup.should_send(agent_id, &dedup_key);
                     match action {
                         crate::notification::NotifyAction::Send => {
                             // 继续发送
@@ -1267,6 +1303,89 @@ But contains a question somewhere"#;
 
         // 应该被跳过（LOW urgency）
         assert!(matches!(result, Ok(SendResult::Skipped(_))));
+    }
+
+    // ==================== Empty snapshot dedup key tests ====================
+
+    #[test]
+    fn test_event_type_to_string_produces_unique_keys() {
+        // Different event types should produce different strings
+        let error_event = NotificationEventType::Error { message: "test error".to_string() };
+        let permission_event = NotificationEventType::PermissionRequest {
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "ls"}),
+        };
+        let stop_event = NotificationEventType::Stop;
+
+        let error_str = event_type_to_string(&error_event);
+        let permission_str = event_type_to_string(&permission_event);
+        let stop_str = event_type_to_string(&stop_event);
+
+        // All should be different
+        assert_ne!(error_str, permission_str);
+        assert_ne!(error_str, stop_str);
+        assert_ne!(permission_str, stop_str);
+
+        // Verify format
+        assert!(error_str.starts_with("error:"));
+        assert!(permission_str.starts_with("permission_request:"));
+        assert_eq!(stop_str, "stop");
+    }
+
+    #[test]
+    fn test_different_events_without_snapshot_get_different_dedup_keys() {
+        // Events without terminal_snapshot should still get unique dedup keys
+        // based on event type and message content
+        let message1 = "Error occurred";
+        let message2 = "Permission needed";
+
+        let error_event = NotificationEventType::Error { message: "API error".to_string() };
+        let permission_event = NotificationEventType::PermissionRequest {
+            tool_name: "Bash".to_string(),
+            tool_input: serde_json::json!({"command": "rm -rf /tmp"}),
+        };
+
+        // Generate fallback keys (simulating what happens when snapshot is None)
+        let fallback1 = format!("{}:{}", event_type_to_string(&error_event), message1);
+        let fallback2 = format!("{}:{}", event_type_to_string(&permission_event), message2);
+
+        let key1 = generate_dedup_key(&fallback1);
+        let key2 = generate_dedup_key(&fallback2);
+
+        // Keys should be different
+        assert_ne!(key1, key2, "Different events without snapshots should have different dedup keys");
+    }
+
+    #[test]
+    fn test_same_event_type_different_message_different_keys() {
+        // Same event type but different messages should get different keys
+        let event_type = NotificationEventType::Error { message: "error1".to_string() };
+
+        let fallback1 = format!("{}:{}", event_type_to_string(&event_type), "First error message");
+        let fallback2 = format!("{}:{}", event_type_to_string(&event_type), "Second error message");
+
+        let key1 = generate_dedup_key(&fallback1);
+        let key2 = generate_dedup_key(&fallback2);
+
+        assert_ne!(key1, key2, "Same event type with different messages should have different keys");
+    }
+
+    // ==================== Passed dedup_key preference tests ====================
+
+    #[test]
+    fn test_event_with_dedup_key_uses_passed_key() {
+        // When event has dedup_key set, it should be used instead of generating one
+        let event = NotificationEvent::new(
+            "cam-test".to_string(),
+            NotificationEventType::WaitingForInput {
+                pattern_type: "Confirmation".to_string(),
+            },
+        )
+        .with_terminal_snapshot("Some terminal content")
+        .with_dedup_key("watcher-generated-key-123");
+
+        // Verify the dedup_key is set
+        assert_eq!(event.dedup_key, Some("watcher-generated-key-123".to_string()));
     }
 
 }
