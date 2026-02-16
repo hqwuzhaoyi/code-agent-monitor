@@ -549,7 +549,6 @@ mod tests {
     #[test]
     fn test_cross_process_state_sync() {
         use tempfile::tempdir;
-        use std::env;
 
         // Create a temp directory for test state
         let dir = tempdir().unwrap();
@@ -580,10 +579,14 @@ mod tests {
 
     #[test]
     fn test_should_send_reloads_state() {
+        use tempfile::tempdir;
+
         // This test verifies that should_send() calls load_state() internally.
-        // We can't easily test cross-process behavior in unit tests, but we can
-        // verify the method signature and that it doesn't panic with persistence enabled.
-        let mut dedup = NotificationDeduplicator::new();
+        // Use a temporary state file to avoid interference with other tests or system state.
+        let dir = tempdir().unwrap();
+        let state_path = dir.path().join("dedup_state.json");
+
+        let mut dedup = NotificationDeduplicator::new_with_state_path(state_path);
 
         // First call should work (creates lock)
         let action1 = dedup.should_send("test-agent", "Test question?");
