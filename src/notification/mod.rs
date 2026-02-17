@@ -35,6 +35,9 @@ pub mod watcher;
 pub mod openclaw;
 pub mod system_event;
 
+#[cfg(test)]
+mod system_event_test;
+
 pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
 pub use dispatcher::NotificationDispatcher;
 pub use builder::NotificationBuilder;
