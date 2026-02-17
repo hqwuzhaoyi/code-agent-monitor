@@ -1,6 +1,6 @@
 ---
 name: code-agent-monitor
-description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)。用于列出运行中的代理、查看会话、恢复任务、发送输入或终止进程。支持 Agent Teams 多 Agent 协作。
+description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)。CAM 负责监控和数据收集，通知决策由 OpenClaw Agent 处理。支持 Agent Teams 多 Agent 协作。
 ---
 
 # Code Agent Monitor (CAM)
@@ -10,7 +10,9 @@ description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex
 ## 相关 Skills
 
 - **[agent-teams](./agent-teams/SKILL.md)** - 创建专家团队完成复杂任务（多 Agent 协作、远程管理、风险评估）
-- **[cam-notify](./cam-notify/SKILL.md)** - 通知系统配置
+- **[cam-notify](./cam-notify/SKILL.md)** - System Event 处理指南（AI 决策、回复路由）
+
+> 注：新架构下，CAM 只发送 system event，通知决策由 OpenClaw Agent 处理。
 
 ## 使用方式
 
@@ -51,6 +53,8 @@ CAM 通过 OpenClaw plugin 提供 MCP 工具，直接调用即可：
 | `team_assign_task` | 分配任务给团队成员 |
 
 ### 快捷回复工具
+
+> 注：这些工具由 OpenClaw Agent 调用，用于执行用户回复。详见 [cam-notify Skill](./cam-notify/SKILL.md)。
 
 | 工具 | 描述 |
 |------|------|
