@@ -103,6 +103,9 @@ enum Commands {
         /// 禁用 AI 提取（用于测试/调试）
         #[arg(long)]
         no_ai: bool,
+        /// Use delegation mode (only send system event, let OpenClaw decide)
+        #[arg(long)]
+        delegation: bool,
     },
     /// 列出所有 Claude Code Agent Teams
     Teams {
@@ -527,7 +530,7 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
-        Commands::Notify { event, agent_id, dry_run, no_ai } => {
+        Commands::Notify { event, agent_id, dry_run, no_ai, delegation } => {
             use std::fs::{OpenOptions, create_dir_all};
             use std::io::Write;
 
@@ -757,7 +760,10 @@ async fn main() -> Result<()> {
                 evt
             };
 
-            let notifier = OpenclawNotifier::new().with_dry_run(dry_run).with_no_ai(no_ai);
+            let notifier = OpenclawNotifier::new()
+                .with_dry_run(dry_run)
+                .with_no_ai(no_ai)
+                .with_delegation_mode(delegation);
             // 使用新的统一 API
             match notifier.send_notification_event(&notification_event) {
                 Ok(result) => {
