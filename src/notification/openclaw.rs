@@ -64,6 +64,8 @@ pub struct OpenclawNotifier {
     dry_run: bool,
     /// Disable AI extraction (for testing/debugging)
     no_ai: bool,
+    /// 是否使用委托模式（只发 system event，不发 message send）
+    delegation_mode: bool,
     /// 消息格式化器
     formatter: MessageFormatter,
     /// Payload 构建器
@@ -81,6 +83,7 @@ impl OpenclawNotifier {
             channel_config,
             dry_run: false,
             no_ai: false,
+            delegation_mode: false,
             formatter: MessageFormatter::new(),
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
@@ -98,6 +101,12 @@ impl OpenclawNotifier {
         self.no_ai = no_ai;
         self.formatter = self.formatter.with_no_ai(no_ai);
         self.payload_builder = self.payload_builder.with_no_ai(no_ai);
+        self
+    }
+
+    /// 设置委托模式（只发 system event）
+    pub fn with_delegation_mode(mut self, enabled: bool) -> Self {
+        self.delegation_mode = enabled;
         self
     }
 
@@ -411,6 +420,11 @@ impl OpenclawNotifier {
     /// 4. 内置去重机制，防止重复通知
     /// 5. 检测处理中状态，避免发送无意义通知
     pub fn send_notification_event(&self, event: &NotificationEvent) -> Result<SendResult> {
+        // 如果启用委托模式，只发送 system event
+        if self.delegation_mode {
+            return self.send_system_event_only(event);
+        }
+
         use crate::notification::terminal_cleaner::is_processing;
 
         let total_start = std::time::Instant::now();
