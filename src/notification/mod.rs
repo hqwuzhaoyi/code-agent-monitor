@@ -33,6 +33,7 @@ pub mod summarizer;
 pub mod throttle;
 pub mod watcher;
 pub mod openclaw;
+pub mod system_event;
 
 pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
 pub use dispatcher::NotificationDispatcher;
@@ -48,3 +49,4 @@ pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
 pub use watcher::{Watcher, Notifier, NotifyEvent};
 pub use openclaw::OpenclawNotifier;
 pub use dedup_key::{generate_dedup_key, normalize_terminal_content};
+pub use system_event::SystemEventPayload;
