@@ -592,6 +592,106 @@ impl OpenclawNotifier {
         }
     }
 
+    /// 只发送 system event（新架构）
+    ///
+    /// 不再发送 message send，所有决策由 OpenClaw Agent 处理
+    pub fn send_system_event_only(&self, event: &NotificationEvent) -> Result<SendResult> {
+        use crate::notification::system_event::SystemEventPayload;
+        use crate::notification::terminal_cleaner::is_processing;
+
+        let agent_id = &event.agent_id;
+
+        // 外部会话不发送通知
+        if agent_id.starts_with("ext-") {
+            debug!(agent_id = %agent_id, "Skipping external session notification");
+            return Ok(SendResult::Skipped("external session".to_string()));
+        }
+
+        // 检测处理中状态
+        if let Some(ref snapshot) = event.terminal_snapshot {
+            if is_processing(snapshot) {
+                debug!(agent_id = %agent_id, "Skipping notification - agent is processing");
+                return Ok(SendResult::Skipped("agent processing".to_string()));
+            }
+        }
+
+        // 计算 urgency
+        let event_type_str = match &event.event_type {
+            NotificationEventType::WaitingForInput { .. } => "WaitingForInput",
+            NotificationEventType::PermissionRequest { .. } => "permission_request",
+            NotificationEventType::Notification { notification_type, .. } => {
+                if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
+                    "notification"
+                } else {
+                    "notification"
+                }
+            }
+            NotificationEventType::AgentExited => "AgentExited",
+            NotificationEventType::Error { .. } => "Error",
+            NotificationEventType::Stop => "stop",
+            NotificationEventType::SessionStart => "session_start",
+            NotificationEventType::SessionEnd => "session_end",
+        };
+
+        let context_for_urgency = match &event.event_type {
+            NotificationEventType::Notification { notification_type, message } => {
+                serde_json::json!({
+                    "notification_type": notification_type,
+                    "message": message
+                }).to_string()
+            }
+            _ => String::new(),
+        };
+
+        let urgency = get_urgency(event_type_str, &context_for_urgency);
+
+        // LOW urgency 静默处理
+        if matches!(urgency, Urgency::Low) {
+            debug!(agent_id = %agent_id, event_type = %event_type_str, "Notification skipped (LOW urgency)");
+            return Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type_str)));
+        }
+
+        // 去重检查
+        let dedup_key = if let Some(ref key) = event.dedup_key {
+            key.clone()
+        } else if let Some(snapshot) = event.terminal_snapshot.as_deref() {
+            let truncated = truncate_for_status(snapshot);
+            generate_dedup_key(&truncated)
+        } else {
+            let fallback_content = format!("{}:{}", event_type_to_string(&event.event_type), agent_id);
+            generate_dedup_key(&fallback_content)
+        };
+
+        {
+            let mut dedup = self.deduplicator.lock().unwrap();
+            let action = dedup.should_send(agent_id, &dedup_key);
+            if let crate::notification::NotifyAction::Suppressed(reason) = action {
+                debug!(agent_id = %agent_id, reason = %reason, "Notification deduplicated");
+                return Ok(SendResult::Skipped("duplicate".to_string()));
+            }
+        }
+
+        // 构建并发送 system event
+        let payload = SystemEventPayload::from_event(event, urgency);
+
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send system event:");
+            eprintln!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+            return Ok(SendResult::Sent);
+        }
+
+        self.send_via_gateway_async(&payload.to_json())?;
+
+        info!(
+            agent_id = %agent_id,
+            event_type = %event_type_str,
+            urgency = urgency.as_str(),
+            "System event sent to OpenClaw"
+        );
+
+        Ok(SendResult::Sent)
+    }
+
     /// 直接发送消息到 channel
     /// agent_id 用于在消息末尾添加路由标记 [agent_id]，方便用户回复时路由到正确的 agent
     ///
