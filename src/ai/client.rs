@@ -21,8 +21,8 @@ pub const ANTHROPIC_API_URL: &str = "https://api.anthropic.com/v1/messages";
 /// API 版本
 pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 
-/// 默认模型 - Haiku 4.5（最快最便宜）
-pub const DEFAULT_MODEL: &str = "claude-haiku-4-5-20251001";
+/// 默认模型 - MiniMax (免费额度，更稳定)
+pub const DEFAULT_MODEL: &str = "MiniMax/M2.5";
 
 /// 默认超时（毫秒）
 pub const DEFAULT_TIMEOUT_MS: u64 = 5000;
@@ -74,6 +74,19 @@ impl Default for AnthropicConfig {
 impl AnthropicConfig {
     /// 从环境和配置文件自动加载配置
     pub fn auto_load() -> Result<Self> {
+        // 优先使用 MiniMax 配置
+        if let Some((api_key, base_url)) = Self::load_minimax_config()? {
+            let webhook = Self::load_webhook_config();
+            return Ok(Self {
+                api_key,
+                base_url,
+                model: DEFAULT_MODEL.to_string(),
+                timeout_ms: DEFAULT_TIMEOUT_MS,
+                max_tokens: DEFAULT_MAX_TOKENS,
+                webhook,
+            });
+        }
+        
         let (api_key, base_url) = Self::load_api_config()?;
         let webhook = Self::load_webhook_config();
         
@@ -85,6 +98,33 @@ impl AnthropicConfig {
             max_tokens: DEFAULT_MAX_TOKENS,
             webhook,
         })
+    }
+
+    /// 加载 MiniMax 配置
+    fn load_minimax_config() -> Result<Option<(String, String)>> {
+        if let Some(home) = dirs::home_dir() {
+            let config_path = home.join(".config/code-agent-monitor/config.json");
+            if config_path.exists() {
+                if let Ok(content) = fs::read_to_string(&config_path) {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        let key = config.get("minimax_api_key").and_then(|k| k.as_str());
+                        let base_url = config.get("minimax_base_url").and_then(|u| u.as_str());
+
+                        if let Some(key) = key {
+                            if !key.is_empty() {
+                                let url = base_url
+                                    .filter(|u| !u.is_empty())
+                                    .unwrap_or("https://api.minimaxi.com/anthropic")
+                                    .to_string();
+                                debug!("Using MiniMax API: key=***, base_url={}", url);
+                                return Ok(Some((key.to_string(), url)));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(None)
     }
 
     /// 加载 API 配置（key 和 base_url），按优先级尝试多个来源
