@@ -43,6 +43,19 @@ pub struct AnthropicConfig {
     pub timeout_ms: u64,
     /// 最大输出 tokens
     pub max_tokens: u32,
+    /// Webhook 配置
+    pub webhook: Option<WebhookConfig>,
+}
+
+/// Webhook 配置
+#[derive(Debug, Clone)]
+pub struct WebhookConfig {
+    /// Gateway URL
+    pub gateway_url: String,
+    /// Hook token
+    pub hook_token: String,
+    /// 超时秒数
+    pub timeout_secs: u64,
 }
 
 impl Default for AnthropicConfig {
@@ -53,18 +66,24 @@ impl Default for AnthropicConfig {
             model: DEFAULT_MODEL.to_string(),
             timeout_ms: DEFAULT_TIMEOUT_MS,
             max_tokens: DEFAULT_MAX_TOKENS,
+            webhook: None,
         }
     }
 }
 
 impl AnthropicConfig {
-    /// 从环境和配置文件自动加载 API key 和 base_url
+    /// 从环境和配置文件自动加载配置
     pub fn auto_load() -> Result<Self> {
         let (api_key, base_url) = Self::load_api_config()?;
+        let webhook = Self::load_webhook_config();
+        
         Ok(Self {
             api_key,
             base_url,
-            ..Default::default()
+            model: DEFAULT_MODEL.to_string(),
+            timeout_ms: DEFAULT_TIMEOUT_MS,
+            max_tokens: DEFAULT_MAX_TOKENS,
+            webhook,
         })
     }
 
@@ -184,6 +203,57 @@ impl AnthropicConfig {
              set ANTHROPIC_API_KEY env var, create ~/.anthropic/api_key, \
              or configure in ~/.openclaw/openclaw.json"
         ))
+    }
+
+    /// 加载 Webhook 配置
+    fn load_webhook_config() -> Option<WebhookConfig> {
+        // 从 ~/.config/code-agent-monitor/config.json 加载
+        if let Some(home) = dirs::home_dir() {
+            let config_path = home.join(".config/code-agent-monitor/config.json");
+            if config_path.exists() {
+                if let Ok(content) = fs::read_to_string(&config_path) {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(webhook) = config.get("webhook") {
+                            let gateway_url = webhook.get("gateway_url")
+                                .and_then(|u| u.as_str())
+                                .unwrap_or("http://localhost:18789")
+                                .to_string();
+                            let hook_token = webhook.get("hook_token")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("")
+                                .to_string();
+                            let timeout_secs = webhook.get("timeout_secs")
+                                .and_then(|t| t.as_u64())
+                                .unwrap_or(30);
+                            
+                            if !hook_token.is_empty() {
+                                debug!("Loaded webhook config from ~/.config/code-agent-monitor/config.json");
+                                return Some(WebhookConfig {
+                                    gateway_url,
+                                    hook_token,
+                                    timeout_secs,
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 从环境变量加载
+        if let Ok(url) = std::env::var("CAM_WEBHOOK_URL") {
+            if let Ok(token) = std::env::var("CAM_WEBHOOK_TOKEN") {
+                if !token.is_empty() {
+                    return Some(WebhookConfig {
+                        gateway_url: url,
+                        hook_token: token,
+                        timeout_secs: 30,
+                    });
+                }
+            }
+        }
+        
+        None
     }
 }
 

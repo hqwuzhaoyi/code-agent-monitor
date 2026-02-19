@@ -2,7 +2,6 @@
 
 use crate::infra::process::{AgentInfo, ProcessScanner};
 use crate::session::SessionManager;
-use crate::notification::openclaw::OpenclawNotifier;
 use anyhow::Result;
 use std::collections::HashMap;
 use std::time::Duration;
@@ -21,17 +20,15 @@ pub enum NotifyEvent {
 
 /// 通知器
 pub struct Notifier {
-    /// 是否使用 OpenClaw 发送通知
+    /// 是否使用 OpenClaw 发送通知（已废弃，保留兼容性）
+    #[allow(dead_code)]
     use_openclaw: bool,
-    /// OpenClaw 通知器（用于直接发送到 channel）
-    openclaw: OpenclawNotifier,
 }
 
 impl Notifier {
     pub fn new(use_openclaw: bool) -> Self {
         Self {
             use_openclaw,
-            openclaw: OpenclawNotifier::new(),
         }
     }
 
@@ -39,15 +36,15 @@ impl Notifier {
     pub fn notify(&self, event: &NotifyEvent) -> Result<()> {
         let message = match event {
             NotifyEvent::AgentStarted(agent) => {
-                format!("🚀 代理启动: {} (PID: {}) 在 {}", 
+                format!("🚀 代理启动: {} (PID: {}) 在 {}",
                     agent.agent_type, agent.pid, agent.working_dir)
             }
             NotifyEvent::AgentExited { pid, agent_type, working_dir } => {
-                format!("✅ 代理退出: {} (PID: {}) 在 {}", 
+                format!("✅ 代理退出: {} (PID: {}) 在 {}",
                     agent_type, pid, working_dir)
             }
             NotifyEvent::AgentStatusChanged { pid, old_status, new_status } => {
-                format!("📊 代理状态变化: PID {} 从 {} 变为 {}", 
+                format!("📊 代理状态变化: PID {} 从 {} 变为 {}",
                     pid, old_status, new_status)
             }
         };
@@ -57,16 +54,9 @@ impl Notifier {
 
     /// 发送自定义文本通知
     pub fn notify_text(&self, message: &str) -> Result<()> {
-        if self.use_openclaw {
-            if let Err(e) = self.openclaw.send_direct_text(message) {
-                eprintln!("OpenClaw 通知失败: {}", e);
-                // 回退到控制台输出
-                println!("[通知] {}", message);
-            }
-        } else {
-            println!("[通知] {}", message);
-        }
-
+        // 委托模式下，通知由 OpenClaw Agent 处理
+        // 这里只输出到控制台
+        println!("[通知] {}", message);
         Ok(())
     }
 }

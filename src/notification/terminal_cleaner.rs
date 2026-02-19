@@ -18,7 +18,7 @@ pub fn is_processing(content: &str) -> bool {
     use crate::anthropic::{is_agent_processing, AgentStatus};
 
     match is_agent_processing(content) {
-        AgentStatus::Processing => true,
+        AgentStatus::Processing | AgentStatus::Running => true,
         AgentStatus::WaitingForInput => false,
         AgentStatus::Unknown => false, // API 失败时默认发送通知
     }

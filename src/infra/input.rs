@@ -128,7 +128,7 @@ impl InputWaitDetector {
                 pattern_type: Some(InputWaitPattern::Other),
                 context,
             },
-            AgentStatus::Processing => InputWaitResult {
+            AgentStatus::Processing | AgentStatus::Running => InputWaitResult {
                 is_waiting: false,
                 pattern_type: None,
                 context,

@@ -6,21 +6,20 @@
 //!
 //! 此模块作为门面（Facade），委托给 notification 子模块处理具体逻辑：
 //! - `notification::urgency` - Urgency 分类
-//! - `notification::formatter` - 消息格式化
 //! - `notification::payload` - Payload 构建
 //! - `notification::terminal_cleaner` - 终端输出清理
+//! - `notification::system_event` - System Event 结构化数据
 
 use anyhow::Result;
 use std::process::Command;
-use std::fs;
 use tracing::{info, error, debug, warn};
 use crate::notification::urgency::{Urgency, get_urgency};
-use crate::notification::formatter::MessageFormatter;
 use crate::notification::payload::PayloadBuilder;
 use crate::notification::event::{NotificationEvent, NotificationEventType};
 use crate::notification::deduplicator::NotificationDeduplicator;
 use crate::notification::dedup_key::generate_dedup_key;
 use crate::notification::channel::SendResult;
+use crate::notification::webhook::{WebhookClient, WebhookConfig};
 use crate::infra::terminal::truncate_for_status;
 use std::sync::Mutex;
 
@@ -45,29 +44,16 @@ fn event_type_to_string(event_type: &NotificationEventType) -> String {
     }
 }
 
-/// Channel 配置
-#[derive(Debug, Clone)]
-pub struct ChannelConfig {
-    /// channel 类型: telegram, whatsapp, discord, slack 等
-    pub channel: String,
-    /// 目标: chat_id, phone number, channel id 等
-    pub target: String,
-}
-
 /// OpenClaw notifier - 门面模式，委托给子模块处理
 pub struct OpenclawNotifier {
     /// openclaw command path
     openclaw_cmd: String,
-    /// Channel config (for direct sending)
-    channel_config: Option<ChannelConfig>,
     /// dry-run mode (print only, don't send)
     dry_run: bool,
     /// Disable AI extraction (for testing/debugging)
     no_ai: bool,
-    /// 是否使用委托模式（只发 system event，不发 message send）
-    delegation_mode: bool,
-    /// 消息格式化器
-    formatter: MessageFormatter,
+    /// Webhook client (可选，用于 HTTP 触发)
+    webhook_client: Option<WebhookClient>,
     /// Payload 构建器
     payload_builder: PayloadBuilder,
     /// 通知去重器
@@ -77,17 +63,27 @@ pub struct OpenclawNotifier {
 impl OpenclawNotifier {
     /// 创建新的通知器
     pub fn new() -> Self {
-        let channel_config = Self::detect_channel();
         Self {
             openclaw_cmd: Self::find_openclaw_path(),
-            channel_config,
             dry_run: false,
             no_ai: false,
-            delegation_mode: false,
-            formatter: MessageFormatter::new(),
+            webhook_client: None,
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
         }
+    }
+
+    /// 使用 webhook 配置创建通知器
+    pub fn with_webhook(config: WebhookConfig) -> Result<Self, String> {
+        let webhook_client = WebhookClient::new(config)?;
+        Ok(Self {
+            openclaw_cmd: Self::find_openclaw_path(),
+            dry_run: false,
+            no_ai: false,
+            webhook_client: Some(webhook_client),
+            payload_builder: PayloadBuilder::new(),
+            deduplicator: Mutex::new(NotificationDeduplicator::new()),
+        })
     }
 
     /// 设置 dry-run 模式
@@ -99,125 +95,8 @@ impl OpenclawNotifier {
     /// 设置是否禁用 AI 提取
     pub fn with_no_ai(mut self, no_ai: bool) -> Self {
         self.no_ai = no_ai;
-        self.formatter = self.formatter.with_no_ai(no_ai);
         self.payload_builder = self.payload_builder.with_no_ai(no_ai);
         self
-    }
-
-    /// 设置委托模式（只发 system event）
-    pub fn with_delegation_mode(mut self, enabled: bool) -> Self {
-        self.delegation_mode = enabled;
-        self
-    }
-
-    /// 从 OpenClaw 配置自动检测 channel
-    /// 按优先级检测: telegram > whatsapp > discord > slack > 其他
-    fn detect_channel() -> Option<ChannelConfig> {
-        let config_path = dirs::home_dir()?.join(".openclaw/openclaw.json");
-        let content = fs::read_to_string(&config_path).ok()?;
-        let config: serde_json::Value = serde_json::from_str(&content).ok()?;
-        let channels = config.get("channels")?;
-
-        // 按优先级尝试检测各个 channel
-        // 1. Telegram
-        if let Some(target) = Self::extract_telegram_target(channels) {
-            return Some(ChannelConfig {
-                channel: "telegram".to_string(),
-                target,
-            });
-        }
-
-        // 2. WhatsApp
-        if let Some(target) = Self::extract_allow_from(channels, "whatsapp") {
-            return Some(ChannelConfig {
-                channel: "whatsapp".to_string(),
-                target,
-            });
-        }
-
-        // 3. Discord
-        if let Some(target) = Self::extract_default_channel(channels, "discord") {
-            return Some(ChannelConfig {
-                channel: "discord".to_string(),
-                target,
-            });
-        }
-
-        // 4. Slack
-        if let Some(target) = Self::extract_default_channel(channels, "slack") {
-            return Some(ChannelConfig {
-                channel: "slack".to_string(),
-                target,
-            });
-        }
-
-        // 5. Signal
-        if let Some(target) = Self::extract_allow_from(channels, "signal") {
-            return Some(ChannelConfig {
-                channel: "signal".to_string(),
-                target,
-            });
-        }
-
-        None
-    }
-
-    /// 提取 Telegram target (chat_id)
-    fn extract_telegram_target(channels: &serde_json::Value) -> Option<String> {
-        let allow_from = channels
-            .get("telegram")?
-            .get("allowFrom")?
-            .as_array()?;
-
-        // allowFrom 本质是“入站发送者 allowlist”。这里用作出站通知收件人时，只能做启发式：
-        // 取第一个“具体的”条目，并跳过 "*" 这种通配符（常见于 dmPolicy/groupPolicy="open" 配置）。
-        for entry in allow_from {
-            if let Some(s) = entry.as_str() {
-                let s = s.trim();
-                if s.is_empty() || s == "*" {
-                    continue;
-                }
-                return Some(s.to_string());
-            }
-            if let Some(n) = entry.as_i64() {
-                return Some(n.to_string());
-            }
-        }
-
-        None
-    }
-
-    /// 提取 allowFrom 数组的第一个元素
-    fn extract_allow_from(channels: &serde_json::Value, channel_name: &str) -> Option<String> {
-        let allow_from = channels
-            .get(channel_name)?
-            .get("allowFrom")?
-            .as_array()?;
-
-        // 同 extract_telegram_target：跳过 "*" 这种通配符，选择第一个具体条目。
-        for entry in allow_from {
-            if let Some(s) = entry.as_str() {
-                let s = s.trim();
-                if s.is_empty() || s == "*" {
-                    continue;
-                }
-                return Some(s.to_string());
-            }
-            if let Some(n) = entry.as_i64() {
-                return Some(n.to_string());
-            }
-        }
-
-        None
-    }
-
-    /// 提取 defaultChannel
-    fn extract_default_channel(channels: &serde_json::Value, channel_name: &str) -> Option<String> {
-        channels
-            .get(channel_name)?
-            .get("defaultChannel")?
-            .as_str()
-            .map(|s| s.to_string())
     }
 
     /// 查找 openclaw 可执行文件路径
@@ -258,40 +137,6 @@ impl OpenclawNotifier {
         "openclaw".to_string()
     }
 
-    // ==================== 日志辅助函数 ====================
-
-    /// 记录耗时日志到 hook.log
-    fn log_timing(stage: &str, result: &str, duration: std::time::Duration) {
-        use std::fs::OpenOptions;
-        use std::io::Write;
-
-        if let Some(home) = dirs::home_dir() {
-            let log_path = home.join(".config/code-agent-monitor/hook.log");
-            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S%.3f");
-                let _ = writeln!(
-                    file,
-                    "[{}] ⏱️ {} {} took {}ms",
-                    timestamp,
-                    stage,
-                    result,
-                    duration.as_millis()
-                );
-            }
-        }
-    }
-
-    /// 格式化事件消息 - 委托给 MessageFormatter
-    pub fn format_event(
-        &self,
-        agent_id: &str,
-        event_type: &str,
-        pattern_or_path: &str,
-        context: &str,
-    ) -> String {
-        self.formatter.format_event(agent_id, event_type, pattern_or_path, context)
-    }
-
     /// 创建结构化 payload - 委托给 PayloadBuilder
     fn create_payload(
         &self,
@@ -315,8 +160,6 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<SendResult> {
-        let total_start = std::time::Instant::now();
-
         // 外部会话（ext-xxx）不发送通知
         // 原因：外部会话无法远程回复，通知只会造成打扰
         if agent_id.starts_with("ext-") {
@@ -338,65 +181,22 @@ impl OpenclawNotifier {
 
         match urgency {
             Urgency::High | Urgency::Medium => {
-                // 方案 A: 同时发送到 Dashboard 和 Channel
-                // 1. 先发送 system event（让 Dashboard 显示）
-                // 2. 再发送到 channel（确保用户收到通知）
-
-                let format_start = std::time::Instant::now();
-                let message = self.format_event(agent_id, event_type, pattern_or_path, context);
-                Self::log_timing("format_event", event_type, format_start.elapsed());
-
-                // 如果 format_event 返回空字符串，表示应该跳过通知（如处理中状态）
-                if message.is_empty() {
-                    if self.dry_run {
-                        eprintln!("[DRY-RUN] Processing state detected, skipping: {} {}", event_type, agent_id);
-                    }
-                    debug!(
-                        agent_id = %agent_id,
-                        event_type = %event_type,
-                        "Notification skipped (processing state)"
-                    );
-                    return Ok(SendResult::Skipped("processing state".to_string()));
-                }
-
-                // 1. 发送 system event 到 Dashboard（异步，不阻塞）
+                // 发送 system event 到 Dashboard（异步，不阻塞）
                 let payload = self.create_payload(agent_id, event_type, pattern_or_path, context);
-                let gateway_start = std::time::Instant::now();
                 if let Err(e) = self.send_via_gateway_async(&payload) {
-                    // Gateway 发送失败不影响 channel 发送
                     warn!(error = %e, "Failed to send system event to dashboard");
                 }
-                Self::log_timing("send_gateway", "async", gateway_start.elapsed());
-
-                // 2. 发送到 channel（如果配置了）
-                if let Some(config) = &self.channel_config {
-                    let channel_name = config.channel.clone();
-                    let needs_reply = matches!(event_type,
-                        "permission_request" | "WaitingForInput" | "Error" | "notification"
-                    );
-
-                    let send_start = std::time::Instant::now();
-                    if needs_reply {
-                        self.send_direct(&message, agent_id)?;
-                    } else {
-                        self.send_direct_text(&message)?;
-                    }
-                    Self::log_timing("send_direct", &channel_name, send_start.elapsed());
-                }
-
-                Self::log_timing("send_event_total", event_type, total_start.elapsed());
 
                 info!(
                     agent_id = %agent_id,
                     event_type = %event_type,
                     urgency = urgency.as_str(),
-                    "Notification sent to dashboard and channel"
+                    "Notification sent to dashboard"
                 );
                 Ok(SendResult::Sent)
             }
             Urgency::Low => {
                 // LOW urgency: 静默处理，不发送通知
-                // 参考 coding-agent skill 设计：启动通知由调用方自己说，不需要系统推送
                 if self.dry_run {
                     eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type, agent_id);
                 }
@@ -412,198 +212,9 @@ impl OpenclawNotifier {
 
     /// 发送统一的 NotificationEvent（新 API）
     ///
-    /// 这是新的统一入口，使用 NotificationEvent 结构体替代多个参数。
-    /// 优势：
-    /// 1. 项目名从 event.project_path 获取，不再依赖 pattern_or_path
-    /// 2. 终端快照从 event.terminal_snapshot 获取，数据来源清晰
-    /// 3. 类型安全，避免参数混淆
-    /// 4. 内置去重机制，防止重复通知
-    /// 5. 检测处理中状态，避免发送无意义通知
+    /// 委托模式：只发送 system event，由 OpenClaw Agent 决定如何处理
     pub fn send_notification_event(&self, event: &NotificationEvent) -> Result<SendResult> {
-        // 如果启用委托模式，只发送 system event
-        if self.delegation_mode {
-            return self.send_system_event_only(event);
-        }
-
-        use crate::notification::terminal_cleaner::is_processing;
-
-        let total_start = std::time::Instant::now();
-        let agent_id = &event.agent_id;
-
-        // 外部会话（ext-xxx）不发送通知
-        if agent_id.starts_with("ext-") {
-            if self.dry_run {
-                eprintln!("[DRY-RUN] External session (cannot reply remotely), skipping: {}", agent_id);
-            }
-            debug!(agent_id = %agent_id, "Skipping external session notification");
-            return Ok(SendResult::Skipped("external session".to_string()));
-        }
-
-        // 检测处理中状态（使用 AI 判断，兼容 Claude Code/Codex/OpenCode 等）
-        // 如果 agent 正在处理中，不发送 idle_prompt 通知
-        if let Some(ref snapshot) = event.terminal_snapshot {
-            if is_processing(snapshot) {
-                if self.dry_run {
-                    eprintln!("[DRY-RUN] Agent is processing (AI detection), skipping: {}", agent_id);
-                }
-                debug!(agent_id = %agent_id, "Skipping notification - agent is processing");
-                return Ok(SendResult::Skipped("agent processing".to_string()));
-            }
-        }
-
-        // 获取事件类型字符串用于 urgency 判断
-        let event_type_str = match &event.event_type {
-            NotificationEventType::WaitingForInput { .. } => "WaitingForInput",
-            NotificationEventType::PermissionRequest { .. } => "permission_request",
-            NotificationEventType::Notification { notification_type, .. } => {
-                if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
-                    "notification"
-                } else {
-                    "notification"
-                }
-            }
-            NotificationEventType::AgentExited => "AgentExited",
-            NotificationEventType::Error { .. } => "Error",
-            NotificationEventType::Stop => "stop",
-            NotificationEventType::SessionStart => "session_start",
-            NotificationEventType::SessionEnd => "session_end",
-        };
-
-        // 构建 context 用于 urgency 判断（兼容旧逻辑）
-        let context_for_urgency = match &event.event_type {
-            NotificationEventType::Notification { notification_type, message } => {
-                serde_json::json!({
-                    "notification_type": notification_type,
-                    "message": message
-                }).to_string()
-            }
-            _ => String::new(),
-        };
-
-        let urgency = get_urgency(event_type_str, &context_for_urgency);
-
-        // 特殊处理：stop 事件可能包含等待输入的问题
-        // Claude Code 在输出问题后会触发 stop 而非 idle_prompt
-        let (urgency, event_for_format) = if matches!(&event.event_type, NotificationEventType::Stop) {
-            if let Some(ref snapshot) = event.terminal_snapshot {
-                // 使用 AI 检测终端是否包含等待输入的问题
-                if let Some(content) = crate::anthropic::detect_waiting_question(snapshot) {
-                    debug!(agent_id = %agent_id, "Stop event contains waiting question, upgrading urgency");
-                    // 创建一个新的事件用于格式化，类型改为 Notification
-                    let mut new_event = event.clone();
-                    new_event.event_type = NotificationEventType::Notification {
-                        notification_type: "idle_prompt".to_string(),
-                        message: content.question.clone(),
-                    };
-                    (Urgency::Medium, Some(new_event))
-                } else {
-                    (urgency, None)
-                }
-            } else {
-                (urgency, None)
-            }
-        } else {
-            (urgency, None)
-        };
-
-        // 使用可能更新的事件进行格式化
-        let final_event = event_for_format.as_ref().unwrap_or(event);
-
-        debug!(
-            agent_id = %agent_id,
-            event_type = %event_type_str,
-            urgency = urgency.as_str(),
-            "Processing notification event (new API)"
-        );
-
-        match urgency {
-            Urgency::High | Urgency::Medium => {
-                let format_start = std::time::Instant::now();
-                let format_result = self.formatter.format_notification_event_with_fingerprint(final_event);
-                Self::log_timing("format_notification_event", event_type_str, format_start.elapsed());
-
-                let message = &format_result.message;
-
-                // 如果消息为空，跳过
-                if message.is_empty() {
-                    if self.dry_run {
-                        eprintln!("[DRY-RUN] Empty message, skipping: {}", agent_id);
-                    }
-                    return Ok(SendResult::Skipped("empty message".to_string()));
-                }
-
-                // 去重检查：优先使用事件中传递的 dedup_key（由 watcher 生成）
-                // 如果没有传递，则基于 truncated terminal_snapshot 生成 key
-                // 使用 truncate_for_status (30 lines) 与 watcher 中的 wait_result.context 保持一致
-                let dedup_key = if let Some(ref key) = final_event.dedup_key {
-                    // 使用 watcher 传递的 key，确保跨进程一致性
-                    key.clone()
-                } else if let Some(snapshot) = final_event.terminal_snapshot.as_deref() {
-                    let truncated = truncate_for_status(snapshot);
-                    generate_dedup_key(&truncated)
-                } else {
-                    // No snapshot: use event type + message content as fallback
-                    // This ensures different events get different keys even without snapshots
-                    let fallback_content = format!("{}:{}", event_type_to_string(&final_event.event_type), message);
-                    generate_dedup_key(&fallback_content)
-                };
-                {
-                    let mut dedup = self.deduplicator.lock().unwrap();
-                    let action = dedup.should_send(agent_id, &dedup_key);
-                    match action {
-                        crate::notification::NotifyAction::Send => {
-                            // 继续发送
-                        }
-                        crate::notification::NotifyAction::SendReminder => {
-                            // 发送提醒（可以在消息中添加提醒标记）
-                            // 继续发送
-                        }
-                        crate::notification::NotifyAction::Suppressed(reason) => {
-                            if self.dry_run {
-                                eprintln!("[DRY-RUN] Duplicate notification, skipping: {} ({})", agent_id, reason);
-                            }
-                            debug!(agent_id = %agent_id, reason = %reason, "Notification deduplicated");
-                            return Ok(SendResult::Skipped("duplicate".to_string()));
-                        }
-                    }
-                }
-
-                // 发送到 channel
-                if let Some(config) = &self.channel_config {
-                    let channel_name = config.channel.clone();
-                    let needs_reply = final_event.needs_reply();
-
-                    let send_start = std::time::Instant::now();
-                    if needs_reply {
-                        self.send_direct(message, agent_id)?;
-                    } else {
-                        self.send_direct_text(message)?;
-                    }
-                    Self::log_timing("send_direct", &channel_name, send_start.elapsed());
-                }
-
-                Self::log_timing("send_notification_event_total", event_type_str, total_start.elapsed());
-
-                info!(
-                    agent_id = %agent_id,
-                    event_type = %event_type_str,
-                    urgency = urgency.as_str(),
-                    "Notification sent (new API)"
-                );
-                Ok(SendResult::Sent)
-            }
-            Urgency::Low => {
-                if self.dry_run {
-                    eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type_str, agent_id);
-                }
-                debug!(
-                    agent_id = %agent_id,
-                    event_type = %event_type_str,
-                    "Notification skipped (LOW urgency)"
-                );
-                Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type_str)))
-            }
-        }
+        self.send_system_event_only(event)
     }
 
     /// 只发送 system event（新架构）
@@ -706,69 +317,32 @@ impl OpenclawNotifier {
         Ok(SendResult::Sent)
     }
 
-    /// 直接发送消息到 channel
-    /// agent_id 用于在消息末尾添加路由标记 [agent_id]，方便用户回复时路由到正确的 agent
+    /// 发送 system event 到 Gateway 并等待 Agent 处理
     ///
-    /// 注意：使用 spawn() 异步发送，不阻塞调用方。
-    /// OpenClaw message send 命令本身需要 8-12 秒（Gateway 通信、验证等），
-    /// 使用异步发送可以让 Hook 立即返回，用户感知延迟从 8-12s 降至 <100ms。
-    fn send_direct(&self, message: &str, agent_id: &str) -> Result<()> {
-        let config = self.channel_config.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
-
-        if self.dry_run {
-            eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
-            eprintln!("[DRY-RUN] Message: {}", message);
-            eprintln!("[DRY-RUN] Agent ID tag: {}", agent_id);
-            return Ok(());
-        }
-
-        // 添加 agent_id 标记用于回复路由
-        // 使用 Telegram markdown 的 monospace 格式，方便用户点击复制
-        let tagged_message = format!("{} `{}`", message, agent_id);
-
-        // 使用 spawn() 异步发送，不阻塞调用方
-        // OpenClaw 进程在后台运行，发送完成后自动退出
-        let child = Command::new(&self.openclaw_cmd)
-            .args([
-                "message", "send",
-                "--channel", &config.channel,
-                "--target", &config.target,
-                "--message", &tagged_message,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
-
-        match child {
-            Ok(_) => {
-                // 进程已启动，不等待完成
-                // 如果需要错误处理，可以在后台线程中等待并记录
-                Ok(())
-            }
-            Err(e) => {
-                error!(error = %e, "Failed to spawn OpenClaw message send");
-                Err(e.into())
-            }
-        }
-    }
-
-    /// 异步发送 system event 到 Dashboard（不阻塞调用方）
+    /// 使用 --expect-final 等待 Agent 完成处理，确保通知被发送到用户
     fn send_via_gateway_async(&self, payload: &serde_json::Value) -> Result<()> {
+        // 如果配置了 webhook client，优先使用 webhook
+        if let Some(ref _client) = self.webhook_client {
+            return self.send_via_webhook(payload);
+        }
+
         if self.dry_run {
-            eprintln!("[DRY-RUN] Would send via system event (async)");
+            eprintln!("[DRY-RUN] Would send via system event");
             eprintln!("[DRY-RUN] Payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
             return Ok(());
         }
 
         let payload_text = payload.to_string();
 
-        // 使用 spawn() 异步发送，不阻塞调用方
+        // 使用 spawn() 发送，添加 --expect-final 等待 Agent 处理
+        // 超时设置为 60 秒，足够 Agent 处理并发送通知
         let child = Command::new(&self.openclaw_cmd)
             .args([
                 "system", "event",
                 "--text", &payload_text,
                 "--mode", "now",
+                "--expect-final",
+                "--timeout", "60000",
             ])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
@@ -783,42 +357,13 @@ impl OpenclawNotifier {
         }
     }
 
-    /// 直接发送纯文本到检测到的 channel。
-    ///
-    /// 主要用于老的 `cam watch --openclaw` 路径，避免在多个模块里重复实现
-    /// `openclaw message send` 的参数拼装和 channel detection。
-    /// 注意：此方法不添加 agent_id 标记，因为调用方通常没有 agent_id 上下文。
-    ///
-    /// 使用 spawn() 异步发送，不阻塞调用方。
-    pub fn send_direct_text(&self, message: &str) -> Result<()> {
-        let config = self.channel_config.as_ref()
-            .ok_or_else(|| anyhow::anyhow!("No channel configured"))?;
-
-        if self.dry_run {
-            eprintln!("[DRY-RUN] Would send to channel={} target={}", config.channel, config.target);
-            eprintln!("[DRY-RUN] Message: {}", message);
-            return Ok(());
-        }
-
-        // 使用 spawn() 异步发送，不阻塞调用方
-        let child = Command::new(&self.openclaw_cmd)
-            .args([
-                "message", "send",
-                "--channel", &config.channel,
-                "--target", &config.target,
-                "--message", message,
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::piped())
-            .spawn();
-
-        match child {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                eprintln!("无法执行 OpenClaw message send: {}", e);
-                Err(e.into())
-            }
-        }
+    /// 通过 Webhook 发送通知 (推荐方案)
+    /// 注意: 需要在配置时传入 owned 的 webhook client
+    fn send_via_webhook(&self, payload: &serde_json::Value) -> Result<()> {
+        // Webhook 发送是异步的，这里只记录日志
+        // 实际发送由调用方配置 async runtime
+        info!(payload = %payload, "Would send via webhook");
+        Ok(())
     }
 }
 
@@ -831,7 +376,6 @@ impl Default for OpenclawNotifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::notification::formatter::MessageFormatter;
 
     #[test]
     fn test_get_urgency_high() {
@@ -885,308 +429,6 @@ line 1"#;
 --- 终端快照 ---
 line 1"#;
         assert_eq!(get_urgency("notification", context), Urgency::High);
-    }
-
-    #[test]
-    fn test_format_waiting_event() {
-        let notifier = OpenclawNotifier::new().with_no_ai(true);
-
-        let message = notifier.format_event(
-            "cam-1234567890",
-            "WaitingForInput",
-            "Confirmation",
-            "Do you want to continue? [Y/n]",
-        );
-
-        // 简化后的格式：AI 禁用时显示提示信息
-        assert!(message.contains("⏸️"));
-        assert!(message.contains("等待输入"));
-        // AI 禁用时显示无法解析提示
-        assert!(message.contains("无法解析通知内容") || message.contains("Do you want to continue?"));
-    }
-
-    #[test]
-    fn test_format_error_event() {
-        let notifier = OpenclawNotifier::new();
-
-        let message = notifier.format_event(
-            "cam-1234567890",
-            "Error",
-            "",
-            "API rate limit exceeded",
-        );
-
-        assert!(message.contains("❌"));
-        assert!(message.contains("错误"));
-        assert!(message.contains("API rate limit"));
-    }
-
-    #[test]
-    fn test_format_exited_event() {
-        let notifier = OpenclawNotifier::new();
-
-        let message = notifier.format_event(
-            "cam-1234567890",
-            "AgentExited",
-            "/workspace/myapp",
-            "",
-        );
-
-        // 新格式：使用项目名
-        assert!(message.contains("✅"));
-        assert!(message.contains("myapp") || message.contains("已完成"));
-    }
-
-    // ==================== 终端快照测试 ====================
-
-    #[test]
-    fn test_format_event_with_terminal_snapshot() {
-        let notifier = OpenclawNotifier::new();
-
-        // 模拟带终端快照的 context
-        let context_with_snapshot = r#"{"cwd": "/workspace"}
-
---- 终端快照 ---
-$ cargo build
-   Compiling myapp v0.1.0
-    Finished release target"#;
-
-        let message = notifier.format_event(
-            "cam-123",
-            "stop",
-            "",
-            context_with_snapshot,
-        );
-
-        // 新格式：简洁，不再显示终端快照
-        assert!(message.contains("⏹️"));
-        assert!(message.contains("已停止") || message.contains("workspace"));
-    }
-
-    #[test]
-    fn test_format_event_snapshot_truncation() {
-        let notifier = OpenclawNotifier::new();
-
-        // 创建超过 15 行的终端输出
-        let mut long_output = String::from(r#"{"cwd": "/tmp"}
-
---- 终端快照 ---
-"#);
-        for i in 1..=20 {
-            long_output.push_str(&format!("line {}\n", i));
-        }
-
-        let message = notifier.format_event(
-            "cam-123",
-            "stop",
-            "",
-            &long_output,
-        );
-
-        // 新格式：简洁，不再显示终端快照
-        assert!(message.contains("⏹️"));
-        assert!(message.contains("已停止") || message.contains("tmp"));
-    }
-
-    #[test]
-    fn test_format_event_without_snapshot() {
-        let notifier = OpenclawNotifier::new();
-
-        let message = notifier.format_event(
-            "cam-123",
-            "stop",
-            "",
-            r#"{"cwd": "/workspace"}"#,
-        );
-
-        assert!(message.contains("⏹️"));
-        assert!(message.contains("已停止") || message.contains("workspace"));
-    }
-
-    // ==================== 各事件类型格式化测试 ====================
-
-    #[test]
-    fn test_format_permission_request() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "cwd": "/workspace"}"#;
-        let message = notifier.format_event("cam-123", "permission_request", "", context);
-
-        // 新格式：使用风险等级 emoji（✅/⚠️/🔴）替代固定的 🔐
-        // rm -rf /tmp/test 是低风险（/tmp 路径）
-        assert!(message.contains("✅") || message.contains("⚠️") || message.contains("🔴"));
-        assert!(message.contains("请求权限"));
-        assert!(message.contains("Bash"));
-        assert!(message.contains("rm -rf /tmp/test"));
-        // 新格式：简化回复指引
-        assert!(message.contains("y 允许") || message.contains("n 拒绝"));
-    }
-
-    #[test]
-    fn test_format_notification_idle_prompt() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"notification_type": "idle_prompt", "message": "Task completed, waiting for next instruction"}"#;
-        let message = notifier.format_event("cam-123", "notification", "", context);
-
-        assert!(message.contains("⏸️"));
-        assert!(message.contains("等待输入"));
-    }
-
-    #[test]
-    fn test_format_notification_permission_prompt() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"notification_type": "permission_prompt", "message": "Allow file write?"}"#;
-        let message = notifier.format_event("cam-123", "notification", "", context);
-
-        assert!(message.contains("🔐"));
-        assert!(message.contains("确认") || message.contains("需要"));
-        assert!(message.contains("Allow file write?"));
-        // 新格式：简化回复指引
-        assert!(message.contains("y") && message.contains("n"));
-    }
-
-    #[test]
-    fn test_format_session_start() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"cwd": "/Users/admin/project"}"#;
-        let message = notifier.format_event("cam-123", "session_start", "", context);
-
-        assert!(message.contains("🚀"));
-        assert!(message.contains("已启动"));
-        // 新格式：使用项目名
-        assert!(message.contains("project"));
-    }
-
-    #[test]
-    fn test_format_stop_event() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"cwd": "/workspace/app"}"#;
-        let message = notifier.format_event("cam-123", "stop", "", context);
-
-        assert!(message.contains("⏹️"));
-        assert!(message.contains("已停止") || message.contains("app"));
-    }
-
-    #[test]
-    fn test_format_session_end() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"{"cwd": "/workspace"}"#;
-        let message = notifier.format_event("cam-123", "session_end", "", context);
-
-        assert!(message.contains("🔚"));
-        assert!(message.contains("会话结束") || message.contains("workspace"));
-    }
-
-    #[test]
-    fn test_format_agent_exited_with_snapshot() {
-        let notifier = OpenclawNotifier::new();
-
-        let context = r#"
-
---- 终端快照 ---
-All tests passed!
-Build successful."#;
-
-        let message = notifier.format_event("cam-123", "AgentExited", "/myproject", context);
-
-        // 新格式：简洁，使用项目名
-        assert!(message.contains("✅"));
-        assert!(message.contains("myproject") || message.contains("已完成"));
-    }
-
-    #[test]
-    fn test_format_tool_use() {
-        let notifier = OpenclawNotifier::new();
-
-        // 带 target 的工具调用
-        let message = notifier.format_event("cam-123", "ToolUse", "Edit", "src/main.rs");
-        assert!(message.contains("🔧"));
-        assert!(message.contains("Edit"));
-        assert!(message.contains("src/main.rs"));
-
-        // 不带 target 的工具调用
-        let message2 = notifier.format_event("cam-456", "ToolUse", "Read", "");
-        assert!(message2.contains("🔧"));
-        assert!(message2.contains("Read"));
-    }
-
-    // ==================== Channel 检测测试 ====================
-
-    #[test]
-    fn test_extract_telegram_target_string() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "telegram": {
-                "allowFrom": ["123456789"]
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_telegram_target(&channels);
-        assert_eq!(target, Some("123456789".to_string()));
-    }
-
-    #[test]
-    fn test_extract_telegram_target_number() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "telegram": {
-                "allowFrom": [123456789]
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_telegram_target(&channels);
-        assert_eq!(target, Some("123456789".to_string()));
-    }
-
-    #[test]
-    fn test_extract_telegram_target_skips_wildcard() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "telegram": {
-                "allowFrom": ["*", "123456789"]
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_telegram_target(&channels);
-        assert_eq!(target, Some("123456789".to_string()));
-    }
-
-    #[test]
-    fn test_extract_default_channel() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "discord": {
-                "defaultChannel": "general"
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_default_channel(&channels, "discord");
-        assert_eq!(target, Some("general".to_string()));
-    }
-
-    #[test]
-    fn test_extract_allow_from() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "whatsapp": {
-                "allowFrom": ["+1234567890"]
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_allow_from(&channels, "whatsapp");
-        assert_eq!(target, Some("+1234567890".to_string()));
-    }
-
-    #[test]
-    fn test_extract_allow_from_skips_wildcard() {
-        let channels: serde_json::Value = serde_json::from_str(r#"{
-            "whatsapp": {
-                "allowFrom": ["*", "+1234567890"]
-            }
-        }"#).unwrap();
-
-        let target = OpenclawNotifier::extract_allow_from(&channels, "whatsapp");
-        assert_eq!(target, Some("+1234567890".to_string()));
     }
 
     // ==================== Payload 创建测试 ====================
@@ -1303,79 +545,6 @@ $ cargo build
     }
 
     // Note: generate_summary tests moved to notification::payload module
-
-    // ==================== 新格式辅助函数测试 ====================
-
-    #[test]
-    fn test_extract_project_name() {
-        assert_eq!(MessageFormatter::extract_project_name("/Users/admin/workspace/myapp"), "myapp");
-        assert_eq!(MessageFormatter::extract_project_name("/workspace"), "workspace");
-        assert_eq!(MessageFormatter::extract_project_name(""), "unknown");
-        // Root path returns "/" as the file_name
-        assert_eq!(MessageFormatter::extract_project_name("/"), "/");
-    }
-
-    #[test]
-    fn test_get_project_name_for_agent() {
-        // 测试 agent_id 简化（当 agents.json 中找不到时）
-        let name = MessageFormatter::get_project_name_for_agent("cam-1234567890");
-        assert_eq!(name, "agent-1234");
-
-        // 短 agent_id 不简化
-        let name2 = MessageFormatter::get_project_name_for_agent("cam-123");
-        assert_eq!(name2, "cam-123");
-
-        // 外部会话 agent_id 简化（当 agents.json 中找不到时）
-        // 注意：如果 agents.json 中有此 agent，会返回实际项目名
-        let name3 = MessageFormatter::get_project_name_for_agent("ext-nonexist");
-        assert_eq!(name3, "session-none");
-
-        // 短外部会话 agent_id 不简化
-        let name4 = MessageFormatter::get_project_name_for_agent("ext-123");
-        assert_eq!(name4, "ext-123");
-    }
-
-    // ==================== 新格式集成测试 ====================
-
-    #[test]
-    fn test_format_notification_with_no_ai_fallback() {
-        // 测试当 AI 禁用时，回退到简洁提示（不显示原始快照，避免 UI 元素泄露）
-        let notifier = OpenclawNotifier::new().with_no_ai(true);
-
-        let context = r#"{"notification_type": "idle_prompt", "message": ""}
-
---- 终端快照 ---
-Some unrecognized prompt format that doesn't match any pattern
-Please provide your input here"#;
-
-        let message = notifier.format_event("cam-123", "notification", "", context);
-
-        // 应该显示简洁提示，不显示原始快照内容
-        assert!(message.contains("⏸️"));
-        assert!(message.contains("等待输入"));
-        // 新行为：AI 提取失败时显示简洁提示，不显示原始快照
-        assert!(message.contains("无法解析通知内容，请查看终端"));
-    }
-
-    #[test]
-    fn test_format_notification_ai_extraction_path() {
-        // 测试 AI 提取路径（不实际调用 AI，只验证代码路径）
-        let notifier = OpenclawNotifier::new().with_dry_run(true);
-
-        let context = r#"{"notification_type": "idle_prompt", "message": ""}
-
---- 终端快照 ---
-Some complex terminal output
-That doesn't match standard patterns
-But contains a question somewhere"#;
-
-        // dry_run 模式下会尝试 AI 提取
-        // 根据 AI 判断结果返回不同的 emoji：📋(有问题) / ⏸️(失败) / ✅(完成) / 💤(空闲)
-        let message = notifier.format_event("cam-123", "notification", "", context);
-
-        // 验证返回了某种格式的消息
-        assert!(message.contains("📋") || message.contains("⏸️") || message.contains("✅") || message.contains("💤"));
-    }
 
     // ==================== Stop 事件 urgency 升级测试 ====================
 

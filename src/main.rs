@@ -530,6 +530,7 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
+        #[allow(unused_variables)]
         Commands::Notify { event, agent_id, dry_run, no_ai, delegation } => {
             use std::fs::{OpenOptions, create_dir_all};
             use std::io::Write;
@@ -762,8 +763,7 @@ async fn main() -> Result<()> {
 
             let notifier = OpenclawNotifier::new()
                 .with_dry_run(dry_run)
-                .with_no_ai(no_ai)
-                .with_delegation_mode(delegation);
+                .with_no_ai(no_ai);
             // 使用新的统一 API
             match notifier.send_notification_event(&notification_event) {
                 Ok(result) => {

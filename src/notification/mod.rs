@@ -25,7 +25,6 @@ pub mod builder;
 pub mod urgency;
 pub mod payload;
 pub mod terminal_cleaner;
-pub mod formatter;
 pub mod deduplicator;
 pub mod dedup_key;
 pub mod event;
@@ -34,6 +33,7 @@ pub mod throttle;
 pub mod watcher;
 pub mod openclaw;
 pub mod system_event;
+pub mod webhook;
 
 #[cfg(test)]
 mod system_event_test;
@@ -44,7 +44,6 @@ pub use builder::NotificationBuilder;
 pub use urgency::{Urgency, get_urgency};
 pub use payload::PayloadBuilder;
 pub use terminal_cleaner::is_processing;
-pub use formatter::{MessageFormatter, FormatResult, msg};
 pub use deduplicator::{NotificationDeduplicator, NotifyAction};
 pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
 pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
@@ -53,3 +52,4 @@ pub use watcher::{Watcher, Notifier, NotifyEvent};
 pub use openclaw::OpenclawNotifier;
 pub use dedup_key::{generate_dedup_key, normalize_terminal_content};
 pub use system_event::SystemEventPayload;
+pub use webhook::{WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse};

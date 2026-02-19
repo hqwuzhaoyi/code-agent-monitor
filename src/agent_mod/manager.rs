@@ -68,6 +68,9 @@ pub enum AgentStatus {
     WaitingForInput,
     /// 未知 - 无法确定状态
     Unknown,
+    /// 运行中 - 兼容旧数据，等同于 Processing
+    #[serde(alias = "running")]
+    Running,
 }
 
 impl Default for AgentStatus {
@@ -85,7 +88,7 @@ impl AgentStatus {
     /// 获取 TUI 显示图标
     pub fn icon(&self) -> &'static str {
         match self {
-            Self::Processing => "🟢",
+            Self::Processing | Self::Running => "🟢",
             Self::WaitingForInput => "🟡",
             Self::Unknown => "❓",
         }
@@ -93,7 +96,7 @@ impl AgentStatus {
 
     /// 是否正在处理
     pub fn is_processing(&self) -> bool {
-        matches!(self, Self::Processing)
+        matches!(self, Self::Processing | Self::Running)
     }
 
     /// 是否在等待输入

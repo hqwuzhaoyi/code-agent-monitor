@@ -544,7 +544,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
 pub fn detect_waiting_question(terminal_snapshot: &str) -> Option<NotificationContent> {
     // 先检查是否在处理中
     match is_agent_processing(terminal_snapshot) {
-        AgentStatus::Processing => return None,
+        AgentStatus::Processing | AgentStatus::Running => return None,
         AgentStatus::Unknown => {
             // 不确定状态，继续尝试提取问题
         }

@@ -176,7 +176,7 @@ pub fn assess_status_detection(status: &AgentStatus, snapshot: &str) -> QualityA
 
     // 根据状态检查快照内容的一致性
     match status {
-        AgentStatus::Processing => {
+        AgentStatus::Processing | AgentStatus::Running => {
             // 处理中状态应该有处理指示器
             let processing_hints = ["…", "...", "Thinking", "Brewing", "Running", "Loading", "Streaming", "Executing"];
             let has_processing_hint = processing_hints.iter().any(|h| snapshot.contains(h));
