@@ -410,7 +410,10 @@ async fn main() -> Result<()> {
             use tokio::time::sleep;
 
             let daemon = WatcherDaemon::new();
-            let notifier = OpenclawNotifier::new();
+            let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
+                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                None => OpenclawNotifier::new(),
+            };
             let mut watcher = AgentWatcher::new();
 
             // 写入当前进程 PID
@@ -761,9 +764,15 @@ async fn main() -> Result<()> {
                 evt
             };
 
-            let notifier = OpenclawNotifier::new()
-                .with_dry_run(dry_run)
-                .with_no_ai(no_ai);
+            let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
+                Some(config) => OpenclawNotifier::with_webhook(config)
+                    .unwrap_or_else(|_| OpenclawNotifier::new())
+                    .with_dry_run(dry_run)
+                    .with_no_ai(no_ai),
+                None => OpenclawNotifier::new()
+                    .with_dry_run(dry_run)
+                    .with_no_ai(no_ai),
+            };
             // 使用新的统一 API
             match notifier.send_notification_event(&notification_event) {
                 Ok(result) => {
@@ -1055,7 +1064,10 @@ async fn main() -> Result<()> {
             use tokio::time::sleep;
 
             let bridge = TeamBridge::new();
-            let notifier = OpenclawNotifier::new();
+            let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
+                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                None => OpenclawNotifier::new(),
+            };
 
             // 验证 team 存在
             if !bridge.team_exists(&team) {

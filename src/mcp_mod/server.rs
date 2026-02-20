@@ -10,6 +10,7 @@ use crate::team;
 use crate::team::task_list;
 use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
 use crate::notification::openclaw::OpenclawNotifier;
+use crate::notification::load_webhook_config_from_file;
 use crate::session::state::{ConversationStateManager, ReplyResult};
 
 // Re-export types from types module for backwards compatibility
@@ -1446,7 +1447,10 @@ impl McpServer {
                 let team = arguments.get("team")
                     .and_then(|v| v.as_str());
 
-                let notifier = OpenclawNotifier::new();
+                let notifier = match load_webhook_config_from_file() {
+                    Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                    None => OpenclawNotifier::new(),
+                };
                 let watcher = InboxWatcher::new(notifier);
 
                 let requests = if let Some(team_name) = team {

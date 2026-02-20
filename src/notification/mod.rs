@@ -52,4 +52,4 @@ pub use watcher::{Watcher, Notifier, NotifyEvent};
 pub use openclaw::OpenclawNotifier;
 pub use dedup_key::{generate_dedup_key, normalize_terminal_content};
 pub use system_event::SystemEventPayload;
-pub use webhook::{WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse};
+pub use webhook::{WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse, load_webhook_config_from_file};

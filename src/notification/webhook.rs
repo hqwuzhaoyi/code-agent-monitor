@@ -27,6 +27,40 @@ impl Default for WebhookConfig {
     }
 }
 
+/// 从配置文件加载 webhook 配置
+/// 配置文件路径: ~/.config/code-agent-monitor/config.json
+pub fn load_webhook_config_from_file() -> Option<WebhookConfig> {
+    use std::fs;
+
+    let config_path = dirs::home_dir()?
+        .join(".config")
+        .join("code-agent-monitor")
+        .join("config.json");
+
+    if !config_path.exists() {
+        return None;
+    }
+
+    let content = fs::read_to_string(&config_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+
+    let webhook = json.get("webhook")?;
+
+    Some(WebhookConfig {
+        gateway_url: webhook.get("gateway_url")
+            .and_then(|v| v.as_str())
+            .unwrap_or("http://localhost:18789")
+            .to_string(),
+        hook_token: webhook.get("hook_token")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .to_string(),
+        timeout_secs: webhook.get("timeout_secs")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(30),
+    })
+}
+
 /// Webhook 请求载荷
 #[derive(Debug, Serialize)]
 pub struct WebhookPayload {
