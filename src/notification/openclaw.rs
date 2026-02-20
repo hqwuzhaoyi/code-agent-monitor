@@ -358,12 +358,45 @@ impl OpenclawNotifier {
     }
 
     /// 通过 Webhook 发送通知 (推荐方案)
-    /// 注意: 需要在配置时传入 owned 的 webhook client
-    fn send_via_webhook(&self, payload: &serde_json::Value) -> Result<()> {
-        // Webhook 发送是异步的，这里只记录日志
-        // 实际发送由调用方配置 async runtime
-        info!(payload = %payload, "Would send via webhook");
-        Ok(())
+    fn send_via_webhook(&self, payload: &serde_json::Value) -> anyhow::Result<()> {
+        if let Some(ref client) = self.webhook_client {
+            // 从 payload 中提取消息内容
+            let message = payload.get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Agent notification")
+                .to_string();
+
+            let agent_id = payload.get("agent_id")
+                .and_then(|m| m.as_str())
+                .map(String::from);
+
+            let agent_id_for_log = agent_id.clone();
+
+            // 使用阻塞版本发送（避免在 async runtime 中创建新 runtime）
+            let result = client.send_notification_blocking(
+                message,
+                agent_id,
+                None, // channel
+                None, // to
+            );
+
+            match result {
+                Ok(resp) => {
+                    if resp.ok {
+                        info!(agent_id = ?agent_id_for_log, "Webhook notification sent successfully");
+                        Ok(())
+                    } else {
+                        anyhow::bail!("Webhook failed: {:?}", resp.error)
+                    }
+                }
+                Err(e) => {
+                    error!(error = %e, "Failed to send webhook notification");
+                    anyhow::bail!("Webhook error: {}", e)
+                }
+            }
+        } else {
+            anyhow::bail!("Webhook client not configured")
+        }
     }
 }
 

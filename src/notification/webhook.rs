@@ -116,6 +116,53 @@ impl WebhookClient {
         Ok(Self { client, config })
     }
 
+    /// 发送通知到 OpenClaw Gateway (同步阻塞版本)
+    pub fn send_notification_blocking(
+        &self,
+        message: String,
+        agent_id: Option<String>,
+        channel: Option<String>,
+        to: Option<String>,
+    ) -> Result<WebhookResponse, String> {
+        use std::time::Duration;
+
+        let url = format!("{}/hooks/agent", self.config.gateway_url);
+
+        let payload = WebhookPayload {
+            message,
+            name: Some("CAM".to_string()),
+            agent_id,
+            wake_mode: Some("now".to_string()),
+            deliver: Some(true),
+            channel,
+            to,
+        };
+
+        // 使用 blocking client
+        let blocking_client = reqwest::blocking::Client::builder()
+            .timeout(Duration::from_secs(self.config.timeout_secs))
+            .build()
+            .map_err(|e| format!("Failed to create blocking client: {}", e))?;
+
+        let response = blocking_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", self.config.hook_token))
+            .header("Content-Type", "application/json")
+            .json(&payload)
+            .send()
+            .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        let webhook_response: WebhookResponse = response
+            .json()
+            .map_err(|e| format!("Failed to parse response: {}", e))?;
+
+        if webhook_response.ok {
+            Ok(webhook_response)
+        } else {
+            Err(webhook_response.error.unwrap_or_else(|| "Unknown error".to_string()))
+        }
+    }
+
     /// 发送通知到 OpenClaw Gateway
     ///
     /// # Arguments
