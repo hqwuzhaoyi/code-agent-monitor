@@ -194,7 +194,7 @@ pub fn assess_status_detection(status: &AgentStatus, snapshot: &str) -> QualityA
                 assessment = assessment.with_issue("快照有等待提示符但 AI 判断为处理中", 0.4);
             }
         }
-        AgentStatus::WaitingForInput => {
+        AgentStatus::WaitingForInput | AgentStatus::DecisionRequired => {
             // 等待输入状态应该有提示符或问题
             let waiting_hints = [">", "❯", "?", "？", "[Y/n]", "[y/N]"];
             let has_hint = waiting_hints.iter().any(|h| snapshot.contains(h));

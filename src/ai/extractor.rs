@@ -10,9 +10,28 @@ use crate::ai::quality::{assess_question_extraction, assess_status_detection, th
 use crate::ai::types::{NotificationContent, QuestionType};
 use crate::agent::manager::AgentStatus;
 use crate::infra::terminal::truncate_for_status;
+use crate::notification::webhook::{load_webhook_config_from_file, WebhookClient};
 
 /// 内容提取超时（毫秒）- 10 秒（本地代理可能需要更长时间）
 const EXTRACT_TIMEOUT_MS: u64 = 10000;
+
+/// 发送 AI 检测失败 webhook 通知
+fn send_ai_error_webhook(error_message: &str) {
+    if let Some(config) = load_webhook_config_from_file() {
+        if let Ok(client) = WebhookClient::new(config) {
+            let message = format!("⚠️ AI 状态检测失败: {}", error_message);
+            match client.send_notification_blocking(
+                message,
+                Some("ai-detector".to_string()),
+                None,
+                None,
+            ) {
+                Ok(_) => debug!("AI error webhook notification sent successfully"),
+                Err(e) => warn!(error = %e, "Failed to send AI error webhook notification"),
+            }
+        }
+    }
+}
 
 // ============================================================================
 // 通知内容提取
@@ -444,7 +463,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
     // 创建带 3 秒超时的客户端
     let config = match AnthropicConfig::auto_load() {
         Ok(c) => AnthropicConfig {
-            timeout_ms: 3000,
+            timeout_ms: 15000,
             max_tokens: 50, // 只需要简短回答
             ..c
         },
@@ -465,7 +484,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
     // 只取最后 N 行，减少 token 消耗
     let last_lines = truncate_for_status(terminal_snapshot);
 
-    let system = "你是一个终端状态分析专家。判断 AI 编码助手（如 Claude Code、Codex、OpenCode）的当前状态。只回答 PROCESSING 或 WAITING，不要其他内容。";
+    let system = "你是一个终端状态分析专家。判断 AI 编码助手的状态。只回答 PROCESSING、WAITING 或 DECISION，不要其他内容。";
 
     let prompt = format!(
         r#"分析以下终端输出，判断 AI 编码助手的状态：
@@ -482,50 +501,71 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
   * 括号内的运行提示（如 (running stop hook)、(executing)、(loading) 等）
   * 旋转动画字符（✢✻✶✽◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
   * 进度条或百分比指示器
-- WAITING: 如果看到空闲提示符（如 >、❯、$）或问题/选项等待用户输入
-- 注意：⏺ 符号是输出块标记，不是处理中指示器。如果终端显示完成信息（如"已完成"、"成功"）后跟空闲提示符，应判断为 WAITING
+- DECISION: 如果终端在等待用户做关键决策，包括：
+  * 询问"你倾向哪个方向"、"哪个方案"、"偏好"
+  * 询问技术栈选择（如 React、Vue、纯 HTML 等）
+  * 询问 UI 风格、设计方案
+  * 询问架构选择或技术决策
+  * 任何需要用户做方向性、策略性、关键性选择的问题
+  * 包含 A) B) C) 或 1. 2. 3. 且涉及方向/方案/偏好选择的
+- WAITING: 其他等待用户输入的情况，包括：
+  * 简单的是/否问题 [Y/n]
+  * 普通的确认提示
+  * 权限请求
+  * 简单的输入
 
-只回答一个词：PROCESSING 或 WAITING"#
+重要：直接回答 PROCESSING、WAITING 或 DECISION。只要终端最后需要用户做关键决策（方向、方案、技术选择等），必须回答 DECISION"#
     );
 
     let response = match client.complete(&prompt, Some(system)) {
         Ok(r) => r,
         Err(e) => {
             warn!(error = %e, "Haiku API call failed for is_agent_processing");
+            // 发送 webhook 通知 API 失败
+            send_ai_error_webhook(&e.to_string());
             return AgentStatus::Unknown;
         }
     };
 
     let elapsed = start.elapsed();
     debug!(elapsed_ms = elapsed.as_millis(), response = %response.trim(), "is_agent_processing completed");
+    
+    // 记录完整的 AI 响应以便调试
+    let response_trimmed = response.trim();
+    info!(ai_response = %response_trimmed, "AI status detection result");
 
+    // 完全信任 AI 的判断 - 看 AI 返回的是 WAITING、PROCESSING 还是 DECISION
     let response_upper = response.trim().to_uppercase();
-    let status = if response_upper.contains("PROCESSING") {
-        AgentStatus::Processing
+    
+    let status = if response_upper.contains("DECISION") {
+        AgentStatus::DecisionRequired
     } else if response_upper.contains("WAITING") {
         AgentStatus::WaitingForInput
+    } else if response_upper.contains("PROCESSING") {
+        AgentStatus::Processing
     } else {
-        warn!(response = %response, "Unexpected response from is_agent_processing");
+        // AI 返回了其他内容，记录警告并返回 Unknown
+        warn!(response = %response, "AI did not return WAITING, PROCESSING or DECISION");
         AgentStatus::Unknown
     };
 
-    // 评估状态检测质量
+    // 评估状态检测质量 - 如果置信度太低，记录警告但仍然返回检测到的状态
     let assessment = assess_status_detection(&status, terminal_snapshot);
     if assessment.confidence < thresholds::LOW {
         warn!(
             confidence = assessment.confidence,
             issues = ?assessment.issues,
             detected_status = ?status,
-            "Status detection quality below LOW threshold, returning Unknown"
+            "Status detection quality below LOW threshold, but still returning detected status"
         );
-        return AgentStatus::Unknown;
+        // 不返回 Unknown，而是返回检测到的状态
+    } else {
+        debug!(
+            confidence = assessment.confidence,
+            status = ?status,
+            "Status detection quality assessment passed"
+        );
     }
-
-    debug!(
-        confidence = assessment.confidence,
-        status = ?status,
-        "Status detection quality assessment passed"
-    );
 
     status
 }
@@ -548,7 +588,7 @@ pub fn detect_waiting_question(terminal_snapshot: &str) -> Option<NotificationCo
         AgentStatus::Unknown => {
             // 不确定状态，继续尝试提取问题
         }
-        AgentStatus::WaitingForInput => {
+        AgentStatus::WaitingForInput | AgentStatus::DecisionRequired => {
             // 确认在等待输入，继续提取问题
         }
     }

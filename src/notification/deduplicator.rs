@@ -55,8 +55,7 @@ pub struct NotificationDeduplicator {
     locks: HashMap<String, NotificationLock>,
     /// 是否启用持久化
     persist: bool,
-    /// 自定义状态文件路径（用于测试）
-    #[cfg(test)]
+    /// 自定义状态文件路径
     custom_state_path: Option<PathBuf>,
 }
 
@@ -73,15 +72,13 @@ impl NotificationDeduplicator {
         let mut dedup = Self {
             locks: HashMap::new(),
             persist: true,
-            #[cfg(test)]
             custom_state_path: None,
         };
         dedup.load_state();
         dedup
     }
 
-    /// 创建不持久化的去重器（用于测试）
-    #[cfg(test)]
+    /// 创建不持久化的去重器
     pub fn new_without_persistence() -> Self {
         Self {
             locks: HashMap::new(),

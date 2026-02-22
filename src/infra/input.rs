@@ -15,6 +15,8 @@ use crate::infra::terminal::truncate_for_status;
 pub struct InputWaitResult {
     /// 是否在等待输入
     pub is_waiting: bool,
+    /// 是否需要关键决策（AI 判断）
+    pub is_decision_required: bool,
     /// 匹配到的模式类型
     pub pattern_type: Option<InputWaitPattern>,
     /// 终端输出的最后几行（上下文）
@@ -106,6 +108,7 @@ impl InputWaitDetector {
         if !is_idle {
             return InputWaitResult {
                 is_waiting: false,
+                is_decision_required: false,
                 pattern_type: None,
                 context: String::new(),
             };
@@ -123,18 +126,27 @@ impl InputWaitDetector {
         let context = truncate_for_status(output);
 
         match is_agent_processing(&context) {
+            AgentStatus::DecisionRequired => InputWaitResult {
+                is_waiting: true,
+                is_decision_required: true,
+                pattern_type: Some(InputWaitPattern::Other),
+                context,
+            },
             AgentStatus::WaitingForInput => InputWaitResult {
                 is_waiting: true,
+                is_decision_required: false,
                 pattern_type: Some(InputWaitPattern::Other),
                 context,
             },
             AgentStatus::Processing | AgentStatus::Running => InputWaitResult {
                 is_waiting: false,
+                is_decision_required: false,
                 pattern_type: None,
                 context,
             },
             AgentStatus::Unknown => InputWaitResult {
                 is_waiting: false,
+                is_decision_required: false,
                 pattern_type: Some(InputWaitPattern::Unknown),
                 context,
             },
@@ -213,11 +225,13 @@ mod tests {
     fn test_input_wait_result_clone() {
         let result = InputWaitResult {
             is_waiting: true,
+            is_decision_required: false,
             pattern_type: Some(InputWaitPattern::Other),
             context: "test context".to_string(),
         };
         let cloned = result.clone();
         assert_eq!(cloned.is_waiting, result.is_waiting);
+        assert_eq!(cloned.is_decision_required, result.is_decision_required);
         assert_eq!(cloned.pattern_type, result.pattern_type);
         assert_eq!(cloned.context, result.context);
     }

@@ -66,6 +66,8 @@ pub enum AgentStatus {
     Processing,
     /// 等待输入 - agent 空闲，等待用户响应
     WaitingForInput,
+    /// 等待输入且需要关键决策 - 需要用户做重要决定
+    DecisionRequired,
     /// 未知 - 无法确定状态
     Unknown,
     /// 运行中 - 兼容旧数据，等同于 Processing
@@ -82,7 +84,7 @@ impl Default for AgentStatus {
 impl AgentStatus {
     /// 是否应该发送通知
     pub fn should_notify(&self) -> bool {
-        matches!(self, Self::WaitingForInput | Self::Unknown)
+        matches!(self, Self::WaitingForInput | Self::DecisionRequired | Self::Unknown)
     }
 
     /// 获取 TUI 显示图标
@@ -90,6 +92,7 @@ impl AgentStatus {
         match self {
             Self::Processing | Self::Running => "🟢",
             Self::WaitingForInput => "🟡",
+            Self::DecisionRequired => "⚠️",
             Self::Unknown => "❓",
         }
     }
@@ -101,7 +104,7 @@ impl AgentStatus {
 
     /// 是否在等待输入
     pub fn is_waiting(&self) -> bool {
-        matches!(self, Self::WaitingForInput)
+        matches!(self, Self::WaitingForInput | Self::DecisionRequired)
     }
 }
 

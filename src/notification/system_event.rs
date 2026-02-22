@@ -43,6 +43,7 @@ pub enum EventData {
     },
     WaitingForInput {
         pattern_type: String,
+        is_decision_required: bool,
     },
     Notification {
         notification_type: String,
@@ -118,9 +119,10 @@ impl SystemEventPayload {
                     tool_input: tool_input.clone(),
                 }
             }
-            NotificationEventType::WaitingForInput { pattern_type } => {
+            NotificationEventType::WaitingForInput { pattern_type, is_decision_required } => {
                 EventData::WaitingForInput {
                     pattern_type: pattern_type.clone(),
+                    is_decision_required: *is_decision_required,
                 }
             }
             NotificationEventType::Notification { notification_type, message } => {
@@ -142,6 +144,15 @@ impl SystemEventPayload {
             NotificationEventType::PermissionRequest { tool_name, tool_input } => {
                 let input_str = tool_input.to_string();
                 assess_risk_level(tool_name, &input_str).to_string()
+            }
+            // WaitingForInput 需要用户交互
+            // 如果是需要关键决策，设为 HIGH
+            NotificationEventType::WaitingForInput { is_decision_required, .. } => {
+                if *is_decision_required {
+                    "HIGH".to_string()
+                } else {
+                    "MEDIUM".to_string()
+                }
             }
             _ => "LOW".to_string(),
         };
@@ -165,6 +176,77 @@ impl SystemEventPayload {
     /// 转换为 JSON Value
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
+    }
+
+    /// 转换为 Telegram 消息格式
+    pub fn to_telegram_message(&self) -> String {
+        let emoji = match self.urgency.as_str() {
+            "HIGH" => "⚠️",
+            "MEDIUM" => "💬",
+            _ => "ℹ️",
+        };
+
+        let event_desc = match self.event_type.as_str() {
+            "permission_request" => {
+                if let EventData::PermissionRequest { tool_name, tool_input } = &self.event_data {
+                    let cmd = tool_input.get("command")
+                        .or_else(|| tool_input.get("file_path"))
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("unknown");
+                    format!("执行: {} {}", tool_name, cmd)
+                } else {
+                    "请求权限".to_string()
+                }
+            }
+            "waiting_for_input" => {
+                // Show the question/options from terminal_snapshot if available
+                if let Some(snapshot) = &self.context.terminal_snapshot {
+                    let preview = if snapshot.len() > 200 {
+                        format!("{}...", &snapshot[..200])
+                    } else {
+                        snapshot.clone()
+                    };
+                    format!("等待输入\n\n{}", preview)
+                } else {
+                    "等待输入".to_string()
+                }
+            }
+            "notification" => {
+                // Show the actual notification message
+                if let EventData::Notification { message, notification_type } = &self.event_data {
+                    format!("{}: {}", notification_type, message)
+                } else {
+                    "通知".to_string()
+                }
+            }
+            "error" => {
+                if let EventData::Error { message } = &self.event_data {
+                    format!("错误: {}", message)
+                } else {
+                    "发生错误".to_string()
+                }
+            }
+            "agent_exited" => "Agent 已退出".to_string(),
+            _ => self.event_type.clone(),
+        };
+
+        let risk = self.context.risk_level.as_str();
+
+        let risk_emoji = match risk {
+            "HIGH" => "🔴",
+            "MEDIUM" => "🟡",
+            "LOW" => "🟢",
+            _ => "⚪",
+        };
+
+        format!(
+            "{} *CAM* {}\n\n{}\n\n风险: {} {}\n\n回复 y 允许 / n 拒绝",
+            emoji,
+            self.agent_id,
+            event_desc,
+            risk_emoji,
+            risk
+        )
     }
 }
 

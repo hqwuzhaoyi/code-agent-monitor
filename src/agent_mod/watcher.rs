@@ -53,6 +53,8 @@ pub enum WatchEvent {
         context: String,
         /// 去重键（由 watcher 生成，用于跨进程一致性）
         dedup_key: String,
+        /// 是否需要关键决策
+        is_decision_required: bool,
     },
     /// Agent 恢复运行（从等待状态）
     AgentResumed {
@@ -186,7 +188,7 @@ impl AgentWatcher {
             tmux: TmuxManager::new(),
             input_detector: InputWaitDetector::new(),
             jsonl_parsers: HashMap::new(),
-            deduplicator: NotificationDeduplicator::new(),
+            deduplicator: NotificationDeduplicator::new_without_persistence(),
             last_waiting_state: HashMap::new(),
             stability_states: HashMap::new(),
             hook_tracker: HookEventTracker::default(),
@@ -481,6 +483,7 @@ impl AgentWatcher {
                             info!(
                                 agent_id = %agent_id,
                                 pattern_type = %pattern_type,
+                                is_decision_required = wait_result.is_decision_required,
                                 "Agent waiting for input, sending notification"
                             );
 
@@ -489,6 +492,7 @@ impl AgentWatcher {
                                 pattern_type,
                                 context: wait_result.context.clone(),
                                 dedup_key: dedup_key.clone(),
+                                is_decision_required: wait_result.is_decision_required,
                             });
                         }
                         NotifyAction::SendReminder => {
@@ -500,6 +504,7 @@ impl AgentWatcher {
                             info!(
                                 agent_id = %agent_id,
                                 pattern_type = %pattern_type,
+                                is_decision_required = wait_result.is_decision_required,
                                 "Agent still waiting, sending reminder"
                             );
 
@@ -508,6 +513,7 @@ impl AgentWatcher {
                                 pattern_type: format!("{} (提醒)", pattern_type),
                                 context: wait_result.context.clone(),
                                 dedup_key: dedup_key.clone(),
+                                is_decision_required: wait_result.is_decision_required,
                             });
                         }
                         NotifyAction::Suppressed(reason) => {
@@ -671,13 +677,14 @@ pub fn format_watch_event(event: &WatchEvent) -> String {
             };
             format!("❌ {} 错误: {}", agent_id, preview)
         }
-        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key } => {
+        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required } => {
             let preview = if context.len() > 200 {
                 format!("{}...", &context[..197])
             } else {
                 context.clone()
             };
-            format!("⏸️ {} 等待输入 ({}) [key:{}]:\n{}", agent_id, pattern_type, &dedup_key[..8.min(dedup_key.len())], preview)
+            let decision_mark = if *is_decision_required { "⚠️" } else { "" };
+            format!("⏸️ {} 等待输入 ({}){} [key:{}]:\n{}", agent_id, pattern_type, decision_mark, &dedup_key[..8.min(dedup_key.len())], preview)
         }
         WatchEvent::AgentResumed { agent_id } => {
             format!("▶️ {} 继续执行", agent_id)
@@ -720,6 +727,7 @@ mod tests {
         let event = WatchEvent::WaitingForInput {
             agent_id: "cam-123".to_string(),
             pattern_type: "Confirmation".to_string(),
+            is_decision_required: false,
             context: "Continue? [Y/n]".to_string(),
             dedup_key: "abc12345".to_string(),
         };

@@ -27,8 +27,8 @@ use std::sync::Mutex;
 /// Used when terminal_snapshot is not available
 fn event_type_to_string(event_type: &NotificationEventType) -> String {
     match event_type {
-        NotificationEventType::WaitingForInput { pattern_type } => {
-            format!("waiting_for_input:{}", pattern_type)
+        NotificationEventType::WaitingForInput { pattern_type, is_decision_required } => {
+            format!("waiting_for_input:{}:{}", pattern_type, is_decision_required)
         }
         NotificationEventType::PermissionRequest { tool_name, .. } => {
             format!("permission_request:{}", tool_name)
@@ -360,11 +360,24 @@ impl OpenclawNotifier {
     /// 通过 Webhook 发送通知 (推荐方案)
     fn send_via_webhook(&self, payload: &serde_json::Value) -> anyhow::Result<()> {
         if let Some(ref client) = self.webhook_client {
-            // 从 payload 中提取消息内容
-            let message = payload.get("message")
-                .and_then(|m| m.as_str())
-                .unwrap_or("Agent notification")
-                .to_string();
+            // 从 payload 中提取消息内容，优先使用格式化消息
+            let message = if payload.get("event_type").is_some() {
+                // 这是 SystemEventPayload 格式，使用格式化消息
+                use crate::notification::system_event::SystemEventPayload;
+                if let Ok(sep) = serde_json::from_value::<SystemEventPayload>(payload.clone()) {
+                    sep.to_telegram_message()
+                } else {
+                    payload.get("message")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("Agent notification")
+                        .to_string()
+                }
+            } else {
+                payload.get("message")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("Agent notification")
+                    .to_string()
+            };
 
             let agent_id = payload.get("agent_id")
                 .and_then(|m| m.as_str())
@@ -695,6 +708,7 @@ $ cargo build
             "cam-test".to_string(),
             NotificationEventType::WaitingForInput {
                 pattern_type: "Confirmation".to_string(),
+                is_decision_required: false,
             },
         )
         .with_terminal_snapshot("Some terminal content")

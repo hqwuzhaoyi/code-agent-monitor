@@ -20,6 +20,7 @@ pub fn is_processing(content: &str) -> bool {
     match is_agent_processing(content) {
         AgentStatus::Processing | AgentStatus::Running => true,
         AgentStatus::WaitingForInput => false,
+        AgentStatus::DecisionRequired => false,
         AgentStatus::Unknown => false, // API 失败时默认发送通知
     }
 }

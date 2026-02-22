@@ -278,6 +278,18 @@ fn record_hook_event(agent_id: &str) -> Result<()> {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // 清除代理环境变量，避免 API 请求超时
+    use std::env;
+    env::remove_var("HTTP_PROXY");
+    env::remove_var("HTTPS_PROXY");
+    env::remove_var("http_proxy");
+    env::remove_var("https_proxy");
+    env::remove_var("ALL_PROXY");
+    env::remove_var("all_proxy");
+    // 设置 NO_PROXY 绕过所有代理
+    env::set_var("NO_PROXY", "*");
+    env::set_var("no_proxy", "*");
+    
     // 初始化 tracing 日志系统
     // 通过 RUST_LOG 环境变量控制日志级别，默认为 info
     // 例如: RUST_LOG=debug cam watch-daemon
@@ -495,10 +507,11 @@ async fn main() -> Result<()> {
                                 Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
                             }
                         }
-                        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key } => {
+                        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required } => {
                             info!(
                                 agent_id = %agent_id,
                                 pattern_type = %pattern_type,
+                                is_decision_required = is_decision_required,
                                 context_len = context.len(),
                                 "Waiting for input detected, sending notification"
                             );
@@ -509,7 +522,7 @@ async fn main() -> Result<()> {
                                 .flatten()
                                 .map(|a| a.project_path)
                                 .unwrap_or_default();
-                            let notification_event = NotificationEvent::waiting_for_input(agent_id, pattern_type)
+                            let notification_event = NotificationEvent::waiting_for_input_with_decision(agent_id, pattern_type, *is_decision_required)
                                 .with_project_path(project_path)
                                 .with_terminal_snapshot(context.clone())
                                 .with_dedup_key(dedup_key.clone());
@@ -713,6 +726,7 @@ async fn main() -> Result<()> {
                 let event_type = match event.as_str() {
                     "WaitingForInput" => NotificationEventType::WaitingForInput {
                         pattern_type: "unknown".to_string(),
+                        is_decision_required: false,
                     },
                     "permission_request" => {
                         let tool_name = json.as_ref()

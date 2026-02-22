@@ -30,6 +30,8 @@ pub enum NotificationEventType {
     /// 等待用户输入（Watcher 检测）
     WaitingForInput {
         pattern_type: String,
+        /// 是否需要关键决策
+        is_decision_required: bool,
     },
     /// 权限请求
     PermissionRequest {
@@ -162,10 +164,20 @@ impl NotificationEventBuilder {
 impl NotificationEvent {
     /// 创建等待输入事件
     pub fn waiting_for_input(agent_id: impl Into<String>, pattern_type: impl Into<String>) -> Self {
+        Self::waiting_for_input_with_decision(agent_id, pattern_type, false)
+    }
+
+    /// 创建等待输入事件（带决策标记）
+    pub fn waiting_for_input_with_decision(
+        agent_id: impl Into<String>,
+        pattern_type: impl Into<String>,
+        is_decision_required: bool,
+    ) -> Self {
         Self::new(
             agent_id,
             NotificationEventType::WaitingForInput {
                 pattern_type: pattern_type.into(),
+                is_decision_required,
             },
         )
     }
@@ -259,6 +271,7 @@ mod tests {
             "cam-123",
             NotificationEventType::WaitingForInput {
                 pattern_type: "Confirmation".to_string(),
+                is_decision_required: false,
             },
         );
 
@@ -274,8 +287,9 @@ mod tests {
         let event = NotificationEvent::waiting_for_input("cam-456", "ClaudePrompt");
 
         assert_eq!(event.agent_id, "cam-456");
-        if let NotificationEventType::WaitingForInput { pattern_type } = &event.event_type {
+        if let NotificationEventType::WaitingForInput { pattern_type, is_decision_required } = &event.event_type {
             assert_eq!(pattern_type, "ClaudePrompt");
+            assert!(!is_decision_required);
         } else {
             panic!("Expected WaitingForInput event type");
         }
@@ -467,6 +481,7 @@ mod tests {
     fn test_event_type_serialization() {
         let event_type = NotificationEventType::WaitingForInput {
             pattern_type: "Confirmation".to_string(),
+            is_decision_required: false,
         };
 
         let json = serde_json::to_string(&event_type).unwrap();
