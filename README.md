@@ -76,6 +76,9 @@ cam serve
 # Start background watcher daemon
 cam watch-daemon -i 3
 
+# Manually trigger watcher detection and send notification
+cam watch-trigger --agent-id <agent_id> [--force] [--no-dedup]
+
 # Launch TUI dashboard
 cam tui
 ```

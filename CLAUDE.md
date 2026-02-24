@@ -27,6 +27,11 @@ cam team-shutdown <team>          # 关闭 Team
 # 快捷回复
 cam pending-confirmations         # 查看待处理
 cam reply y                       # 批准
+
+# 手动触发检测
+cam watch-trigger --agent-id <id>           # 触发检测并发送通知
+cam watch-trigger --agent-id <id> --force   # 强制发送（绕过 AI 检测）
+cam watch-trigger --agent-id <id> --no-dedup # 跳过去重
 ```
 
 ### 构建和更新
@@ -60,6 +65,21 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 | HIGH | permission_request, Error, WaitingForInput | 立即发送 |
 | MEDIUM | AgentExited, idle_prompt | 发送 |
 | LOW | session_start, stop | 静默 |
+
+需要回复的事件（permission_request, waiting_for_input）走 system event CLI 以支持 `cam reply`，其他事件优先走 webhook。
+
+**历史背景**：最初全部使用 system event CLI，但 `openclaw system event --mode now` 触发了 bug #14527（HEARTBEAT.md 为空时事件被跳过），因此改为 webhook 直连 `POST /hooks/agent`。需要回复的事件仍需走 system event 以支持交互。
+
+**回复链路**：
+```
+1. CAM 发送 system event → Gateway → 通知到 OpenClaw 对话
+2. 用户在 OpenClaw 对话中回复（如 "y"）
+3. OpenClaw 的 CAM skill 解析回复，调用 cam reply y
+4. cam reply 读取 conversation_state.json 找到待处理的 agent
+5. 通过 tmux send-keys 发送到对应 session
+```
+
+Webhook 不经过 OpenClaw 对话，CAM skill 无法介入处理回复，所以需要回复的事件必须走 system event。
 
 ### 会话类型
 
