@@ -13,7 +13,7 @@ use code_agent_monitor::{
     TeamBridge, InboxMessage, TeamOrchestrator,
     ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
     NotificationEvent, NotificationEventType,
-    cli::CodexNotifyArgs,
+    cli::{CodexNotifyArgs, SetupArgs},
 };
 use anyhow::Result;
 
@@ -122,6 +122,8 @@ enum Commands {
     },
     /// 接收 Codex CLI notify 事件
     CodexNotify(CodexNotifyArgs),
+    /// 配置 CAM hooks
+    Setup(SetupArgs),
     /// 列出所有 Claude Code Agent Teams
     Teams {
         /// 输出 JSON 格式
@@ -895,6 +897,9 @@ async fn main() -> Result<()> {
         }
         Commands::CodexNotify(args) => {
             code_agent_monitor::cli::handle_codex_notify(args).await?;
+        }
+        Commands::Setup(args) => {
+            code_agent_monitor::cli::handle_setup(args)?;
         }
         Commands::Teams { json } => {
             let teams = discover_teams();
