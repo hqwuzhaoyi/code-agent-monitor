@@ -21,7 +21,7 @@ impl GenericAdapter {
         let command = match &agent_type {
             AgentType::GeminiCli => "gemini".to_string(),
             AgentType::MistralVibe => "vibe".to_string(),
-            AgentType::Mock => "echo".to_string(),
+            AgentType::Mock => "sleep 3600".to_string(),  // 测试用，保持 session 存活
             _ => "echo".to_string(),
         };
         Self { agent_type, command }

@@ -8,6 +8,7 @@
 use crate::agent::{AgentManager, AgentRecord};
 use crate::agent::manager::AgentStatus;
 use crate::agent::monitor::AgentMonitor;
+use crate::agent::adapter::{get_adapter, DetectionStrategy};
 use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
@@ -181,6 +182,8 @@ impl AgentWatcher {
     const STABILITY_THRESHOLD_SECS: u64 = 6;
     /// Hook quiet period - skip AI check if hook event within this window (seconds)
     const HOOK_QUIET_PERIOD_SECS: u64 = 10;
+    /// Hook inactive threshold - consider hooks inactive if no event for this duration (seconds)
+    const HOOK_INACTIVE_THRESHOLD_SECS: u64 = 300; // 5 minutes
 
     /// 创建新的监控器
     pub fn new() -> Self {
@@ -319,6 +322,31 @@ impl AgentWatcher {
                     }
                 }
             }
+        }
+    }
+
+    /// Determine if polling should be performed for an agent based on DetectionStrategy
+    pub fn should_poll(&self, agent: &AgentRecord) -> bool {
+        let adapter = get_adapter(&agent.agent_type);
+        match adapter.detection_strategy() {
+            DetectionStrategy::HookOnly => {
+                // Only poll when hooks seem inactive (no hook event for 5 minutes)
+                self.hook_seems_inactive(agent)
+            }
+            DetectionStrategy::HookWithPolling | DetectionStrategy::PollingOnly => {
+                // Always poll
+                true
+            }
+        }
+    }
+
+    /// Check if hooks seem inactive for an agent (no hook event for threshold duration)
+    fn hook_seems_inactive(&self, agent: &AgentRecord) -> bool {
+        let now = Self::current_timestamp();
+        let last_hook = self.hook_tracker.last_hook_times.get(&agent.agent_id);
+        match last_hook {
+            Some(&time) => now.saturating_sub(time) > Self::HOOK_INACTIVE_THRESHOLD_SECS,
+            None => true, // No hook event recorded, consider inactive
         }
     }
 
@@ -931,5 +959,125 @@ mod tests {
         let state = StabilityState::new(12345, 1000);
         // 10 seconds stable, not checked, no recent hook - should check
         assert!(watcher.should_check_ai("agent-1", &state, 1010, false));
+    }
+
+    // === should_poll tests ===
+
+    #[test]
+    fn test_should_poll_hook_only_no_hook_events() {
+        use crate::agent::AgentType;
+
+        let watcher = AgentWatcher::new_for_test();
+        let agent = AgentRecord {
+            agent_id: "test-agent".to_string(),
+            agent_type: AgentType::Claude, // HookOnly strategy
+            tmux_session: "test-session".to_string(),
+            project_path: "/tmp".to_string(),
+            session_id: None,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            status: crate::agent::AgentStatus::Processing,
+        };
+
+        // No hook events recorded - should poll (hooks seem inactive)
+        assert!(watcher.should_poll(&agent));
+    }
+
+    #[test]
+    fn test_should_poll_hook_only_recent_hook() {
+        use crate::agent::AgentType;
+
+        let mut watcher = AgentWatcher::new_for_test();
+        let agent = AgentRecord {
+            agent_id: "test-agent".to_string(),
+            agent_type: AgentType::Claude, // HookOnly strategy
+            tmux_session: "test-session".to_string(),
+            project_path: "/tmp".to_string(),
+            session_id: None,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            status: crate::agent::AgentStatus::Processing,
+        };
+
+        // Record recent hook event
+        let now = AgentWatcher::current_timestamp();
+        watcher.hook_tracker.record_hook("test-agent", now);
+
+        // Recent hook event - should NOT poll (hooks are active)
+        assert!(!watcher.should_poll(&agent));
+    }
+
+    #[test]
+    fn test_should_poll_hook_only_old_hook() {
+        use crate::agent::AgentType;
+
+        let mut watcher = AgentWatcher::new_for_test();
+        let agent = AgentRecord {
+            agent_id: "test-agent".to_string(),
+            agent_type: AgentType::Claude, // HookOnly strategy
+            tmux_session: "test-session".to_string(),
+            project_path: "/tmp".to_string(),
+            session_id: None,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            status: crate::agent::AgentStatus::Processing,
+        };
+
+        // Record old hook event (more than 5 minutes ago)
+        let now = AgentWatcher::current_timestamp();
+        watcher.hook_tracker.record_hook("test-agent", now.saturating_sub(400)); // 400 seconds ago
+
+        // Old hook event - should poll (hooks seem inactive)
+        assert!(watcher.should_poll(&agent));
+    }
+
+    #[test]
+    fn test_should_poll_hook_with_polling_always() {
+        use crate::agent::AgentType;
+
+        let watcher = AgentWatcher::new_for_test();
+        let agent = AgentRecord {
+            agent_id: "test-agent".to_string(),
+            agent_type: AgentType::Codex, // HookWithPolling strategy
+            tmux_session: "test-session".to_string(),
+            project_path: "/tmp".to_string(),
+            session_id: None,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            status: crate::agent::AgentStatus::Processing,
+        };
+
+        // HookWithPolling - should always poll
+        assert!(watcher.should_poll(&agent));
+    }
+
+    #[test]
+    fn test_should_poll_polling_only_always() {
+        use crate::agent::AgentType;
+
+        let watcher = AgentWatcher::new_for_test();
+        let agent = AgentRecord {
+            agent_id: "test-agent".to_string(),
+            agent_type: AgentType::Unknown, // PollingOnly strategy (GenericAdapter)
+            tmux_session: "test-session".to_string(),
+            project_path: "/tmp".to_string(),
+            session_id: None,
+            jsonl_path: None,
+            jsonl_offset: 0,
+            last_output_hash: None,
+            started_at: "2024-01-01T00:00:00Z".to_string(),
+            status: crate::agent::AgentStatus::Processing,
+        };
+
+        // PollingOnly - should always poll
+        assert!(watcher.should_poll(&agent));
     }
 }
