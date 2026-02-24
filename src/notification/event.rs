@@ -21,6 +21,9 @@ pub struct NotificationEvent {
     pub timestamp: DateTime<Utc>,
     /// 去重键（由 watcher 生成，用于通知去重）
     pub dedup_key: Option<String>,
+    /// 跳过去重（强制发送）
+    #[serde(default)]
+    pub skip_dedup: bool,
 }
 
 /// 事件类型枚举
@@ -67,6 +70,7 @@ impl NotificationEvent {
             terminal_snapshot: None,
             timestamp: Utc::now(),
             dedup_key: None,
+            skip_dedup: false,
         }
     }
 
@@ -156,6 +160,7 @@ impl NotificationEventBuilder {
             terminal_snapshot: self.terminal_snapshot,
             timestamp: self.timestamp.unwrap_or_else(Utc::now),
             dedup_key: self.dedup_key,
+            skip_dedup: false,
         })
     }
 }
@@ -257,6 +262,12 @@ impl NotificationEvent {
     /// 设置去重键（链式调用）
     pub fn with_dedup_key(mut self, key: impl Into<String>) -> Self {
         self.dedup_key = Some(key.into());
+        self
+    }
+
+    /// 跳过去重（链式调用）
+    pub fn with_skip_dedup(mut self, skip: bool) -> Self {
+        self.skip_dedup = skip;
         self
     }
 }

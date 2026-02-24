@@ -287,7 +287,7 @@ impl OpenclawNotifier {
             generate_dedup_key(&fallback_content)
         };
 
-        {
+        if !event.skip_dedup {
             let mut dedup = self.deduplicator.lock().unwrap();
             let action = dedup.should_send(agent_id, &dedup_key);
             if let crate::notification::NotifyAction::Suppressed(reason) = action {
@@ -305,7 +305,12 @@ impl OpenclawNotifier {
             return Ok(SendResult::Sent);
         }
 
-        self.send_via_gateway_async(&payload.to_json())?;
+        if event.needs_reply() && self.webhook_client.is_some() {
+            // Reply-required events must go through system events so the CAM skill can respond.
+            self.send_via_gateway_async_no_webhook(&payload.to_json())?;
+        } else {
+            self.send_via_gateway_async(&payload.to_json())?;
+        }
 
         info!(
             agent_id = %agent_id,
@@ -336,6 +341,37 @@ impl OpenclawNotifier {
 
         // 使用 spawn() 发送，添加 --expect-final 等待 Agent 处理
         // 超时设置为 60 秒，足够 Agent 处理并发送通知
+        let child = Command::new(&self.openclaw_cmd)
+            .args([
+                "system", "event",
+                "--text", &payload_text,
+                "--mode", "now",
+                "--expect-final",
+                "--timeout", "60000",
+            ])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+
+        match child {
+            Ok(_) => Ok(()),
+            Err(e) => {
+                error!(error = %e, "Failed to spawn system event");
+                Err(e.into())
+            }
+        }
+    }
+
+    /// 发送 system event 到 Gateway（忽略 webhook）
+    fn send_via_gateway_async_no_webhook(&self, payload: &serde_json::Value) -> Result<()> {
+        if self.dry_run {
+            eprintln!("[DRY-RUN] Would send via system event");
+            eprintln!("[DRY-RUN] Payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
+            return Ok(());
+        }
+
+        let payload_text = payload.to_string();
+
         let child = Command::new(&self.openclaw_cmd)
             .args([
                 "system", "event",
