@@ -11,6 +11,7 @@ use crate::agent::monitor::AgentMonitor;
 use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
+use crate::infra::terminal::truncate_for_status;
 use crate::notification::{NotificationDeduplicator, NotifyAction, generate_dedup_key};
 // Import new watcher module for future migration
 use anyhow::Result;
@@ -547,6 +548,65 @@ impl AgentWatcher {
         }
 
         Ok(events)
+    }
+
+    /// 手动触发一次输入等待检测（不受稳定性/去重影响）
+    pub fn trigger_wait_check(&mut self, agent_id: &str, force_send: bool) -> Result<Option<WatchEvent>> {
+        let agent = match self.agent_manager.get_agent(agent_id)? {
+            Some(a) => a,
+            None => return Ok(None),
+        };
+
+        let output = match self.tmux.capture_pane(&agent.tmux_session, 50) {
+            Ok(out) => out,
+            Err(e) => return Err(e),
+        };
+
+        let wait_result = self.input_detector.detect_immediate(&output);
+        let new_status = if wait_result.is_waiting {
+            AgentStatus::WaitingForInput
+        } else if wait_result.pattern_type == Some(InputWaitPattern::Unknown) {
+            AgentStatus::Unknown
+        } else {
+            AgentStatus::Processing
+        };
+
+        if agent.status != new_status {
+            if let Err(e) = self.agent_manager.update_agent_status(agent_id, new_status) {
+                error!(agent_id = %agent_id, error = %e, "Failed to update agent status");
+            }
+        }
+
+        if !wait_result.is_waiting && !force_send {
+            return Ok(None);
+        }
+
+        let (context, pattern_type, is_decision_required) = if wait_result.is_waiting {
+            (
+                wait_result.context,
+                wait_result.pattern_type
+                    .as_ref()
+                    .map(|p| format!("{:?}", p))
+                    .unwrap_or_else(|| "Unknown".to_string()),
+                wait_result.is_decision_required,
+            )
+        } else {
+            let context = truncate_for_status(&output);
+            let is_decision_required = context.contains("Pick ")
+                || context.contains("选择")
+                || (context.contains("1.") && context.contains("2."));
+            (context, "ManualTrigger".to_string(), is_decision_required)
+        };
+
+        let dedup_key = generate_dedup_key(&context);
+
+        Ok(Some(WatchEvent::WaitingForInput {
+            agent_id: agent_id.to_string(),
+            pattern_type,
+            context,
+            dedup_key,
+            is_decision_required,
+        }))
     }
 
     /// 获取 agent 的当前状态快照

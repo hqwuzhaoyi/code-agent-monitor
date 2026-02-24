@@ -89,6 +89,18 @@ enum Commands {
         #[arg(long, short, default_value = "3")]
         interval: u64,
     },
+    /// 手动触发 watcher 检测并发送通知
+    WatchTrigger {
+        /// Agent ID
+        #[arg(long)]
+        agent_id: String,
+        /// 强制发送（绕过 AI 检测失败）
+        #[arg(long)]
+        force: bool,
+        /// 跳过去重（总是发送）
+        #[arg(long)]
+        no_dedup: bool,
+    },
     /// 接收 Claude Code Hook 通知（内部使用）
     Notify {
         /// 事件类型
@@ -544,6 +556,35 @@ async fn main() -> Result<()> {
                 }
 
                 sleep(Duration::from_secs(interval)).await;
+            }
+        }
+        Commands::WatchTrigger { agent_id, force, no_dedup } => {
+            let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
+                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                None => OpenclawNotifier::new(),
+            };
+            let mut watcher = AgentWatcher::new();
+            match watcher.trigger_wait_check(&agent_id, force)? {
+                Some(WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required }) => {
+                    let project_path = watcher.agent_manager()
+                        .get_agent(&agent_id)
+                        .ok()
+                        .flatten()
+                        .map(|a| a.project_path)
+                        .unwrap_or_default();
+                    let event = NotificationEvent::waiting_for_input_with_decision(&agent_id, &pattern_type, is_decision_required)
+                        .with_project_path(project_path)
+                        .with_terminal_snapshot(context)
+                        .with_dedup_key(dedup_key);
+                    let notification_event = if no_dedup { event.with_skip_dedup(true) } else { event };
+                    match notifier.send_notification_event(&notification_event) {
+                        Ok(result) => println!("Notification sent: {:?}", result),
+                        Err(e) => eprintln!("Notification failed: {}", e),
+                    }
+                }
+                _ => {
+                    println!("No waiting input detected for agent: {}", agent_id);
+                }
             }
         }
         #[allow(unused_variables)]
