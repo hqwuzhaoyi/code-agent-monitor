@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::agent::AgentType;
-use std::process::Command;
+use std::path::PathBuf;
 
 pub struct CodexAdapter;
 
@@ -20,6 +20,9 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
+        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
+        }
         format!("codex --resume {}", session_id)
     }
 
@@ -38,7 +41,10 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn paths(&self) -> AgentPaths {
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = dirs::home_dir().unwrap_or_else(|| {
+            tracing::warn!("Could not determine home directory, using current directory");
+            PathBuf::from(".")
+        });
         AgentPaths {
             config: Some(home.join(".codex/config.toml")),
             sessions: Some(home.join(".codex/sessions")),
@@ -47,11 +53,7 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn is_installed(&self) -> bool {
-        Command::new("which")
-            .arg("codex")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        which::which("codex").is_ok()
     }
 
     fn parse_hook_event(&self, payload: &str) -> Option<HookEvent> {
@@ -213,5 +215,28 @@ mod tests {
         assert!(adapter.detect_ready("Ready for input"));
         assert!(adapter.detect_ready("Some output\n> "));
         assert!(!adapter.detect_ready("Loading..."));
+    }
+
+    #[test]
+    fn test_get_resume_command_with_hyphen_underscore() {
+        let adapter = CodexAdapter;
+        assert_eq!(
+            adapter.get_resume_command("session-123_abc"),
+            "codex --resume session-123_abc"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_shell_injection() {
+        let adapter = CodexAdapter;
+        adapter.get_resume_command("abc; rm -rf /");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_spaces() {
+        let adapter = CodexAdapter;
+        adapter.get_resume_command("abc def");
     }
 }

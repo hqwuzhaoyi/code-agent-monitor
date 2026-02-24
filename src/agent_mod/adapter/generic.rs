@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::agent::AgentType;
-use std::process::Command;
 
 /// 通用适配器，用于未知或自定义 CLI
 pub struct GenericAdapter {
@@ -42,7 +41,12 @@ impl AgentAdapter for GenericAdapter {
         &self.command
     }
 
-    fn get_resume_command(&self, _session_id: &str) -> String {
+    fn get_resume_command(&self, session_id: &str) -> String {
+        // Validate session_id even though generic adapter doesn't use it,
+        // to maintain consistent security behavior across all adapters
+        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
+        }
         // 通用适配器不支持恢复会话，直接返回启动命令
         self.command.clone()
     }
@@ -70,11 +74,7 @@ impl AgentAdapter for GenericAdapter {
     }
 
     fn is_installed(&self) -> bool {
-        Command::new("which")
-            .arg(&self.command)
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        which::which(&self.command).is_ok()
     }
 
     fn parse_hook_event(&self, _payload: &str) -> Option<HookEvent> {
@@ -166,5 +166,25 @@ mod tests {
         let adapter = GenericAdapter::new(AgentType::GeminiCli);
         // 通用适配器不支持恢复，返回原始命令
         assert_eq!(adapter.get_resume_command("session-123"), "gemini");
+    }
+
+    #[test]
+    fn test_get_resume_command_with_hyphen_underscore() {
+        let adapter = GenericAdapter::new(AgentType::GeminiCli);
+        assert_eq!(adapter.get_resume_command("session-123_abc"), "gemini");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_shell_injection() {
+        let adapter = GenericAdapter::new(AgentType::GeminiCli);
+        adapter.get_resume_command("abc; rm -rf /");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_spaces() {
+        let adapter = GenericAdapter::new(AgentType::GeminiCli);
+        adapter.get_resume_command("abc def");
     }
 }

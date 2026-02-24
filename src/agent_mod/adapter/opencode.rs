@@ -6,7 +6,7 @@
 
 use super::*;
 use crate::agent::AgentType;
-use std::process::Command;
+use std::path::PathBuf;
 
 pub struct OpenCodeAdapter;
 
@@ -20,6 +20,9 @@ impl AgentAdapter for OpenCodeAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
+        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
+        }
         format!("opencode --session {}", session_id)
     }
 
@@ -46,7 +49,10 @@ impl AgentAdapter for OpenCodeAdapter {
     }
 
     fn paths(&self) -> AgentPaths {
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = dirs::home_dir().unwrap_or_else(|| {
+            tracing::warn!("Could not determine home directory, using current directory");
+            PathBuf::from(".")
+        });
         AgentPaths {
             config: Some(home.join(".config/opencode/opencode.json")),
             sessions: Some(home.join(".config/opencode/sessions")),
@@ -55,11 +61,7 @@ impl AgentAdapter for OpenCodeAdapter {
     }
 
     fn is_installed(&self) -> bool {
-        Command::new("which")
-            .arg("opencode")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        which::which("opencode").is_ok()
     }
 
     fn parse_hook_event(&self, payload: &str) -> Option<HookEvent> {
@@ -358,5 +360,28 @@ mod tests {
         assert!(adapter.detect_ready("Ready for input"));
         assert!(!adapter.detect_ready("Loading..."));
         assert!(!adapter.detect_ready(""));
+    }
+
+    #[test]
+    fn test_get_resume_command_with_hyphen_underscore() {
+        let adapter = OpenCodeAdapter;
+        assert_eq!(
+            adapter.get_resume_command("session-123_abc"),
+            "opencode --session session-123_abc"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_shell_injection() {
+        let adapter = OpenCodeAdapter;
+        adapter.get_resume_command("abc; rm -rf /");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_spaces() {
+        let adapter = OpenCodeAdapter;
+        adapter.get_resume_command("abc def");
     }
 }

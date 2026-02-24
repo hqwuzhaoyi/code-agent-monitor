@@ -8,6 +8,9 @@ use chrono::Local;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// 默认最大备份数量
+const DEFAULT_MAX_BACKUPS: usize = 5;
+
 /// 配置备份管理器
 pub struct BackupManager {
     /// 备份目录
@@ -20,11 +23,14 @@ impl BackupManager {
     /// 创建新的备份管理器
     pub fn new() -> Self {
         let backup_dir = dirs::config_dir()
-            .unwrap_or_else(|| PathBuf::from("."))
+            .unwrap_or_else(|| {
+                tracing::warn!("Could not determine config directory, using current directory");
+                PathBuf::from(".")
+            })
             .join("code-agent-monitor/backups");
         Self {
             backup_dir,
-            max_backups: 5,
+            max_backups: DEFAULT_MAX_BACKUPS,
         }
     }
 

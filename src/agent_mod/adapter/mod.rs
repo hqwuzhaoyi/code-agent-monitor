@@ -55,3 +55,51 @@ pub mod codex;
 pub mod opencode;
 pub mod generic;
 pub mod config_manager;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::agent::AgentType;
+
+    #[test]
+    fn test_get_adapter_claude() {
+        let adapter = get_adapter(&AgentType::Claude);
+        assert_eq!(adapter.agent_type(), AgentType::Claude);
+    }
+
+    #[test]
+    fn test_get_adapter_codex() {
+        let adapter = get_adapter(&AgentType::Codex);
+        assert_eq!(adapter.agent_type(), AgentType::Codex);
+    }
+
+    #[test]
+    fn test_get_adapter_opencode() {
+        let adapter = get_adapter(&AgentType::OpenCode);
+        assert_eq!(adapter.agent_type(), AgentType::OpenCode);
+    }
+
+    #[test]
+    fn test_get_adapter_gemini_cli() {
+        let adapter = get_adapter(&AgentType::GeminiCli);
+        assert_eq!(adapter.agent_type(), AgentType::GeminiCli);
+    }
+
+    #[test]
+    fn test_get_adapter_mistral_vibe() {
+        let adapter = get_adapter(&AgentType::MistralVibe);
+        assert_eq!(adapter.agent_type(), AgentType::MistralVibe);
+    }
+
+    #[test]
+    fn test_get_adapter_mock() {
+        let adapter = get_adapter(&AgentType::Mock);
+        assert_eq!(adapter.agent_type(), AgentType::Mock);
+    }
+
+    #[test]
+    fn test_get_adapter_unknown() {
+        let adapter = get_adapter(&AgentType::Unknown);
+        assert_eq!(adapter.agent_type(), AgentType::Unknown);
+    }
+}

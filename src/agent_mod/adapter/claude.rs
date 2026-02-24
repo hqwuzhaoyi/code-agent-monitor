@@ -3,7 +3,13 @@
 
 use super::*;
 use crate::agent::AgentType;
-use std::process::Command;
+use regex::Regex;
+use std::path::PathBuf;
+use std::sync::LazyLock;
+
+/// 静态编译的提示符正则表达式，避免每次调用都编译
+static PROMPT_RE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?m)^[❯>]\s*$").expect("Invalid prompt regex"));
 
 pub struct ClaudeAdapter;
 
@@ -17,6 +23,9 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
+        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
+        }
         format!("claude --resume {}", session_id)
     }
 
@@ -40,7 +49,10 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn paths(&self) -> AgentPaths {
-        let home = dirs::home_dir().unwrap_or_default();
+        let home = dirs::home_dir().unwrap_or_else(|| {
+            tracing::warn!("Could not determine home directory, using current directory");
+            PathBuf::from(".")
+        });
         AgentPaths {
             config: Some(home.join(".claude/settings.json")),
             sessions: Some(home.join(".claude/projects")),
@@ -49,11 +61,7 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn is_installed(&self) -> bool {
-        Command::new("which")
-            .arg("claude")
-            .output()
-            .map(|o| o.status.success())
-            .unwrap_or(false)
+        which::which("claude").is_ok()
     }
 
     fn parse_hook_event(&self, payload: &str) -> Option<HookEvent> {
@@ -110,8 +118,7 @@ impl AgentAdapter for ClaudeAdapter {
         // 1. 提示符 ❯ 或 > 在行首
         // 2. Welcome 消息
         // 3. Claude Code 标识
-        let prompt_re = regex::Regex::new(r"(?m)^[❯>]\s*$").unwrap();
-        prompt_re.is_match(terminal_output)
+        PROMPT_RE.is_match(terminal_output)
             || terminal_output.contains("Welcome to")
             || terminal_output.contains("Claude Code")
     }
@@ -257,5 +264,28 @@ mod tests {
         assert!(adapter.parse_hook_event("not json").is_none());
         assert!(adapter.parse_hook_event("{}").is_none());
         assert!(adapter.parse_hook_event(r#"{"event":"unknown"}"#).is_none());
+    }
+
+    #[test]
+    fn test_get_resume_command_with_hyphen_underscore() {
+        let adapter = ClaudeAdapter;
+        assert_eq!(
+            adapter.get_resume_command("session-123_abc"),
+            "claude --resume session-123_abc"
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_shell_injection() {
+        let adapter = ClaudeAdapter;
+        adapter.get_resume_command("abc; rm -rf /");
+    }
+
+    #[test]
+    #[should_panic(expected = "Invalid session_id format")]
+    fn test_get_resume_command_rejects_spaces() {
+        let adapter = ClaudeAdapter;
+        adapter.get_resume_command("abc def");
     }
 }
