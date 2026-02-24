@@ -8,6 +8,7 @@ Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex).
 
 - **TUI Dashboard** - Terminal UI for monitoring agents with real-time status, filtering, and tmux integration
 - **Process Monitoring** - Scan all running AI coding agents in the system
+- **Multi-Agent Adapter** - Unified abstraction layer supporting Claude Code, Codex CLI, OpenCode with automatic detection
 - **Session Management** - List and resume Claude Code historical sessions
 - **Agent Lifecycle** - Start, stop, and send input to agents
 - **Smart Notifications** - Route notifications based on urgency (HIGH/MEDIUM/LOW)
@@ -162,6 +163,32 @@ cam reply y [--target <agent_id>]
 cam reply y --all                 # Approve all pending
 cam reply y --agent "cam-*"       # Approve matching agents
 cam reply y --risk low            # Approve all LOW risk requests
+
+# Setup hooks for different CLI tools
+cam setup claude                  # Configure Claude Code hooks
+cam setup codex                   # Configure Codex CLI notify
+cam setup --dry-run claude        # Preview changes without applying
+```
+
+### Multi-Agent CLI Support
+
+CAM supports multiple AI coding CLI tools through a unified adapter layer:
+
+| CLI Tool | Detection Strategy | Hook Events |
+|----------|-------------------|-------------|
+| Claude Code | HookOnly | session_start, stop, notification, PreToolUse, PostToolUse |
+| Codex CLI | HookWithPolling | agent-turn-complete |
+| OpenCode | HookOnly | session.created, session.idle, permission.asked, tool.execute.* |
+| Others | PollingOnly | (terminal state detection via AI) |
+
+```bash
+# Setup hooks automatically
+cam setup claude                  # Configure Claude Code hooks
+cam setup codex                   # Configure Codex notify
+cam setup opencode                # Configure OpenCode plugin
+
+# Handle Codex CLI events
+cam codex-notify '{"type":"agent-turn-complete","thread-id":"xxx"}'
 ```
 
 ## Configuration
@@ -346,7 +373,15 @@ src/
 ├── agent_mod/           # Agent lifecycle management
 │   ├── manager.rs       # Start/stop/list agents
 │   ├── watcher.rs       # State monitoring
-│   └── daemon.rs        # Background watcher daemon
+│   ├── daemon.rs        # Background watcher daemon
+│   └── adapter/         # Multi-CLI adapter layer
+│       ├── mod.rs       # AgentAdapter trait
+│       ├── types.rs     # HookEvent, DetectionStrategy
+│       ├── claude.rs    # Claude Code adapter
+│       ├── codex.rs     # Codex CLI adapter
+│       ├── opencode.rs  # OpenCode adapter
+│       ├── generic.rs   # Generic fallback adapter
+│       └── config_manager.rs  # Config backup/restore
 ├── session_mod/         # Session management
 │   ├── manager.rs       # Claude Code session listing
 │   └── state.rs         # Conversation state, quick replies
@@ -430,6 +465,7 @@ CAM → POST /hooks/agent → Gateway → OpenClaw conversation
 | `~/.config/code-agent-monitor/hook.log` | Hook logs |
 | `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
 | `~/.config/code-agent-monitor/config.json` | Webhook and Haiku API configuration |
+| `~/.config/code-agent-monitor/backups/` | Config file backups (created by `cam setup`) |
 | `~/.config/code-agent-monitor/notifications.jsonl` | Local notification records for TUI |
 | `~/Library/LaunchAgents/com.cam.watcher.plist` | launchd service config (macOS) |
 | `~/.claude/teams/` | Agent Teams |
