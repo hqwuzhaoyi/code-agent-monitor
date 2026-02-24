@@ -16,6 +16,7 @@ Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex).
 - **OpenClaw Integration** - Manage agents via natural language
 - **Agent Teams** - Multi-agent collaboration with remote management and quick replies
 - **Risk Assessment** - Automatically evaluate permission request risk levels
+- **Service Management** - Install watcher as launchd system service (macOS) with auto-start on boot
 
 ## Installation
 
@@ -81,6 +82,17 @@ cam watch-trigger --agent-id <agent_id> [--force] [--no-dedup]
 
 # Launch TUI dashboard
 cam tui
+
+# Install watcher as system service (macOS)
+cam install                       # Install service
+cam install --force               # Force reinstall
+cam uninstall                     # Uninstall service
+
+# Service management
+cam service status                # View service status
+cam service restart               # Restart service
+cam service logs                  # View service logs
+cam service logs -f               # Follow logs
 ```
 
 ### TUI Dashboard
@@ -280,6 +292,10 @@ echo '{}' | cam notify --event stop --agent-id test --dry-run 2>&1 | grep "chann
 After code changes, restart the watcher:
 
 ```bash
+# If running as service (recommended)
+cam service restart
+
+# If running manually
 kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 # Watcher will auto-start on next agent launch
 ```
@@ -415,6 +431,7 @@ CAM → POST /hooks/agent → Gateway → OpenClaw conversation
 | `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
 | `~/.config/code-agent-monitor/config.json` | Webhook and Haiku API configuration |
 | `~/.config/code-agent-monitor/notifications.jsonl` | Local notification records for TUI |
+| `~/Library/LaunchAgents/com.cam.watcher.plist` | launchd service config (macOS) |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | Task lists |
 
@@ -450,6 +467,9 @@ cargo test --lib team
 cargo build --release
 cp target/release/cam plugins/cam/bin/cam
 openclaw gateway restart
+
+# Restart service to load new binary
+cam service restart
 ```
 
 ## License

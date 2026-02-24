@@ -2,6 +2,7 @@
 
 use crate::infra::tmux::TmuxManager;
 use crate::agent::daemon::WatcherDaemon;
+use crate::agent::adapter::get_adapter;
 use anyhow::{anyhow, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -292,21 +293,13 @@ impl AgentManager {
     }
 
     /// 获取 agent 启动命令
+    #[deprecated(note = "Use get_adapter().get_command() instead")]
     fn get_agent_command(&self, agent_type: &AgentType, resume_session: Option<&str>) -> String {
-        match agent_type {
-            AgentType::Claude => {
-                if let Some(session_id) = resume_session {
-                    format!("claude --resume {}", session_id)
-                } else {
-                    "claude".to_string()
-                }
-            }
-            AgentType::OpenCode => "opencode".to_string(),
-            AgentType::Codex => "codex".to_string(),
-            AgentType::GeminiCli => "gemini".to_string(),
-            AgentType::MistralVibe => "mistral-vibe".to_string(),
-            AgentType::Mock => "sleep 3600".to_string(),  // 测试用
-            AgentType::Unknown => "echo 'Unknown agent type'".to_string(),
+        let adapter = get_adapter(agent_type);
+        if let Some(session_id) = resume_session {
+            adapter.get_resume_command(session_id)
+        } else {
+            adapter.get_command().to_string()
         }
     }
 
@@ -335,7 +328,13 @@ impl AgentManager {
             "Starting agent"
         );
 
-        let command = self.get_agent_command(&agent_type, request.resume_session.as_deref());
+        // Use adapter to get command
+        let adapter = get_adapter(&agent_type);
+        let command = if let Some(ref session_id) = request.resume_session {
+            adapter.get_resume_command(session_id)
+        } else {
+            adapter.get_command().to_string()
+        };
 
         // 检查 tmux session 是否已存在
         let session_exists = self.tmux.session_exists(&tmux_session);
