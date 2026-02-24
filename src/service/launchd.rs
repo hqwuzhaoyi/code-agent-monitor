@@ -103,11 +103,14 @@ impl LaunchdService {
 
         // Generate and write plist
         let plist_content = self.generate_plist()?;
-        std::fs::write(&self.plist_path, plist_content)
+        std::fs::write(&self.plist_path, &plist_content)
             .context("Failed to write plist file")?;
 
-        // Load the service
-        self.load()?;
+        // Load the service, cleanup on failure
+        if let Err(e) = self.load() {
+            let _ = std::fs::remove_file(&self.plist_path);
+            return Err(e);
+        }
 
         Ok(())
     }
@@ -116,6 +119,10 @@ impl LaunchdService {
     pub fn uninstall(&self) -> Result<()> {
         // Unload first if running
         let _ = self.unload();
+
+        // Wait for launchd to fully unload the service
+        // launchd operations are asynchronous
+        std::thread::sleep(std::time::Duration::from_millis(500));
 
         // Remove plist file
         if self.plist_path.exists() {
@@ -212,11 +219,5 @@ impl LaunchdService {
             self.log_dir.join("watcher.stdout.log"),
             self.log_dir.join("watcher.stderr.log"),
         )
-    }
-}
-
-impl Default for LaunchdService {
-    fn default() -> Self {
-        Self::new().expect("Failed to create LaunchdService")
     }
 }
