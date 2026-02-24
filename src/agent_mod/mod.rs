@@ -6,6 +6,7 @@ pub mod daemon;
 pub mod monitor;
 pub mod event_processor;
 pub mod stability;
+pub mod adapter;
 
 pub use manager::{AgentManager, AgentRecord, AgentType, AgentStatus, StartAgentRequest, StartAgentResponse};
 pub use watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
