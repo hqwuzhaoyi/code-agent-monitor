@@ -20,6 +20,7 @@ use crate::notification::deduplicator::NotificationDeduplicator;
 use crate::notification::dedup_key::generate_dedup_key;
 use crate::notification::channel::SendResult;
 use crate::notification::webhook::{WebhookClient, WebhookConfig};
+use crate::notification::store::{NotificationStore, NotificationRecord};
 use crate::infra::terminal::truncate_for_status;
 use std::sync::Mutex;
 
@@ -308,6 +309,40 @@ impl OpenclawNotifier {
         // If a webhook is configured, prefer it (single-channel delivery).
         // This is especially important for reply-required events so OpenClaw hooks/skills can run.
         self.send_via_gateway_async(&payload.to_json())?;
+
+        // 记录到本地文件（供 TUI 显示）
+        let summary = match &event.event_type {
+            NotificationEventType::PermissionRequest { tool_name, .. } => {
+                format!("Permission: {}", tool_name)
+            }
+            NotificationEventType::WaitingForInput { pattern_type, .. } => {
+                format!("Waiting: {}", pattern_type)
+            }
+            NotificationEventType::Notification { notification_type, message } => {
+                if message.is_empty() {
+                    notification_type.clone()
+                } else {
+                    message.chars().take(80).collect()
+                }
+            }
+            NotificationEventType::Error { message } => {
+                format!("Error: {}", message.chars().take(60).collect::<String>())
+            }
+            NotificationEventType::AgentExited => "Agent exited".to_string(),
+            NotificationEventType::Stop => "Stopped".to_string(),
+            NotificationEventType::SessionStart => "Session started".to_string(),
+            NotificationEventType::SessionEnd => "Session ended".to_string(),
+        };
+        let record = NotificationRecord {
+            ts: chrono::Utc::now(),
+            agent_id: agent_id.clone(),
+            urgency,
+            event: event_type_str.to_string(),
+            summary,
+        };
+        if let Err(e) = NotificationStore::append(&record) {
+            warn!(error = %e, "Failed to write notification to local file");
+        }
 
         info!(
             agent_id = %agent_id,
