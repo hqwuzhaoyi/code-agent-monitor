@@ -189,11 +189,24 @@ impl SystemEventPayload {
         let event_desc = match self.event_type.as_str() {
             "permission_request" => {
                 if let EventData::PermissionRequest { tool_name, tool_input } = &self.event_data {
-                    let cmd = tool_input.get("command")
+                    let cmd = tool_input
+                        .get("command")
                         .or_else(|| tool_input.get("file_path"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
-                    format!("执行: {} {}", tool_name, cmd)
+
+                    // Include a terminal tail so the user can see the interactive prompt/options.
+                    let snapshot_tail = self.context.terminal_snapshot.as_ref().map(|snapshot| {
+                        let lines: Vec<&str> = snapshot.lines().collect();
+                        let start = lines.len().saturating_sub(30);
+                        lines[start..].join("\n")
+                    });
+
+                    if let Some(tail) = snapshot_tail {
+                        format!("执行: {} {}\n\n{}", tool_name, cmd, tail)
+                    } else {
+                        format!("执行: {} {}", tool_name, cmd)
+                    }
                 } else {
                     "请求权限".to_string()
                 }
@@ -301,5 +314,22 @@ mod tests {
         let json = payload.to_json();
         assert_eq!(json["source"], "cam");
         assert_eq!(json["event_type"], "error");
+    }
+
+    #[test]
+    fn test_permission_request_includes_terminal_tail_in_message() {
+        let mut event = NotificationEvent::permission_request(
+            "cam-123",
+            "Bash",
+            serde_json::json!({"command": "echo hi"}),
+        );
+        event.terminal_snapshot = Some((1..=50).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n"));
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::High);
+        let msg = payload.to_telegram_message();
+
+        // Tail should include the last line, and (by construction) omit the first.
+        assert!(msg.contains("line 50"));
+        assert!(!msg.contains("line 1\nline 2\nline 3"));
     }
 }

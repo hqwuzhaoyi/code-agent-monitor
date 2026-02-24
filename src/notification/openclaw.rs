@@ -305,12 +305,9 @@ impl OpenclawNotifier {
             return Ok(SendResult::Sent);
         }
 
-        if event.needs_reply() && self.webhook_client.is_some() {
-            // Reply-required events must go through system events so the CAM skill can respond.
-            self.send_via_gateway_async_no_webhook(&payload.to_json())?;
-        } else {
-            self.send_via_gateway_async(&payload.to_json())?;
-        }
+        // If a webhook is configured, prefer it (single-channel delivery).
+        // This is especially important for reply-required events so OpenClaw hooks/skills can run.
+        self.send_via_gateway_async(&payload.to_json())?;
 
         info!(
             agent_id = %agent_id,
@@ -339,9 +336,9 @@ impl OpenclawNotifier {
 
         let payload_text = payload.to_string();
 
-        // 使用 spawn() 发送，添加 --expect-final 等待 Agent 处理
+        // 使用阻塞执行，确保获取失败原因
         // 超时设置为 60 秒，足够 Agent 处理并发送通知
-        let child = Command::new(&self.openclaw_cmd)
+        let output = Command::new(&self.openclaw_cmd)
             .args([
                 "system", "event",
                 "--text", &payload_text,
@@ -349,45 +346,20 @@ impl OpenclawNotifier {
                 "--expect-final",
                 "--timeout", "60000",
             ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
+            .output();
 
-        match child {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                error!(error = %e, "Failed to spawn system event");
-                Err(e.into())
+        match output {
+            Ok(out) => {
+                if out.status.success() {
+                    Ok(())
+                } else {
+                    let stderr = String::from_utf8_lossy(&out.stderr);
+                    error!(status = ?out.status, stderr = %stderr, "System event command failed");
+                    Err(anyhow::anyhow!("System event command failed: {}", stderr))
+                }
             }
-        }
-    }
-
-    /// 发送 system event 到 Gateway（忽略 webhook）
-    fn send_via_gateway_async_no_webhook(&self, payload: &serde_json::Value) -> Result<()> {
-        if self.dry_run {
-            eprintln!("[DRY-RUN] Would send via system event");
-            eprintln!("[DRY-RUN] Payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
-            return Ok(());
-        }
-
-        let payload_text = payload.to_string();
-
-        let child = Command::new(&self.openclaw_cmd)
-            .args([
-                "system", "event",
-                "--text", &payload_text,
-                "--mode", "now",
-                "--expect-final",
-                "--timeout", "60000",
-            ])
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn();
-
-        match child {
-            Ok(_) => Ok(()),
             Err(e) => {
-                error!(error = %e, "Failed to spawn system event");
+                error!(error = %e, "Failed to run system event");
                 Err(e.into())
             }
         }
@@ -401,7 +373,22 @@ impl OpenclawNotifier {
                 // 这是 SystemEventPayload 格式，使用格式化消息
                 use crate::notification::system_event::SystemEventPayload;
                 if let Ok(sep) = serde_json::from_value::<SystemEventPayload>(payload.clone()) {
-                    sep.to_telegram_message()
+                    let mut msg = sep.to_telegram_message();
+
+                    // For reply-required events, include raw JSON so hooks/skills (and humans) have full context.
+                    if matches!(sep.event_type.as_str(), "permission_request" | "waiting_for_input") {
+                        let raw = serde_json::to_string_pretty(payload).unwrap_or_default();
+                        let max_chars = 3500usize;
+                        let raw_trunc: String = raw.chars().take(max_chars).collect();
+                        msg.push_str("\n\n---\nraw_event_json:\n```json\n");
+                        msg.push_str(&raw_trunc);
+                        if raw.len() > max_chars {
+                            msg.push_str("\n... (truncated)");
+                        }
+                        msg.push_str("\n```\n");
+                    }
+
+                    msg
                 } else {
                     payload.get("message")
                         .and_then(|m| m.as_str())

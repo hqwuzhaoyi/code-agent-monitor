@@ -148,6 +148,20 @@ cam reply y [--target <agent_id>]
 
 ## Configuration
 
+### Webhook Configuration (Required for Notifications)
+
+CAM sends notifications via Webhook to OpenClaw Gateway. Configure in `~/.config/code-agent-monitor/config.json`:
+
+```json
+{
+  "webhook": {
+    "gateway_url": "http://localhost:18789",
+    "hook_token": "your-webhook-token",
+    "timeout_secs": 30
+  }
+}
+```
+
 ### Haiku API Configuration
 
 CAM uses Claude Haiku 4.5 for terminal state detection and question extraction. API configuration is read in the following priority:
@@ -356,11 +370,22 @@ For detailed architecture documentation, see:
 
 ### Notification Routing
 
+All notifications are sent via Webhook to OpenClaw Gateway (`POST /hooks/agent`), which triggers an OpenClaw conversation. Users can reply directly in the conversation, and the CAM skill will process the reply via `cam reply`.
+
 | Urgency | Events | Behavior |
 |---------|--------|----------|
-| HIGH | permission_request, Error, WaitingForInput | Send immediately |
-| MEDIUM | AgentExited, idle_prompt | Send notification |
-| LOW | session_start, stop | Silent |
+| HIGH | permission_request, Error, WaitingForInput | Send immediately, requires user response |
+| MEDIUM | AgentExited, idle_prompt | Send notification, may need user action |
+| LOW | session_start, stop, ToolUse | Silent (no notification sent) |
+
+Reply flow:
+```
+CAM → POST /hooks/agent → Gateway → OpenClaw conversation
+                                        ↓
+                              User replies "y"
+                                        ↓
+                              CAM skill → cam reply → tmux send-keys
+```
 
 ### Data Storage
 
@@ -370,7 +395,7 @@ For detailed architecture documentation, see:
 | `~/.config/code-agent-monitor/watcher.pid` | Watcher process PID |
 | `~/.config/code-agent-monitor/hook.log` | Hook logs |
 | `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
-| `~/.config/code-agent-monitor/config.json` | Haiku API configuration |
+| `~/.config/code-agent-monitor/config.json` | Webhook and Haiku API configuration |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | Task lists |
 

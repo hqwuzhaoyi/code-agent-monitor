@@ -54,32 +54,39 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 | `~/.config/code-agent-monitor/hook.log` | Hook 日志 |
 | `~/.config/code-agent-monitor/conversation_state.json` | 对话状态 |
 | `~/.config/code-agent-monitor/dedup_state.json` | 通知去重状态 |
-| `~/.config/code-agent-monitor/config.json` | Haiku API 配置 |
+| `~/.config/code-agent-monitor/config.json` | Webhook 和 Haiku API 配置 |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | 任务列表 |
 
 ### 通知路由
 
+所有通知统一通过 Webhook 发送到 OpenClaw Gateway（`POST /hooks/agent`），触发 OpenClaw 对话。用户可以直接在对话中回复，CAM skill 会通过 `cam reply` 处理。
+
 | Urgency | 事件 | 行为 |
 |---------|------|------|
-| HIGH | permission_request, Error, WaitingForInput | 立即发送 |
-| MEDIUM | AgentExited, idle_prompt | 发送 |
-| LOW | session_start, stop | 静默 |
-
-需要回复的事件（permission_request, waiting_for_input）走 system event CLI 以支持 `cam reply`，其他事件优先走 webhook。
-
-**历史背景**：最初全部使用 system event CLI，但 `openclaw system event --mode now` 触发了 bug #14527（HEARTBEAT.md 为空时事件被跳过），因此改为 webhook 直连 `POST /hooks/agent`。需要回复的事件仍需走 system event 以支持交互。
+| HIGH | permission_request, Error, WaitingForInput | 立即发送，需要用户回复 |
+| MEDIUM | AgentExited, idle_prompt | 发送通知，可能需要用户操作 |
+| LOW | session_start, stop, ToolUse | 静默（不发送通知） |
 
 **回复链路**：
 ```
-1. CAM 发送 system event → Gateway → 通知到 OpenClaw 对话
-2. 用户在 OpenClaw 对话中回复（如 "y"）
-3. OpenClaw 的 CAM skill 解析回复，调用 cam reply y
-4. cam reply 读取 conversation_state.json 找到待处理的 agent
-5. 通过 tmux send-keys 发送到对应 session
+CAM → POST /hooks/agent → Gateway → OpenClaw 对话
+                                        ↓
+                              用户回复 "y"
+                                        ↓
+                              CAM skill → cam reply → tmux send-keys
 ```
 
-Webhook 不经过 OpenClaw 对话，CAM skill 无法介入处理回复，所以需要回复的事件必须走 system event。
+**配置要求**：需要在 `~/.config/code-agent-monitor/config.json` 中配置 webhook：
+```json
+{
+  "webhook": {
+    "gateway_url": "http://localhost:18789",
+    "hook_token": "your-token",
+    "timeout_secs": 30
+  }
+}
+```
 
 ### 会话类型
 
