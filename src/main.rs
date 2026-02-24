@@ -266,6 +266,14 @@ enum Commands {
         #[command(subcommand)]
         action: ServiceAction,
     },
+    /// 安装 watcher 服务（cam service install 的快捷方式）
+    Install {
+        /// 强制重新安装
+        #[arg(long)]
+        force: bool,
+    },
+    /// 卸载 watcher 服务（cam service uninstall 的快捷方式）
+    Uninstall,
 }
 
 #[derive(Subcommand)]
@@ -1505,6 +1513,47 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                }
+            }
+        }
+        Commands::Install { force } => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            if force {
+                let _ = service.uninstall();
+            }
+            match service.install() {
+                Ok(_) => {
+                    println!("✅ CAM watcher 服务已安装并启动");
+                    println!("   服务会在系统启动时自动运行");
+                    println!("   查看状态: cam service status");
+                }
+                Err(e) => {
+                    eprintln!("❌ 安装失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Uninstall => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            match service.uninstall() {
+                Ok(_) => {
+                    println!("✅ CAM watcher 服务已卸载");
+                }
+                Err(e) => {
+                    eprintln!("❌ 卸载失败: {}", e);
+                    std::process::exit(1);
                 }
             }
         }
