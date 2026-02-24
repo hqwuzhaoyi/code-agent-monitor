@@ -3,6 +3,7 @@
 use super::channel::NotificationMessage;
 use super::dispatcher::NotificationDispatcher;
 use super::channels::dashboard::{DashboardChannel, DashboardConfig};
+use super::channels::local_file::LocalFileChannel;
 use super::urgency::Urgency;
 use anyhow::Result;
 use std::sync::Arc;
@@ -55,6 +56,10 @@ impl NotificationBuilder {
             });
             dispatcher.register_channel(Arc::new(dashboard));
         }
+
+        // LocalFile（总是启用，记录所有通知）
+        info!(channel = "local_file", "Enabling LocalFile channel");
+        dispatcher.register_channel(Arc::new(LocalFileChannel::new()));
 
         Ok(dispatcher)
     }
