@@ -49,6 +49,7 @@ impl LaunchdService {
         let cam_path = Self::get_cam_binary_path()?;
         let stdout_log = self.log_dir.join("watcher.stdout.log");
         let stderr_log = self.log_dir.join("watcher.stderr.log");
+        let home = dirs::home_dir().context("Failed to get home directory")?;
 
         Ok(format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -60,9 +61,7 @@ impl LaunchdService {
     <key>ProgramArguments</key>
     <array>
         <string>{cam_path}</string>
-        <string>watcher</string>
-        <string>start</string>
-        <string>--foreground</string>
+        <string>watch</string>
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -74,8 +73,10 @@ impl LaunchdService {
     <string>{stderr}</string>
     <key>EnvironmentVariables</key>
     <dict>
+        <key>HOME</key>
+        <string>{home}</string>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
     </dict>
 </dict>
 </plist>
@@ -84,6 +85,7 @@ impl LaunchdService {
             cam_path = cam_path.display(),
             stdout = stdout_log.display(),
             stderr = stderr_log.display(),
+            home = home.display(),
         ))
     }
 
@@ -184,13 +186,17 @@ impl LaunchdService {
             });
         }
 
-        // Parse PID from output (format: "PID\tStatus\tLabel")
+        // Parse PID from output (format: "PID" = 12345;)
         let stdout = String::from_utf8_lossy(&output.stdout);
         let pid = stdout
             .lines()
-            .next()
-            .and_then(|line| line.split('\t').next())
-            .and_then(|pid_str| pid_str.trim().parse::<u32>().ok())
+            .find(|line| line.contains("\"PID\""))
+            .and_then(|line| {
+                line.split('=')
+                    .nth(1)
+                    .map(|s| s.trim().trim_end_matches(';').trim())
+                    .and_then(|s| s.parse::<u32>().ok())
+            })
             .filter(|&pid| pid > 0);
 
         Ok(ServiceStatus {
