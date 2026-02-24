@@ -58,6 +58,7 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 | `~/.config/code-agent-monitor/conversation_state.json` | 对话状态 |
 | `~/.config/code-agent-monitor/dedup_state.json` | 通知去重状态 |
 | `~/.config/code-agent-monitor/config.json` | Webhook 和 Haiku API 配置 |
+| `~/.config/code-agent-monitor/notifications.jsonl` | TUI 本地通知记录 |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | 任务列表 |
 

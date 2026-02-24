@@ -97,7 +97,8 @@ Features:
 - Live terminal preview of selected agent's tmux session
 - Lazygit-style instant filtering (type to filter as you type)
 - Log viewer with level filtering (Error/Warn/Info/Debug)
-- Recent notifications panel
+- Notifications panel with urgency-based color coding (HIGH=Red, MEDIUM=Yellow, LOW=Gray)
+- Local notification storage with automatic rolling cleanup (keeps last 100 entries)
 
 Key bindings:
 | Key | Action |
@@ -413,6 +414,7 @@ CAM → POST /hooks/agent → Gateway → OpenClaw conversation
 | `~/.config/code-agent-monitor/hook.log` | Hook logs |
 | `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
 | `~/.config/code-agent-monitor/config.json` | Webhook and Haiku API configuration |
+| `~/.config/code-agent-monitor/notifications.jsonl` | Local notification records for TUI |
 | `~/.claude/teams/` | Agent Teams |
 | `~/.claude/tasks/` | Task lists |
 
