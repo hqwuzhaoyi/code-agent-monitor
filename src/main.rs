@@ -13,6 +13,7 @@ use code_agent_monitor::{
     TeamBridge, InboxMessage, TeamOrchestrator,
     ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
     NotificationEvent, NotificationEventType,
+    LaunchdService,
 };
 use anyhow::Result;
 
@@ -1391,21 +1392,119 @@ async fn main() -> Result<()> {
             result?;
         }
         Commands::Service { action } => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
             match action {
                 ServiceAction::Install { force } => {
-                    println!("TODO: Install service (force={})", force);
+                    // If force, uninstall first
+                    if force {
+                        let _ = service.uninstall();
+                    }
+                    match service.install() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已安装并启动");
+                            println!("   服务会在系统启动时自动运行");
+                            println!("   查看状态: cam service status");
+                            println!("   查看日志: cam service logs");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 安装失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 ServiceAction::Uninstall => {
-                    println!("TODO: Uninstall service");
+                    match service.uninstall() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已卸载");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 卸载失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 ServiceAction::Restart => {
-                    println!("TODO: Restart service");
+                    match service.restart() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已重启");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 重启失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 ServiceAction::Status => {
-                    println!("TODO: Show service status");
+                    match service.status() {
+                        Ok(status) => {
+                            if !status.installed {
+                                println!("⚪ 服务未安装");
+                                println!("   运行 'cam service install' 安装服务");
+                            } else if status.running {
+                                println!("🟢 服务运行中");
+                                if let Some(pid) = status.pid {
+                                    println!("   PID: {}", pid);
+                                }
+                            } else {
+                                println!("🔴 服务已安装但未运行");
+                                println!("   运行 'cam service restart' 启动服务");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 获取状态失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
                 }
                 ServiceAction::Logs { lines, follow } => {
-                    println!("TODO: Show service logs (lines={}, follow={})", lines, follow);
+                    let (stdout_log, stderr_log) = service.log_paths();
+
+                    if follow {
+                        println!("📋 跟踪日志 (Ctrl+C 退出)...\n");
+                        let _ = std::process::Command::new("tail")
+                            .args(["-f", "-n"])
+                            .arg(lines.to_string())
+                            .arg(&stdout_log)
+                            .status();
+                    } else {
+                        println!("📋 最近 {} 行日志:\n", lines);
+
+                        if stdout_log.exists() {
+                            let output = std::process::Command::new("tail")
+                                .args(["-n"])
+                                .arg(lines.to_string())
+                                .arg(&stdout_log)
+                                .output();
+
+                            if let Ok(output) = output {
+                                print!("{}", String::from_utf8_lossy(&output.stdout));
+                            }
+                        } else {
+                            println!("(日志文件不存在: {})", stdout_log.display());
+                        }
+
+                        if stderr_log.exists() {
+                            let output = std::process::Command::new("tail")
+                                .args(["-n", "10"])
+                                .arg(&stderr_log)
+                                .output();
+
+                            if let Ok(output) = output {
+                                let stderr_content = String::from_utf8_lossy(&output.stdout);
+                                if !stderr_content.trim().is_empty() {
+                                    println!("\n--- 错误日志 ---");
+                                    print!("{}", stderr_content);
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
