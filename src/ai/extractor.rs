@@ -484,7 +484,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
     // 只取最后 N 行，减少 token 消耗
     let last_lines = truncate_for_status(terminal_snapshot);
 
-    let system = "你是一个终端状态分析专家。判断 AI 编码助手的状态。只回答 PROCESSING、WAITING 或 DECISION，不要其他内容。";
+    let system = "你是一个终端状态分析专家。严格返回且只能返回以下之一：PROCESSING / WAITING / DECISION。禁止输出任何解释、分析、示例、编号或其它文字。";
 
     let prompt = format!(
         r#"分析以下终端输出，判断 AI 编码助手的状态：
@@ -514,7 +514,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
   * 权限请求
   * 简单的输入
 
-重要：直接回答 PROCESSING、WAITING 或 DECISION。只要终端最后需要用户做关键决策（方向、方案、技术选择等），必须回答 DECISION"#
+重要：直接回答 PROCESSING、WAITING 或 DECISION，禁止输出任何解释或摘要。只要终端最后需要用户做关键决策（方向、方案、技术选择等），必须回答 DECISION。"#
     );
 
     let response = match client.complete(&prompt, Some(system)) {
