@@ -142,8 +142,13 @@ cam team-shutdown my-project
 # View pending confirmations
 cam pending-confirmations
 
-# Reply to pending confirmation
+# Reply to single pending confirmation
 cam reply y [--target <agent_id>]
+
+# Batch reply (Agent Swarm scenarios)
+cam reply y --all                 # Approve all pending
+cam reply y --agent "cam-*"       # Approve matching agents
+cam reply y --risk low            # Approve all LOW risk requests
 ```
 
 ## Configuration

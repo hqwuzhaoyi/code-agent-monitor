@@ -27,6 +27,9 @@ cam team-shutdown <team>          # 关闭 Team
 # 快捷回复
 cam pending-confirmations         # 查看待处理
 cam reply y                       # 批准
+cam reply y --all                 # 批准所有待处理
+cam reply y --agent "cam-*"       # 批准匹配的 agent
+cam reply y --risk low            # 批准所有低风险请求
 
 # 手动触发检测
 cam watch-trigger --agent-id <id>           # 触发检测并发送通知
