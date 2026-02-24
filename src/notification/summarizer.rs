@@ -72,10 +72,33 @@ pub struct CompletionSummary {
 /// 通知汇总器
 pub struct NotificationSummarizer;
 
+/// Sensitive paths that require human confirmation even for whitelisted commands
+const SENSITIVE_PATH_PATTERNS: &[&str] = &[
+    "/etc/",
+    "~/.ssh/",
+    "~/.aws/",
+    "~/.config/",
+    ".env",
+    "credentials",
+    "secret",
+    "token",
+    "password",
+    "id_rsa",
+    "id_ed25519",
+];
+
 impl NotificationSummarizer {
     /// 创建新的通知汇总器
     pub fn new() -> Self {
         Self
+    }
+
+    /// Check if command arguments contain sensitive paths
+    fn contains_sensitive_path(&self, command: &str) -> bool {
+        let command_lower = command.to_lowercase();
+        SENSITIVE_PATH_PATTERNS
+            .iter()
+            .any(|pattern| command_lower.contains(pattern))
     }
 
     /// 汇总权限请求
@@ -315,6 +338,11 @@ impl NotificationSummarizer {
 
         let first_word = command_lower.split_whitespace().next().unwrap_or("");
         if low_risk_commands.contains(&first_word) {
+            // Parameter safety check: even whitelisted commands need confirmation
+            // if arguments contain sensitive paths
+            if self.contains_sensitive_path(command) {
+                return RiskLevel::High;
+            }
             return RiskLevel::Low;
         }
 
@@ -657,5 +685,21 @@ mod tests {
             truncate_path("/very/long/path/to/some/file.txt", 20).len(),
             20
         );
+    }
+
+    #[test]
+    fn test_assess_bash_risk_whitelist_with_sensitive_path() {
+        let summarizer = NotificationSummarizer::new();
+
+        // Whitelisted command + sensitive path = HIGH risk
+        assert_eq!(summarizer.assess_bash_risk("cat /etc/passwd"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("cat ~/.ssh/id_rsa"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("ls ~/.aws/credentials"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("head .env"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("tail ~/.config/secrets.json"), RiskLevel::High);
+
+        // Whitelisted command + safe path = LOW risk
+        assert_eq!(summarizer.assess_bash_risk("cat README.md"), RiskLevel::Low);
+        assert_eq!(summarizer.assess_bash_risk("ls src/"), RiskLevel::Low);
     }
 }
