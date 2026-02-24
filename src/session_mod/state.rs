@@ -11,6 +11,7 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::agent::AgentManager;
+use crate::notification::summarizer::RiskLevel;
 use crate::team::{TeamBridge, InboxMessage};
 use crate::infra::tmux::TmuxManager;
 
@@ -52,6 +53,9 @@ pub struct PendingConfirmation {
     pub created_at: DateTime<Utc>,
     /// tmux session 名称（用于发送回复）
     pub tmux_session: Option<String>,
+    /// 风险等级（用于批量过滤）
+    #[serde(default)]
+    pub risk_level: Option<RiskLevel>,
 }
 
 /// Agent 上下文
@@ -105,6 +109,8 @@ pub enum BatchFilter {
     All,
     /// Reply to confirmations matching agent pattern (supports glob)
     Agent(String),
+    /// Reply to confirmations with specific risk level
+    Risk(RiskLevel),
 }
 
 /// Batch reply result
@@ -195,6 +201,7 @@ impl ConversationStateManager {
             context: context.to_string(),
             created_at: Utc::now(),
             tmux_session: tmux_session.map(|s| s.to_string()),
+            risk_level: None, // Will be set by caller if needed
         };
 
         state.pending_confirmations.push(confirmation);
@@ -312,6 +319,9 @@ impl ConversationStateManager {
                     } else {
                         c.agent_id == *pattern
                     }
+                }
+                BatchFilter::Risk(risk) => {
+                    c.risk_level.map(|r| r == *risk).unwrap_or(false)
                 }
             })
             .cloned()

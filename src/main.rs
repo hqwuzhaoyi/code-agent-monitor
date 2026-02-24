@@ -11,7 +11,7 @@ use code_agent_monitor::{
     discover_teams, get_team_members,
     list_tasks, list_team_names,
     TeamBridge, InboxMessage, TeamOrchestrator,
-    ConversationStateManager, ReplyResult, BatchFilter,
+    ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
     NotificationEvent, NotificationEventType,
 };
 use anyhow::Result;
@@ -247,6 +247,9 @@ enum Commands {
         /// 批量回复匹配的 agent（支持 glob，如 "cam-*"）
         #[arg(long, conflicts_with_all = ["target", "all"])]
         agent: Option<String>,
+        /// 批量回复指定风险等级的请求 (low/medium/high)
+        #[arg(long, conflicts_with_all = ["target", "all", "agent"])]
+        risk: Option<String>,
     },
     /// 启动 TUI 仪表盘
     Tui {
@@ -1258,7 +1261,7 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Reply { reply, target, all, agent } => {
+        Commands::Reply { reply, target, all, agent, risk } => {
             let state_manager = ConversationStateManager::new();
 
             // Determine batch filter
@@ -1266,6 +1269,17 @@ async fn main() -> Result<()> {
                 Some(BatchFilter::All)
             } else if let Some(pattern) = agent {
                 Some(BatchFilter::Agent(pattern))
+            } else if let Some(risk_str) = risk {
+                let risk_level = match risk_str.to_lowercase().as_str() {
+                    "low" => RiskLevel::Low,
+                    "medium" => RiskLevel::Medium,
+                    "high" => RiskLevel::High,
+                    _ => {
+                        eprintln!("无效的风险等级: {}，可选: low, medium, high", risk_str);
+                        std::process::exit(1);
+                    }
+                };
+                Some(BatchFilter::Risk(risk_level))
             } else {
                 None
             };
