@@ -26,7 +26,7 @@ pub use agent::WatcherDaemon;
 
 // Re-exports from session (backwards compatibility)
 pub use session::{SessionManager, SessionFilter};
-pub use session::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult};
+pub use session::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult, BatchFilter, BatchReplyResult};
 
 // Re-exports from mcp (backwards compatibility)
 pub use mcp::McpServer;

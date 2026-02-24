@@ -11,7 +11,7 @@ use code_agent_monitor::{
     discover_teams, get_team_members,
     list_tasks, list_team_names,
     TeamBridge, InboxMessage, TeamOrchestrator,
-    ConversationStateManager, ReplyResult,
+    ConversationStateManager, ReplyResult, BatchFilter,
     NotificationEvent, NotificationEventType,
 };
 use anyhow::Result;
@@ -241,6 +241,12 @@ enum Commands {
         /// 目标 agent_id 或 confirmation_id（可选）
         #[arg(long, short)]
         target: Option<String>,
+        /// 批量回复所有待处理请求
+        #[arg(long, conflicts_with = "target")]
+        all: bool,
+        /// 批量回复匹配的 agent（支持 glob，如 "cam-*"）
+        #[arg(long, conflicts_with_all = ["target", "all"])]
+        agent: Option<String>,
     },
     /// 启动 TUI 仪表盘
     Tui {
@@ -1252,34 +1258,79 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Reply { reply, target } => {
+        Commands::Reply { reply, target, all, agent } => {
             let state_manager = ConversationStateManager::new();
 
-            match state_manager.handle_reply(&reply, target.as_deref()) {
-                Ok(result) => {
-                    match result {
-                        ReplyResult::Sent { agent_id, reply } => {
-                            println!("已发送回复 '{}' 到 {}", reply, agent_id);
-                        }
-                        ReplyResult::NeedSelection { options } => {
-                            println!("有多个待处理的确认，请指定目标：\n");
-                            for (i, opt) in options.iter().enumerate() {
-                                println!("  {}. [{}] {}", i + 1, opt.agent_id, opt.context);
-                            }
-                            println!("\n使用 --target <agent_id> 指定目标");
-                        }
-                        ReplyResult::NoPending => {
+            // Determine batch filter
+            let batch_filter = if all {
+                Some(BatchFilter::All)
+            } else if let Some(pattern) = agent {
+                Some(BatchFilter::Agent(pattern))
+            } else {
+                None
+            };
+
+            if let Some(filter) = batch_filter {
+                // Batch reply mode
+                match state_manager.handle_reply_batch(&reply, filter) {
+                    Ok(results) => {
+                        if results.is_empty() {
                             println!("没有待处理的确认请求");
-                        }
-                        ReplyResult::InvalidSelection(msg) => {
-                            eprintln!("无效的选择: {}", msg);
-                            std::process::exit(1);
+                        } else {
+                            let success_count = results.iter().filter(|r| r.success).count();
+                            let fail_count = results.len() - success_count;
+                            println!(
+                                "已处理 {} 个请求 (成功: {}, 失败: {})",
+                                results.len(),
+                                success_count,
+                                fail_count
+                            );
+                            for result in &results {
+                                if result.success {
+                                    println!("  ✅ {} <- {}", result.agent_id, result.reply);
+                                } else {
+                                    println!(
+                                        "  ❌ {} - {}",
+                                        result.agent_id,
+                                        result.error.as_deref().unwrap_or("unknown error")
+                                    );
+                                }
+                            }
                         }
                     }
+                    Err(e) => {
+                        eprintln!("批量回复失败: {}", e);
+                        std::process::exit(1);
+                    }
                 }
-                Err(e) => {
-                    eprintln!("发送回复失败: {}", e);
-                    std::process::exit(1);
+            } else {
+                // Single reply mode (existing logic)
+                match state_manager.handle_reply(&reply, target.as_deref()) {
+                    Ok(result) => {
+                        match result {
+                            ReplyResult::Sent { agent_id, reply } => {
+                                println!("已发送回复 '{}' 到 {}", reply, agent_id);
+                            }
+                            ReplyResult::NeedSelection { options } => {
+                                println!("有多个待处理的确认，请指定目标：\n");
+                                for (i, opt) in options.iter().enumerate() {
+                                    println!("  {}. [{}] {}", i + 1, opt.agent_id, opt.context);
+                                }
+                                println!("\n使用 --target <agent_id> 指定目标，或使用 --all 批量处理");
+                            }
+                            ReplyResult::NoPending => {
+                                println!("没有待处理的确认请求");
+                            }
+                            ReplyResult::InvalidSelection(msg) => {
+                                eprintln!("无效的选择: {}", msg);
+                                std::process::exit(1);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        eprintln!("发送回复失败: {}", e);
+                        std::process::exit(1);
+                    }
                 }
             }
         }
