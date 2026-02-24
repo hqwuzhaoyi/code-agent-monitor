@@ -378,6 +378,18 @@ All notifications are sent via Webhook to OpenClaw Gateway (`POST /hooks/agent`)
 | MEDIUM | AgentExited, idle_prompt | Send notification, may need user action |
 | LOW | session_start, stop, ToolUse | Silent (no notification sent) |
 
+#### Auto-Approve (OpenClaw Skill)
+
+OpenClaw can automatically approve low-risk operations using a three-layer decision model:
+
+1. **Whitelist** - Safe commands auto-approved: `ls`, `cat`, `git status`, `cargo test`, `npm test`
+2. **Blacklist** - Always require human confirmation: `rm`, `sudo`, commands with `&&`, `|`, `>`
+3. **LLM Judgment** - AI analyzes risk for commands not in either list
+
+**Parameter Safety Check**: Even whitelisted commands require confirmation if arguments contain sensitive paths (`/etc/`, `~/.ssh/`, `.env`).
+
+See [Auto-Approve Design](docs/plans/2026-02-24-auto-approve-design.md) for details.
+
 Reply flow:
 ```
 CAM → POST /hooks/agent → Gateway → OpenClaw conversation

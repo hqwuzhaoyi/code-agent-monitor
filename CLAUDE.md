@@ -68,6 +68,18 @@ kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
 | MEDIUM | AgentExited, idle_prompt | 发送通知，可能需要用户操作 |
 | LOW | session_start, stop, ToolUse | 静默（不发送通知） |
 
+#### 自动审批（OpenClaw Skill 实现）
+
+OpenClaw 使用三层决策模型自动处理低风险操作：
+
+1. **白名单** - 安全命令自动批准：`ls`, `cat`, `git status`, `cargo test`, `npm test`
+2. **黑名单** - 必须人工确认：`rm`, `sudo`, 包含 `&&`, `|`, `>` 的命令
+3. **LLM 判断** - AI 分析不在名单中的命令风险
+
+**参数安全检查**：即使白名单命令，如果参数包含敏感路径（`/etc/`, `~/.ssh/`, `.env`），仍需人工确认。
+
+详见 [自动审批设计](docs/plans/2026-02-24-auto-approve-design.md)。
+
 **回复链路**：
 ```
 CAM → POST /hooks/agent → Gateway → OpenClaw 对话
@@ -100,8 +112,9 @@ CAM → POST /hooks/agent → Gateway → OpenClaw 对话
 - [开发指南](docs/development.md) - 项目结构、构建、扩展
 - [调试指南](docs/debugging.md) - 问题排查、链路调试
 - [测试指南](docs/testing.md) - 测试场景、端到端测试
+- [自动审批设计](docs/plans/2026-02-24-auto-approve-design.md) - 三层决策模型、白名单/黑名单规则
 - [Agent Teams Skill](skills/agent-teams/SKILL.md) - Team 编排详细用法
-- [通知处理 Skill](skills/cam-notify/SKILL.md) - 通知类型和处理流程
+- [通知处理 Skill](skills/cam-notify/SKILL.md) - 通知类型、自动审批规则、回复路由
 - [E2E 测试 Skill](skills/cam-e2e-test/SKILL.md) - 端到端测试流程
 
 ## 开发原则
