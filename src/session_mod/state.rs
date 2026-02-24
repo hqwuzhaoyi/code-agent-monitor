@@ -98,6 +98,24 @@ pub enum ReplyResult {
     InvalidSelection(String),
 }
 
+/// Batch filter for reply operations
+#[derive(Debug, Clone)]
+pub enum BatchFilter {
+    /// Reply to all pending confirmations
+    All,
+    /// Reply to confirmations matching agent pattern (supports glob)
+    Agent(String),
+}
+
+/// Batch reply result
+#[derive(Debug, Clone)]
+pub struct BatchReplyResult {
+    pub agent_id: String,
+    pub reply: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 /// 对话状态管理器
 pub struct ConversationStateManager {
     state_file: PathBuf,
@@ -272,6 +290,59 @@ impl ConversationStateManager {
             agent_id: confirmation.agent_id,
             reply: normalized_reply,
         })
+    }
+
+    /// Handle batch reply to multiple pending confirmations
+    pub fn handle_reply_batch(&self, reply: &str, filter: BatchFilter) -> Result<Vec<BatchReplyResult>> {
+        let pending = self.get_pending_confirmations()?;
+        let normalized_reply = self.normalize_reply(reply);
+        let mut results = Vec::new();
+
+        let filtered: Vec<_> = pending
+            .iter()
+            .filter(|c| match &filter {
+                BatchFilter::All => true,
+                BatchFilter::Agent(pattern) => {
+                    if pattern.contains('*') {
+                        // Simple glob matching
+                        let regex_pattern = format!("^{}$", pattern.replace("*", ".*"));
+                        regex::Regex::new(&regex_pattern)
+                            .map(|re| re.is_match(&c.agent_id))
+                            .unwrap_or(false)
+                    } else {
+                        c.agent_id == *pattern
+                    }
+                }
+            })
+            .cloned()
+            .collect();
+
+        for confirmation in filtered {
+            let result = match self.send_reply_to_agent(&confirmation, &normalized_reply) {
+                Ok(()) => {
+                    let _ = self.remove_pending(&confirmation.id);
+                    BatchReplyResult {
+                        agent_id: confirmation.agent_id,
+                        reply: normalized_reply.clone(),
+                        success: true,
+                        error: None,
+                    }
+                }
+                Err(e) => {
+                    // Still remove from pending even if send fails
+                    let _ = self.remove_pending(&confirmation.id);
+                    BatchReplyResult {
+                        agent_id: confirmation.agent_id,
+                        reply: normalized_reply.clone(),
+                        success: false,
+                        error: Some(e.to_string()),
+                    }
+                }
+            };
+            results.push(result);
+        }
+
+        Ok(results)
     }
 
     /// 标准化回复
@@ -594,5 +665,88 @@ mod tests {
         };
         let json = serde_json::to_string(&shutdown).unwrap();
         assert!(json.contains("shutdown_request"));
+    }
+
+    #[test]
+    fn test_handle_reply_batch_all() {
+        let (manager, _temp) = create_test_manager();
+
+        // Register multiple pending confirmations
+        manager
+            .register_pending(
+                "cam-123",
+                None,
+                ConfirmationType::PermissionRequest {
+                    tool: "Bash".to_string(),
+                    input: serde_json::json!({"command": "ls"}),
+                },
+                "test1",
+                Some("cam-123"),
+            )
+            .unwrap();
+
+        manager
+            .register_pending(
+                "cam-456",
+                None,
+                ConfirmationType::PermissionRequest {
+                    tool: "Bash".to_string(),
+                    input: serde_json::json!({"command": "cat file"}),
+                },
+                "test2",
+                Some("cam-456"),
+            )
+            .unwrap();
+
+        // Batch reply should process all
+        let result = manager.handle_reply_batch("y", BatchFilter::All).unwrap();
+        assert_eq!(result.len(), 2);
+
+        // All should be removed
+        let pending = manager.get_pending_confirmations().unwrap();
+        assert!(pending.is_empty());
+    }
+
+    #[test]
+    fn test_handle_reply_batch_agent_pattern() {
+        let (manager, _temp) = create_test_manager();
+
+        manager
+            .register_pending(
+                "cam-123",
+                None,
+                ConfirmationType::PermissionRequest {
+                    tool: "Bash".to_string(),
+                    input: serde_json::json!({}),
+                },
+                "test1",
+                Some("cam-123"),
+            )
+            .unwrap();
+
+        manager
+            .register_pending(
+                "ext-456",
+                None,
+                ConfirmationType::PermissionRequest {
+                    tool: "Bash".to_string(),
+                    input: serde_json::json!({}),
+                },
+                "test2",
+                Some("ext-456"),
+            )
+            .unwrap();
+
+        // Only cam-* should be processed
+        let result = manager
+            .handle_reply_batch("y", BatchFilter::Agent("cam-*".to_string()))
+            .unwrap();
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].agent_id, "cam-123");
+
+        // ext-456 should still be pending
+        let pending = manager.get_pending_confirmations().unwrap();
+        assert_eq!(pending.len(), 1);
+        assert_eq!(pending[0].agent_id, "ext-456");
     }
 }
