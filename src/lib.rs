@@ -13,6 +13,7 @@ pub mod agent;
 pub mod team;
 pub mod anthropic;
 pub mod notification;
+pub mod service;
 
 // Re-exports from infra (backwards compatibility)
 pub use infra::{TmuxManager, ProcessScanner};
@@ -46,3 +47,6 @@ pub use team::{TeamConfig, TeamMember, TeamBridge, InboxMessage, SpecialMessage,
 pub use team::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
 
 pub use anthropic::{AnthropicClient, AnthropicConfig, extract_question_with_haiku};
+
+// Re-exports from service
+pub use service::{LaunchdService, ServiceStatus};

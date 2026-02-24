@@ -13,6 +13,7 @@ use code_agent_monitor::{
     TeamBridge, InboxMessage, TeamOrchestrator,
     ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
     NotificationEvent, NotificationEventType,
+    LaunchdService,
 };
 use anyhow::Result;
 
@@ -259,6 +260,44 @@ enum Commands {
         /// 不显示通知流
         #[arg(long)]
         no_notifications: bool,
+    },
+    /// 管理 CAM watcher 服务
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+    /// 安装 watcher 服务（cam service install 的快捷方式）
+    Install {
+        /// 强制重新安装
+        #[arg(long)]
+        force: bool,
+    },
+    /// 卸载 watcher 服务（cam service uninstall 的快捷方式）
+    Uninstall,
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// 安装 watcher 为系统服务
+    Install {
+        /// 强制重新安装
+        #[arg(long)]
+        force: bool,
+    },
+    /// 卸载 watcher 服务
+    Uninstall,
+    /// 重启 watcher 服务
+    Restart,
+    /// 查看服务状态
+    Status,
+    /// 查看服务日志
+    Logs {
+        /// 显示最近 N 行
+        #[arg(long, short, default_value = "50")]
+        lines: usize,
+        /// 持续跟踪日志
+        #[arg(long, short)]
+        follow: bool,
     },
 }
 
@@ -1359,6 +1398,164 @@ async fn main() -> Result<()> {
             restore_terminal(&mut terminal)?;
 
             result?;
+        }
+        Commands::Service { action } => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            match action {
+                ServiceAction::Install { force } => {
+                    // If force, uninstall first
+                    if force {
+                        let _ = service.uninstall();
+                    }
+                    match service.install() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已安装并启动");
+                            println!("   服务会在系统启动时自动运行");
+                            println!("   查看状态: cam service status");
+                            println!("   查看日志: cam service logs");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 安装失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServiceAction::Uninstall => {
+                    match service.uninstall() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已卸载");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 卸载失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServiceAction::Restart => {
+                    match service.restart() {
+                        Ok(_) => {
+                            println!("✅ CAM watcher 服务已重启");
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 重启失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServiceAction::Status => {
+                    match service.status() {
+                        Ok(status) => {
+                            if !status.installed {
+                                println!("⚪ 服务未安装");
+                                println!("   运行 'cam service install' 安装服务");
+                            } else if status.running {
+                                println!("🟢 服务运行中");
+                                if let Some(pid) = status.pid {
+                                    println!("   PID: {}", pid);
+                                }
+                            } else {
+                                println!("🔴 服务已安装但未运行");
+                                println!("   运行 'cam service restart' 启动服务");
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("❌ 获取状态失败: {}", e);
+                            std::process::exit(1);
+                        }
+                    }
+                }
+                ServiceAction::Logs { lines, follow } => {
+                    let (stdout_log, stderr_log) = service.log_paths();
+
+                    if follow {
+                        println!("📋 跟踪日志 (Ctrl+C 退出)...\n");
+                        let _ = std::process::Command::new("tail")
+                            .args(["-f", "-n"])
+                            .arg(lines.to_string())
+                            .arg(&stdout_log)
+                            .status();
+                    } else {
+                        println!("📋 最近 {} 行日志:\n", lines);
+
+                        if stdout_log.exists() {
+                            let output = std::process::Command::new("tail")
+                                .args(["-n"])
+                                .arg(lines.to_string())
+                                .arg(&stdout_log)
+                                .output();
+
+                            if let Ok(output) = output {
+                                print!("{}", String::from_utf8_lossy(&output.stdout));
+                            }
+                        } else {
+                            println!("(日志文件不存在: {})", stdout_log.display());
+                        }
+
+                        if stderr_log.exists() {
+                            let output = std::process::Command::new("tail")
+                                .args(["-n", "10"])
+                                .arg(&stderr_log)
+                                .output();
+
+                            if let Ok(output) = output {
+                                let stderr_content = String::from_utf8_lossy(&output.stdout);
+                                if !stderr_content.trim().is_empty() {
+                                    println!("\n--- 错误日志 ---");
+                                    print!("{}", stderr_content);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Commands::Install { force } => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            if force {
+                let _ = service.uninstall();
+            }
+            match service.install() {
+                Ok(_) => {
+                    println!("✅ CAM watcher 服务已安装并启动");
+                    println!("   服务会在系统启动时自动运行");
+                    println!("   查看状态: cam service status");
+                }
+                Err(e) => {
+                    eprintln!("❌ 安装失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Uninstall => {
+            let service = match LaunchdService::new() {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("❌ 初始化服务失败: {}", e);
+                    std::process::exit(1);
+                }
+            };
+            match service.uninstall() {
+                Ok(_) => {
+                    println!("✅ CAM watcher 服务已卸载");
+                }
+                Err(e) => {
+                    eprintln!("❌ 卸载失败: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
     }
 

@@ -35,6 +35,15 @@ cam reply y --risk low            # 批准所有低风险请求
 cam watch-trigger --agent-id <id>           # 触发检测并发送通知
 cam watch-trigger --agent-id <id> --force   # 强制发送（绕过 AI 检测）
 cam watch-trigger --agent-id <id> --no-dedup # 跳过去重
+
+# 服务管理
+cam install                       # 安装 watcher 为系统服务
+cam install --force               # 强制重新安装
+cam uninstall                     # 卸载服务
+cam service status                # 查看服务状态
+cam service restart               # 重启服务（开发后使用）
+cam service logs                  # 查看服务日志
+cam service logs -f               # 跟踪日志
 ```
 
 ### 构建和更新
@@ -46,6 +55,11 @@ openclaw gateway restart
 
 # 重启 watcher（更新后必须）
 kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
+
+# 开发后更新服务
+cargo build --release
+cp target/release/cam plugins/cam/bin/cam
+cam service restart               # 重启服务加载新二进制
 ```
 
 ### 数据存储
