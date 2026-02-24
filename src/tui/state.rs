@@ -2,6 +2,7 @@
 
 use chrono::{DateTime, Local};
 use crate::AgentStatus;
+use crate::notification::Urgency;
 
 /// Agent 信息（TUI 显示用）
 #[derive(Debug, Clone)]
@@ -20,6 +21,7 @@ pub struct NotificationItem {
     pub timestamp: DateTime<Local>,
     pub agent_id: String,
     pub message: String,
+    pub urgency: Urgency,
 }
 
 /// 当前视图

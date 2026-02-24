@@ -136,19 +136,27 @@ fn render_terminal_preview(app: &App, frame: &mut Frame, area: Rect) {
 
 /// 渲染通知区域
 fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
+    use crate::notification::Urgency;
+
     let items: Vec<ListItem> = app
         .notifications
         .iter()
         .rev()
-        .take(3)
+        .take(5)
         .map(|n| {
+            let color = match n.urgency {
+                Urgency::High => Color::Red,
+                Urgency::Medium => Color::Yellow,
+                Urgency::Low => Color::DarkGray,
+            };
+
             let text = format!(
                 "[{}] {}: {}",
                 n.timestamp.format("%H:%M"),
                 n.agent_id,
                 n.message
             );
-            ListItem::new(text)
+            ListItem::new(text).style(Style::default().fg(color))
         })
         .collect();
 

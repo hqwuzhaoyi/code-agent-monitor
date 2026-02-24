@@ -1,6 +1,7 @@
 //! TUI 应用状态和主循环
 
 use std::io::{self, Stdout};
+use std::time::SystemTime;
 
 use anyhow::Result;
 use crossterm::{
@@ -10,8 +11,9 @@ use crossterm::{
 };
 use ratatui::prelude::*;
 
-use chrono::{DateTime, Local};
+use chrono::{DateTime, Local, TimeZone};
 
+use crate::notification::NotificationStore;
 use crate::tui::logs::LogsState;
 use crate::tui::search::SearchInput;
 use crate::tui::state::{AgentItem, NotificationItem, View};
@@ -33,6 +35,8 @@ pub struct App {
     pub selected_index: usize,
     /// 通知列表
     pub notifications: Vec<NotificationItem>,
+    /// 通知文件的最后修改时间
+    pub notifications_mtime: Option<SystemTime>,
     /// 终端预览内容
     pub terminal_preview: String,
     /// 上次刷新时间
@@ -60,6 +64,7 @@ impl App {
             agents: Vec::new(),
             selected_index: 0,
             notifications: Vec::new(),
+            notifications_mtime: None,
             terminal_preview: String::new(),
             last_refresh: std::time::Instant::now(),
             terminal_stream: TerminalStream::new(),
@@ -189,6 +194,9 @@ impl App {
             self.refresh_terminal_preview(&session)?;
         }
 
+        // 刷新通知
+        self.refresh_notifications();
+
         Ok(())
     }
 
@@ -211,6 +219,30 @@ impl App {
             self.terminal_preview = output;
         }
         Ok(())
+    }
+
+    /// 刷新通知列表（仅当文件变化时）
+    fn refresh_notifications(&mut self) {
+        let path = NotificationStore::path();
+        let current_mtime = std::fs::metadata(&path)
+            .ok()
+            .and_then(|m| m.modified().ok());
+
+        // 文件未变化，跳过读取
+        if current_mtime == self.notifications_mtime && self.notifications_mtime.is_some() {
+            return;
+        }
+
+        self.notifications_mtime = current_mtime;
+        self.notifications = NotificationStore::read_recent(20)
+            .into_iter()
+            .map(|r| NotificationItem {
+                timestamp: Local.from_utc_datetime(&r.ts.naive_utc()),
+                agent_id: r.agent_id,
+                message: r.summary,
+                urgency: r.urgency,
+            })
+            .collect();
     }
 
     /// 切换选中 agent 时启动新的 pipe-pane
