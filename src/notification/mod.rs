@@ -34,6 +34,7 @@ pub mod watcher;
 pub mod openclaw;
 pub mod system_event;
 pub mod webhook;
+pub mod store;
 
 #[cfg(test)]
 mod system_event_test;
@@ -53,3 +54,4 @@ pub use openclaw::OpenclawNotifier;
 pub use dedup_key::{generate_dedup_key, normalize_terminal_content};
 pub use system_event::SystemEventPayload;
 pub use webhook::{WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse, load_webhook_config_from_file};
+pub use store::{NotificationStore, NotificationRecord};
