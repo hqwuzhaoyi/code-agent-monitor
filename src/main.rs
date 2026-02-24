@@ -260,6 +260,36 @@ enum Commands {
         #[arg(long)]
         no_notifications: bool,
     },
+    /// 管理 CAM watcher 服务
+    Service {
+        #[command(subcommand)]
+        action: ServiceAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ServiceAction {
+    /// 安装 watcher 为系统服务
+    Install {
+        /// 强制重新安装
+        #[arg(long)]
+        force: bool,
+    },
+    /// 卸载 watcher 服务
+    Uninstall,
+    /// 重启 watcher 服务
+    Restart,
+    /// 查看服务状态
+    Status,
+    /// 查看服务日志
+    Logs {
+        /// 显示最近 N 行
+        #[arg(long, short, default_value = "50")]
+        lines: usize,
+        /// 持续跟踪日志
+        #[arg(long, short)]
+        follow: bool,
+    },
 }
 
 /// Record hook event timestamp for cross-process coordination with watcher
@@ -1359,6 +1389,25 @@ async fn main() -> Result<()> {
             restore_terminal(&mut terminal)?;
 
             result?;
+        }
+        Commands::Service { action } => {
+            match action {
+                ServiceAction::Install { force } => {
+                    println!("TODO: Install service (force={})", force);
+                }
+                ServiceAction::Uninstall => {
+                    println!("TODO: Uninstall service");
+                }
+                ServiceAction::Restart => {
+                    println!("TODO: Restart service");
+                }
+                ServiceAction::Status => {
+                    println!("TODO: Show service status");
+                }
+                ServiceAction::Logs { lines, follow } => {
+                    println!("TODO: Show service logs (lines={}, follow={})", lines, follow);
+                }
+            }
         }
     }
 
