@@ -87,6 +87,20 @@ const SENSITIVE_PATH_PATTERNS: &[&str] = &[
     "id_ed25519",
 ];
 
+/// Command chain/redirection patterns that require human confirmation
+const COMMAND_CHAIN_PATTERNS: &[&str] = &[
+    "&&",  // command chain
+    "||",  // conditional chain
+    ";",   // sequential execution
+    "|",   // pipe (can pipe to sh)
+    ">",   // output redirection
+    ">>",  // append redirection
+    "<",   // input redirection
+    "$(",  // command substitution
+    "`",   // backtick substitution
+    "$",   // environment variable (can't predict expanded value)
+];
+
 impl NotificationSummarizer {
     /// 创建新的通知汇总器
     pub fn new() -> Self {
@@ -99,6 +113,13 @@ impl NotificationSummarizer {
         SENSITIVE_PATH_PATTERNS
             .iter()
             .any(|pattern| command_lower.contains(pattern))
+    }
+
+    /// Check if command contains chain/redirection operators
+    fn contains_command_chain(&self, command: &str) -> bool {
+        COMMAND_CHAIN_PATTERNS
+            .iter()
+            .any(|pattern| command.contains(pattern))
     }
 
     /// 汇总权限请求
@@ -275,6 +296,11 @@ impl NotificationSummarizer {
     /// 评估 Bash 命令风险
     pub fn assess_bash_risk(&self, command: &str) -> RiskLevel {
         let command_lower = command.to_lowercase();
+
+        // Command chain detection - always HIGH risk (can hide dangerous commands)
+        if self.contains_command_chain(command) {
+            return RiskLevel::High;
+        }
 
         // 高风险命令模式
         let high_risk_patterns = [
@@ -701,5 +727,21 @@ mod tests {
         // Whitelisted command + safe path = LOW risk
         assert_eq!(summarizer.assess_bash_risk("cat README.md"), RiskLevel::Low);
         assert_eq!(summarizer.assess_bash_risk("ls src/"), RiskLevel::Low);
+    }
+
+    #[test]
+    fn test_assess_bash_risk_command_chains() {
+        let summarizer = NotificationSummarizer::new();
+
+        // Command chains should be HIGH risk (can hide dangerous commands)
+        assert_eq!(summarizer.assess_bash_risk("ls && rm -rf /"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("cat file | sh"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("echo test > /etc/passwd"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("ls; sudo rm -rf /"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("$(cat /etc/passwd)"), RiskLevel::High);
+        assert_eq!(summarizer.assess_bash_risk("echo `whoami`"), RiskLevel::High);
+
+        // Environment variable expansion should be HIGH risk
+        assert_eq!(summarizer.assess_bash_risk("cat $HOME/.ssh/id_rsa"), RiskLevel::High);
     }
 }
