@@ -199,13 +199,11 @@ impl SystemEventPayload {
                 }
             }
             "waiting_for_input" => {
-                // Show the question/options from terminal_snapshot if available
+                // Show the latest lines so options are preserved.
                 if let Some(snapshot) = &self.context.terminal_snapshot {
-                    let preview = if snapshot.len() > 200 {
-                        format!("{}...", &snapshot[..200])
-                    } else {
-                        snapshot.clone()
-                    };
+                    let lines: Vec<&str> = snapshot.lines().collect();
+                    let start = lines.len().saturating_sub(30);
+                    let preview = lines[start..].join("\n");
                     format!("等待输入\n\n{}", preview)
                 } else {
                     "等待输入".to_string()
@@ -239,13 +237,20 @@ impl SystemEventPayload {
             _ => "⚪",
         };
 
+        let action_hint = match self.event_type.as_str() {
+            "permission_request" => "回复 y 允许 / n 拒绝",
+            "waiting_for_input" => "回复你的选择或输入内容",
+            _ => "无需回复",
+        };
+
         format!(
-            "{} *CAM* {}\n\n{}\n\n风险: {} {}\n\n回复 y 允许 / n 拒绝",
+            "{} *CAM* {}\n\n{}\n\n风险: {} {}\n\n{}",
             emoji,
             self.agent_id,
             event_desc,
             risk_emoji,
-            risk
+            risk,
+            action_hint
         )
     }
 }
