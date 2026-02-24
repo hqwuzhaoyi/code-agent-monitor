@@ -14,3 +14,8 @@ pub use daemon::WatcherDaemon;
 pub use monitor::AgentMonitor;
 pub use event_processor::EventProcessor;
 pub use stability::{StabilityState, StabilityDetector};
+
+// Adapter exports
+pub use adapter::{
+    AgentAdapter, AgentCapabilities, AgentPaths, DetectionStrategy, HookEvent, get_adapter,
+};
