@@ -174,12 +174,12 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 ```
 
 **关键模块**：
-- `src/anthropic.rs` - Haiku API 客户端，包含：
-  - `is_agent_processing()` - 判断 agent 是否在处理中
-  - `extract_question_with_haiku()` - 提取问题和选项
-  - `extract_notification_content()` - 提取通知内容
-- `src/notification/terminal_cleaner.rs` - 只有 `is_processing()` 函数，调用 AI 判断
-- `src/notification/formatter.rs` - 消息格式化，使用 AI 提取问题
+- `src/agent_mod/extractor/` - ReAct 消息提取器（推荐使用）
+  - `mod.rs` - ReAct 循环逻辑，`ReactExtractor` 和 `HaikuExtractor`
+  - `traits.rs` - `MessageExtractor` trait、`ExtractedMessage`、`ExtractionResult`
+  - `prompts.rs` - AI 提示词模板
+- `src/ai/client.rs` - Anthropic API 客户端
+- `src/ai/extractor.rs` - 旧版提取器（兼容保留）
 
 **原则**：
 1. 状态判断用 AI，不用正则
@@ -191,7 +191,7 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 
 通知内容提取时，AI 会判断终端快照是否包含完整的上下文。如果问题引用了未显示的内容（如"这个项目结构看起来合适吗？"但结构未显示），AI 会返回 `context_complete: false`，系统会自动扩展上下文重试。
 
-**扩展策略**：80 行 → 150 行 → 300 行
+**扩展策略**：80 行 → 150 行 → 300 行 → 500 行 → 800 行
 
 **AI 提示词包含**：
 ```json
@@ -201,7 +201,47 @@ pub fn extract_question_with_haiku(terminal_snapshot: &str) -> Option<(String, S
 }
 ```
 
-**相关代码**：`src/anthropic.rs` - `extract_question_with_haiku()`
+**相关代码**：`src/agent_mod/extractor/` - ReAct 消息提取器
+
+### ReAct 消息提取器
+
+ReAct (Reasoning + Acting) 提取器是 CAM 的核心组件，负责从终端快照中提取 Agent 问题。
+
+**工作原理**：
+1. 一次性获取最大行数（800 行）的终端快照
+2. 从 80 行开始调用 AI 分析
+3. 如果 AI 返回 `context_complete: false`，扩展上下文重试
+4. 迭代直到成功或达到最大行数
+
+**核心类型**：
+```rust
+// 提取结果
+enum ExtractionResult {
+    Success(ExtractedMessage),  // 成功提取
+    NeedMoreContext,            // 需要更多上下文
+    Processing,                 // Agent 正在处理
+    Failed(String),             // 提取失败
+}
+
+// 消息类型
+enum MessageType {
+    Choice,        // 选择题
+    Confirmation,  // 确认题 (y/n)
+    OpenEnded,     // 开放式问题
+    Idle { .. },   // Agent 空闲
+}
+```
+
+**使用方式**：
+```rust
+let extractor = HaikuExtractor::new()?;
+let react = ReactExtractor::new(Box::new(extractor));
+let message = react.extract_message(session_id, &tmux)?;
+```
+
+**设计文档**：
+- [架构设计](design/react-extractor.md)
+- [AI Prompt 设计](design/ai-prompts.md)
 
 ### Haiku API 配置
 

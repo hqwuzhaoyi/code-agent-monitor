@@ -29,13 +29,20 @@ for skill in cam agent-teams cam-notify; do
     fi
 done
 
-# Kill existing watcher if running
-if [ -f ~/.config/code-agent-monitor/watcher.pid ]; then
-    OLD_PID=$(cat ~/.config/code-agent-monitor/watcher.pid)
-    if kill -0 "$OLD_PID" 2>/dev/null; then
-        echo "Stopping old watcher (PID: $OLD_PID)..."
-        kill "$OLD_PID" 2>/dev/null || true
-        sleep 1
+# Restart watcher service (if installed) or kill manual process
+echo "Restarting watcher..."
+if launchctl list com.cam.watcher &>/dev/null; then
+    # Service is installed, use service restart
+    "$PROJECT_DIR/target/release/cam" service restart
+else
+    # Fallback: kill manual watcher process
+    if [ -f ~/.config/code-agent-monitor/watcher.pid ]; then
+        OLD_PID=$(cat ~/.config/code-agent-monitor/watcher.pid)
+        if kill -0 "$OLD_PID" 2>/dev/null; then
+            echo "Stopping old watcher (PID: $OLD_PID)..."
+            kill "$OLD_PID" 2>/dev/null || true
+            sleep 1
+        fi
     fi
 fi
 

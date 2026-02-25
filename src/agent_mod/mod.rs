@@ -7,6 +7,7 @@ pub mod monitor;
 pub mod event_processor;
 pub mod stability;
 pub mod adapter;
+pub mod extractor;
 
 pub use manager::{AgentManager, AgentRecord, AgentType, AgentStatus, StartAgentRequest, StartAgentResponse};
 pub use watcher::{AgentWatcher, WatchEvent, AgentSnapshot, format_watch_event};
@@ -14,6 +15,7 @@ pub use daemon::WatcherDaemon;
 pub use monitor::AgentMonitor;
 pub use event_processor::EventProcessor;
 pub use stability::{StabilityState, StabilityDetector};
+pub use extractor::{ReactExtractor, HaikuExtractor, ExtractedMessage, MessageType, ExtractionResult, IterationConfig};
 
 // Adapter exports
 pub use adapter::{

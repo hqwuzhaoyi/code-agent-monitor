@@ -30,12 +30,24 @@ impl Urgency {
     }
 }
 
+/// Normalize event type to canonical form (case-insensitive)
+///
+/// CLI may send lowercase event names (e.g., `waiting_for_input`),
+/// but internal code expects PascalCase (e.g., `WaitingForInput`).
+/// This function normalizes both to a consistent lowercase form for matching.
+fn normalize_event_type(event_type: &str) -> String {
+    event_type.to_lowercase().replace('_', "")
+}
+
 /// Classify urgency based on event type and context
 ///
 /// Priority for 20 parallel AIs:
 /// - HIGH: Must respond immediately (permission requests, errors) -> blocks task progress
 /// - MEDIUM: Need to know (completed, idle) -> can assign new tasks
 /// - LOW: Optional (startup) -> usually no notification needed
+///
+/// Note: Event type matching is case-insensitive and ignores underscores.
+/// Both `WaitingForInput` and `waiting_for_input` will match.
 pub fn get_urgency(event_type: &str, context: &str) -> Urgency {
     // `cam notify` appends terminal snapshot to JSON context, causing parse failure.
     // Strip snapshot part first to ensure stable urgency classification.
@@ -45,9 +57,11 @@ pub fn get_urgency(event_type: &str, context: &str) -> Urgency {
         context
     };
 
-    match event_type {
+    let normalized = normalize_event_type(event_type);
+
+    match normalized.as_str() {
         // Permission request must be forwarded - blocks task progress
-        "permission_request" => Urgency::High,
+        "permissionrequest" => Urgency::High,
         // notification type needs to check specific type
         "notification" => {
             let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
@@ -62,17 +76,17 @@ pub fn get_urgency(event_type: &str, context: &str) -> Urgency {
             }
         }
         // Error must be forwarded - needs intervention
-        "Error" => Urgency::High,
+        "error" => Urgency::High,
         // Waiting for input must be forwarded
-        "WaitingForInput" => Urgency::High,
+        "waitingforinput" => Urgency::High,
         // Agent abnormal exit - need to know (might be crash or killed)
-        "AgentExited" => Urgency::Medium,
+        "agentexited" => Urgency::Medium,
         // stop/session_end - user triggered stop, no notification needed (user already knows)
-        "stop" | "session_end" => Urgency::Low,
+        "stop" | "sessionend" => Urgency::Low,
         // Startup notification - optional
-        "session_start" => Urgency::Low,
+        "sessionstart" => Urgency::Low,
         // Tool call - too frequent, silent processing
-        "ToolUse" => Urgency::Low,
+        "tooluse" => Urgency::Low,
         // Others
         _ => Urgency::Low,
     }
@@ -91,6 +105,14 @@ mod tests {
         // notification with permission_prompt
         let context = r#"{"notification_type": "permission_prompt"}"#;
         assert_eq!(get_urgency("notification", context), Urgency::High);
+    }
+
+    #[test]
+    fn test_get_urgency_high_lowercase() {
+        // CLI sends lowercase event names
+        assert_eq!(get_urgency("waiting_for_input", ""), Urgency::High);
+        assert_eq!(get_urgency("error", ""), Urgency::High);
+        assert_eq!(get_urgency("agent_exited", ""), Urgency::Medium);
     }
 
     #[test]
@@ -116,6 +138,13 @@ mod tests {
         // notification with unknown type
         let context = r#"{"notification_type": "other"}"#;
         assert_eq!(get_urgency("notification", context), Urgency::Low);
+    }
+
+    #[test]
+    fn test_get_urgency_low_lowercase() {
+        // CLI sends lowercase event names
+        assert_eq!(get_urgency("tool_use", ""), Urgency::Low);
+        assert_eq!(get_urgency("session_start", ""), Urgency::Low);
     }
 
     #[test]
@@ -148,5 +177,17 @@ line 1"#;
         assert_eq!(Urgency::High.as_str(), "HIGH");
         assert_eq!(Urgency::Medium.as_str(), "MEDIUM");
         assert_eq!(Urgency::Low.as_str(), "LOW");
+    }
+
+    #[test]
+    fn test_normalize_event_type() {
+        // PascalCase -> lowercase without underscores
+        assert_eq!(normalize_event_type("WaitingForInput"), "waitingforinput");
+        assert_eq!(normalize_event_type("AgentExited"), "agentexited");
+        // snake_case -> lowercase without underscores
+        assert_eq!(normalize_event_type("waiting_for_input"), "waitingforinput");
+        assert_eq!(normalize_event_type("agent_exited"), "agentexited");
+        // Mixed case
+        assert_eq!(normalize_event_type("Permission_Request"), "permissionrequest");
     }
 }

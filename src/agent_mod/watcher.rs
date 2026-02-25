@@ -9,6 +9,7 @@ use crate::agent::{AgentManager, AgentRecord};
 use crate::agent::manager::AgentStatus;
 use crate::agent::monitor::AgentMonitor;
 use crate::agent::adapter::{get_adapter, DetectionStrategy};
+use crate::agent::extractor::{ReactExtractor, HaikuExtractor, MessageType};
 use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 use crate::infra::tmux::TmuxManager;
@@ -175,6 +176,8 @@ pub struct AgentWatcher {
     hook_tracker: HookEventTracker,
     /// New watcher module agent monitor (for gradual migration)
     agent_monitor: AgentMonitor,
+    /// ReAct 消息提取器（可选，用于新的提取逻辑）
+    react_extractor: Option<ReactExtractor>,
 }
 
 impl AgentWatcher {
@@ -187,6 +190,11 @@ impl AgentWatcher {
 
     /// 创建新的监控器
     pub fn new() -> Self {
+        // 尝试创建 ReactExtractor，失败时使用 None
+        let react_extractor = HaikuExtractor::new()
+            .ok()
+            .map(|e| ReactExtractor::new(Box::new(e)));
+
         Self {
             agent_manager: AgentManager::new(),
             tmux: TmuxManager::new(),
@@ -197,6 +205,7 @@ impl AgentWatcher {
             stability_states: HashMap::new(),
             hook_tracker: HookEventTracker::default(),
             agent_monitor: AgentMonitor::new(),
+            react_extractor,
         }
     }
 
@@ -213,6 +222,7 @@ impl AgentWatcher {
             stability_states: HashMap::new(),
             hook_tracker: HookEventTracker::default(),
             agent_monitor: AgentMonitor::new(),
+            react_extractor: None,
         }
     }
 
@@ -732,6 +742,44 @@ impl AgentWatcher {
                 WatchEvent::WaitingForInput { .. }
             ))
             .collect())
+    }
+
+    /// 使用 ReactExtractor 检测等待状态（新实现）
+    ///
+    /// 这是一个实验性方法，使用 ReAct 循环提取消息。
+    /// 如果 ReactExtractor 不可用，返回 None。
+    pub fn check_waiting_with_react(&self, agent: &AgentRecord) -> Option<WatchEvent> {
+        let react_extractor = self.react_extractor.as_ref()?;
+
+        match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
+            Ok(Some(message)) => {
+                let is_decision_required = matches!(message.message_type, MessageType::Choice);
+                let pattern_type = match &message.message_type {
+                    MessageType::Choice => "Choice".to_string(),
+                    MessageType::Confirmation => "Confirmation".to_string(),
+                    MessageType::OpenEnded => "OpenEnded".to_string(),
+                    MessageType::Idle { .. } => return None,
+                };
+
+                Some(WatchEvent::WaitingForInput {
+                    agent_id: agent.agent_id.clone(),
+                    pattern_type,
+                    context: message.content,
+                    dedup_key: message.fingerprint,
+                    is_decision_required,
+                })
+            }
+            Ok(None) => None,
+            Err(e) => {
+                debug!(agent_id = %agent.agent_id, error = %e, "ReactExtractor failed");
+                None
+            }
+        }
+    }
+
+    /// 检查 ReactExtractor 是否可用
+    pub fn has_react_extractor(&self) -> bool {
+        self.react_extractor.is_some()
     }
 }
 

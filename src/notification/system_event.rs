@@ -61,6 +61,12 @@ pub struct EventContext {
     /// 终端快照
     #[serde(skip_serializing_if = "Option::is_none")]
     pub terminal_snapshot: Option<String>,
+    /// AI 提取的格式化消息（包含完整问题和选项）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub extracted_message: Option<String>,
+    /// 问题指纹（用于去重）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub question_fingerprint: Option<String>,
     /// 风险等级
     pub risk_level: String,
 }
@@ -168,6 +174,8 @@ impl SystemEventPayload {
             event_data,
             context: EventContext {
                 terminal_snapshot: event.terminal_snapshot.clone(),
+                extracted_message: None,
+                question_fingerprint: None,
                 risk_level,
             },
         }
@@ -176,6 +184,14 @@ impl SystemEventPayload {
     /// 转换为 JSON Value
     pub fn to_json(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or_default()
+    }
+
+    /// 设置 AI 提取的消息和指纹
+    ///
+    /// 在发送通知前调用，避免在 from_event 中重复调用 AI
+    pub fn set_extracted_message(&mut self, message: String, fingerprint: String) {
+        self.context.extracted_message = Some(message);
+        self.context.question_fingerprint = Some(fingerprint);
     }
 
     /// 转换为 Telegram 消息格式
@@ -188,14 +204,17 @@ impl SystemEventPayload {
 
         let event_desc = match self.event_type.as_str() {
             "permission_request" => {
-                if let EventData::PermissionRequest { tool_name, tool_input } = &self.event_data {
+                // 优先使用 AI 提取的消息
+                if let Some(extracted) = &self.context.extracted_message {
+                    extracted.clone()
+                } else if let EventData::PermissionRequest { tool_name, tool_input } = &self.event_data {
                     let cmd = tool_input
                         .get("command")
                         .or_else(|| tool_input.get("file_path"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
-                    // Include a terminal tail so the user can see the interactive prompt/options.
+                    // Fallback: 截取终端最后 30 行
                     let snapshot_tail = self.context.terminal_snapshot.as_ref().map(|snapshot| {
                         let lines: Vec<&str> = snapshot.lines().collect();
                         let start = lines.len().saturating_sub(30);
@@ -212,8 +231,11 @@ impl SystemEventPayload {
                 }
             }
             "waiting_for_input" => {
-                // Show the latest lines so options are preserved.
-                if let Some(snapshot) = &self.context.terminal_snapshot {
+                // 优先使用 AI 提取的消息
+                if let Some(extracted) = &self.context.extracted_message {
+                    extracted.clone()
+                } else if let Some(snapshot) = &self.context.terminal_snapshot {
+                    // Fallback: 截取终端最后 30 行
                     let lines: Vec<&str> = snapshot.lines().collect();
                     let start = lines.len().saturating_sub(30);
                     let preview = lines[start..].join("\n");

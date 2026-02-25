@@ -26,10 +26,27 @@ CAM 发送的 system event 格式：
   },
   "context": {
     "terminal_snapshot": "...",
+    "extracted_message": "AI 提取的格式化消息",
+    "question_fingerprint": "npm-install-express-confirm",
+    "message_type": "confirmation",
+    "options": [],
     "risk_level": "MEDIUM"
   }
 }
 ```
+
+### Context 字段说明
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `terminal_snapshot` | string? | 原始终端快照（最后 30-80 行） |
+| `extracted_message` | string? | AI 提取的格式化消息，包含完整问题和选项 |
+| `question_fingerprint` | string? | 语义指纹，用于去重（如 `npm-install-express-confirm`） |
+| `message_type` | string? | 问题类型：`choice`/`confirmation`/`open_ended` |
+| `options` | array? | 选项列表（仅 `choice` 类型） |
+| `risk_level` | string | 风险等级：`LOW`/`MEDIUM`/`HIGH` |
+
+**重要**：优先使用 `extracted_message`，它包含 AI 提取的完整上下文。只有当 `extracted_message` 为空时才回退到 `terminal_snapshot`。
 
 ### Event Types
 
@@ -148,41 +165,150 @@ deploy, push --force, production, release
   - cargo check (dev1, dev2)
 ```
 
-## 消息格式化建议
+## 消息格式化规则
 
-### 权限请求
+**核心原则**：用户不看终端也能理解问题并做出决策。
+
+### 消息来源优先级
+
+1. **优先使用 `extracted_message`** - AI 已提取完整上下文
+2. **回退到 `terminal_snapshot`** - 当 AI 提取失败时
+3. **最后使用 `event_data`** - 构造基本信息
+
+### 根据 message_type 格式化
+
+#### 选择题 (choice)
+
+当 `context.message_type == "choice"` 时：
 
 ```
-⚠️ {project_name} 请求权限
+💬 [{agent_id}] 需要你选择
 
-执行: {tool_name}
-{tool_input 简短描述}
+📋 问题:
+{extracted_message 中的问题文本}
 
-风险: {risk_level_emoji}
+🔢 选项:
+{遍历 context.options，保持原始编号}
+A) 选项一描述
+B) 选项二描述
+C) 选项三描述
 
-回复 y 允许 / n 拒绝
+📝 回复字母选择 (A/B/C)
 ```
+
+**示例**：
+```
+💬 [cam-abc123] 需要你选择
+
+📋 问题:
+你想要增强现有的 React Todo List 还是从头开始？
+
+🔢 选项:
+A) 增强现有项目 - 添加新功能到当前代码
+B) 从头开始 - 创建全新的项目结构
+
+📝 回复字母选择 (A/B)
+```
+
+#### 确认题 (confirmation)
+
+当 `context.message_type == "confirmation"` 或 `event_type == "permission_request"` 时：
+
+```
+⚠️ [{agent_id}] 请求确认
+
+🔧 操作:
+{tool_name}: {tool_input 的关键信息}
+
+💡 上下文:
+{extracted_message 中的背景说明，如果有}
+
+⚡ 风险: {risk_level_emoji} {risk_level}
+
+📝 回复 y 允许 / n 拒绝
+```
+
+**示例**：
+```
+⚠️ [cam-abc123] 请求确认
+
+🔧 操作:
+Bash: rm -rf ./node_modules
+
+💡 上下文:
+Agent 正在清理项目依赖，准备重新安装
+
+⚡ 风险: 🟡 MEDIUM
+
+📝 回复 y 允许 / n 拒绝
+```
+
+#### 开放式问题 (open_ended)
+
+当 `context.message_type == "open_ended"` 时：
+
+```
+💬 [{agent_id}] 需要你输入
+
+📋 问题:
+{extracted_message 中的完整问题}
+
+💡 背景:
+{如果 extracted_message 包含背景信息}
+
+📝 直接回复你的答案
+```
+
+**示例**：
+```
+💬 [cam-abc123] 需要你输入
+
+📋 问题:
+请提供你的 OpenAI API Key
+
+💡 背景:
+Agent 正在配置 AI 功能，需要 API 密钥
+
+📝 直接回复你的答案
+```
+
+### AI 提取失败时的处理
+
+当 `extracted_message` 为空或 AI 提取失败时：
+
+```
+⚠️ [{agent_id}] 需要你的输入
+
+📋 无法解析具体问题，请查看终端
+
+🖥️ 终端快照:
+{terminal_snapshot 最后 20 行，去除 UI 噪音}
+
+📝 查看终端后回复
+```
+
+**处理步骤**：
+1. 检查 `context.extracted_message` 是否存在且非空
+2. 如果为空，使用 `terminal_snapshot` 的最后 20 行
+3. 过滤掉明显的 UI 噪音（进度条、动画字符等）
+4. 明确告知用户需要查看终端
+
+### 风险等级 Emoji
+
+| risk_level | Emoji | 含义 |
+|------------|-------|------|
+| LOW | 🟢 | 安全操作，可放心执行 |
+| MEDIUM | 🟡 | 需要确认，但风险可控 |
+| HIGH | 🔴 | 高风险，请仔细检查 |
 
 ### 错误通知
 
 ```
-❌ {project_name} 遇到错误
+❌ [{agent_id}] 遇到错误
 
 {error_message}
 
 回复查看详情或处理建议
-```
-
-### 等待输入
-
-```
-⏸️ {project_name} 等待输入
-
-{question}
-
-{options if any}
-
-回复选择或输入内容
 ```
 
 ### 自动批准通知
@@ -224,3 +350,200 @@ deploy, push --force, production, release
 - 命令必须**完全相等**（包括所有参数）
 - 检测到命令链符号时不自动批准
 - 状态存储在 OpenClaw 会话中（会话结束清空）
+
+## 完整示例场景
+
+### 场景 1: 选择题 - 项目方向决策
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-abc123",
+  "event_type": "waiting_for_input",
+  "urgency": "HIGH",
+  "context": {
+    "extracted_message": "你想要增强现有的 React Todo List 还是从头开始？\n\nA) 增强现有项目 - 在当前代码基础上添加新功能\nB) 从头开始 - 使用最新最佳实践创建全新项目",
+    "question_fingerprint": "react-todo-enhance-or-fresh",
+    "message_type": "choice",
+    "options": ["增强现有项目", "从头开始"],
+    "risk_level": "LOW"
+  }
+}
+```
+
+**发送给用户的消息**:
+```
+💬 [cam-abc123] 需要你选择
+
+📋 问题:
+你想要增强现有的 React Todo List 还是从头开始？
+
+🔢 选项:
+A) 增强现有项目 - 在当前代码基础上添加新功能
+B) 从头开始 - 使用最新最佳实践创建全新项目
+
+📝 回复字母选择 (A/B)
+```
+
+**用户回复**: `A`
+**执行**: `cam_agent_send("cam-abc123", "A")`
+
+### 场景 2: 确认题 - 危险命令
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-xyz789",
+  "event_type": "permission_request",
+  "urgency": "HIGH",
+  "event_data": {
+    "tool_name": "Bash",
+    "tool_input": {"command": "rm -rf ./dist && rm -rf ./node_modules"}
+  },
+  "context": {
+    "extracted_message": "清理构建产物和依赖目录，准备全新构建",
+    "message_type": "confirmation",
+    "risk_level": "HIGH"
+  }
+}
+```
+
+**发送给用户的消息**:
+```
+⚠️ [cam-xyz789] 请求确认
+
+🔧 操作:
+Bash: rm -rf ./dist && rm -rf ./node_modules
+
+💡 上下文:
+清理构建产物和依赖目录，准备全新构建
+
+⚡ 风险: 🔴 HIGH
+
+📝 回复 y 允许 / n 拒绝
+```
+
+**用户回复**: `y`
+**执行**: `cam_agent_send("cam-xyz789", "y")`
+
+### 场景 3: 开放式问题 - 需要用户输入
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-def456",
+  "event_type": "waiting_for_input",
+  "urgency": "HIGH",
+  "context": {
+    "extracted_message": "请提供你的 GitHub Personal Access Token，用于创建 PR",
+    "message_type": "open_ended",
+    "risk_level": "MEDIUM"
+  }
+}
+```
+
+**发送给用户的消息**:
+```
+💬 [cam-def456] 需要你输入
+
+📋 问题:
+请提供你的 GitHub Personal Access Token，用于创建 PR
+
+📝 直接回复你的答案
+```
+
+**用户回复**: `ghp_xxxxxxxxxxxx`
+**执行**: `cam_agent_send("cam-def456", "ghp_xxxxxxxxxxxx")`
+
+### 场景 4: AI 提取失败 - Fallback 处理
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-fail001",
+  "event_type": "waiting_for_input",
+  "urgency": "HIGH",
+  "context": {
+    "terminal_snapshot": "...\n⏺ 我分析了你的代码结构...\n\n你觉得这个方案怎么样？\n❯ ",
+    "extracted_message": null,
+    "risk_level": "MEDIUM"
+  }
+}
+```
+
+**发送给用户的消息**:
+```
+⚠️ [cam-fail001] 需要你的输入
+
+📋 无法解析具体问题，请查看终端
+
+🖥️ 终端快照:
+⏺ 我分析了你的代码结构...
+
+你觉得这个方案怎么样？
+❯
+
+📝 查看终端后回复
+```
+
+### 场景 5: 自动批准 - 安全命令
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-auto001",
+  "event_type": "permission_request",
+  "urgency": "HIGH",
+  "event_data": {
+    "tool_name": "Bash",
+    "tool_input": {"command": "cargo test"}
+  },
+  "context": {
+    "risk_level": "LOW"
+  }
+}
+```
+
+**处理流程**:
+1. 检查白名单 → `cargo test` 在白名单中
+2. 检查参数安全 → 无敏感路径
+3. 自动批准
+
+**执行**: `cam_agent_send("cam-auto001", "y")`
+
+**可选通知**:
+```
+✅ [cam-auto001] 已自动批准: cargo test
+```
+
+### 场景 6: Agent 异常退出
+
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-exit001",
+  "event_type": "agent_exited",
+  "urgency": "HIGH",
+  "event_data": {
+    "exit_code": 1,
+    "reason": "Process terminated unexpectedly"
+  },
+  "context": {
+    "terminal_snapshot": "...\nerror: could not compile `myapp`\n",
+    "risk_level": "HIGH"
+  }
+}
+```
+
+**发送给用户的消息**:
+```
+❌ [cam-exit001] Agent 异常退出
+
+退出码: 1
+原因: Process terminated unexpectedly
+
+最后输出:
+error: could not compile `myapp`
+
+回复 "resume" 恢复会话，或 "logs" 查看完整日志
+```

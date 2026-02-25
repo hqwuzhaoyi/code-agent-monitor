@@ -13,6 +13,7 @@
 use anyhow::Result;
 use std::process::Command;
 use tracing::{info, error, debug, warn};
+use crate::ai::extractor::{extract_formatted_message, SimpleExtractionResult};
 use crate::notification::urgency::{Urgency, get_urgency};
 use crate::notification::payload::PayloadBuilder;
 use crate::notification::event::{NotificationEvent, NotificationEventType};
@@ -298,7 +299,40 @@ impl OpenclawNotifier {
         }
 
         // 构建并发送 system event
-        let payload = SystemEventPayload::from_event(event, urgency);
+        let mut payload = SystemEventPayload::from_event(event, urgency);
+
+        // 对于需要用户输入的事件，使用 AI 提取格式化消息
+        // 只在确定要发送时才调用，避免浪费 API 调用
+        if !self.no_ai {
+            if let Some(snapshot) = &event.terminal_snapshot {
+                if matches!(event.event_type,
+                    NotificationEventType::WaitingForInput { .. } |
+                    NotificationEventType::PermissionRequest { .. }
+                ) {
+                    match extract_formatted_message(snapshot) {
+                        SimpleExtractionResult::Message { message, fingerprint } => {
+                            debug!(
+                                agent_id = %agent_id,
+                                fingerprint = %fingerprint,
+                                "AI extracted formatted message"
+                            );
+                            payload.set_extracted_message(message, fingerprint);
+                        }
+                        SimpleExtractionResult::Idle { status, last_action } => {
+                            debug!(
+                                agent_id = %agent_id,
+                                status = %status,
+                                last_action = ?last_action,
+                                "AI detected idle state, no question"
+                            );
+                        }
+                        SimpleExtractionResult::Failed => {
+                            warn!(agent_id = %agent_id, "AI extraction failed, using fallback");
+                        }
+                    }
+                }
+            }
+        }
 
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send system event:");
