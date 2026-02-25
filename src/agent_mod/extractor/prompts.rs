@@ -3,29 +3,53 @@
 //! 用于 ReAct 消息提取的 AI 提示词。
 
 /// 状态检测系统提示词
-pub const STATUS_DETECTION_SYSTEM: &str = r#"你是终端状态分析专家。
-严格返回且只能返回以下之一：PROCESSING / WAITING / DECISION。
-禁止输出任何解释、分析、示例、编号或其它文字。"#;
+pub const STATUS_DETECTION_SYSTEM: &str = r#"你是终端状态分析专家。分析 AI 编码助手的终端输出，判断其当前状态。
+
+输出要求：只返回一个词：PROCESSING、WAITING 或 DECISION。不要输出任何其他内容。"#;
 
 /// 状态检测用户提示词模板
 pub fn status_detection_prompt(terminal_content: &str) -> String {
     format!(
-        r#"分析以下终端输出，判断 AI 编码助手的状态：
+        r#"分析终端输出的最后部分，判断 AI 编码助手的状态。
 
 <terminal>
 {terminal_content}
 </terminal>
 
-判断规则：
-- 只判断终端最后的状态，忽略历史输出
-- PROCESSING: 如果看到以下任一指示器：
-  * 带省略号的状态词（如 Thinking…、Brewing…、Running… 等）
-  * 旋转动画字符（✢✻✶✽◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
-  * 进度条（注意：底部状态栏不算）
-- DECISION: 等待用户做关键决策（方向、方案、技术选择）
-- WAITING: 其他等待用户输入的情况
+## 状态定义
 
-直接回答 PROCESSING、WAITING 或 DECISION。"#
+### PROCESSING（正在处理）
+AI 正在执行任务，用户无需操作。
+
+必须满足以下任一条件：
+- 终端最后显示加载动画字符：✢ ✻ ✶ ✽ ◐ ◑ ◒ ◓ ⠋ ⠙ ⠹ ⠸ ⠼ ⠴ ⠦ ⠧ ⠇ ⠏
+- 终端最后显示带省略号的状态词：Thinking…、Brewing…、Running…、Hatching…、Working…
+- 终端最后显示进度指示：[====>    ] 或百分比进度
+
+### WAITING（等待输入）
+AI 已完成当前步骤，等待用户提供信息或确认。
+
+必须满足以下全部条件：
+- 没有 PROCESSING 的任何指示器
+- 终端显示问题或提示，如：
+  - 确认请求：「是否继续？」「确认执行？」「y/n」
+  - 信息请求：「请输入...」「请提供...」
+  - 选择题：带编号的选项列表
+
+### DECISION（需要决策）
+AI 需要用户做出影响后续方向的重要决策。
+
+必须满足以下全部条件：
+- 没有 PROCESSING 的任何指示器
+- 问题涉及：技术方案选择、架构设计、实现策略、功能取舍
+
+## 判断流程
+
+1. 首先检查终端最后是否有 PROCESSING 指示器 → 如果有，返回 PROCESSING
+2. 然后检查是否有问题等待回答 → 如果没有问题，返回 PROCESSING
+3. 最后判断问题类型 → 重要决策返回 DECISION，其他返回 WAITING
+
+回答："#
     )
 }
 
