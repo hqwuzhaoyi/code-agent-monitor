@@ -90,10 +90,17 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn detect_ready(&self, terminal_output: &str) -> bool {
-        // Codex TUI 就绪检测
-        terminal_output.contains("codex")
-            || terminal_output.contains("Ready")
-            || terminal_output.contains(">")
+        // 排除信任确认界面
+        if terminal_output.contains("Do you trust the contents of this directory?")
+            || terminal_output.contains("1. Yes, continue")
+        {
+            return false;
+        }
+
+        // 检测正常就绪状态
+        terminal_output.contains(">_ OpenAI Codex")
+            || terminal_output.contains("? for shortcuts")
+            || terminal_output.contains("context left")
     }
 }
 
@@ -209,12 +216,50 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_ready() {
+    fn test_detect_ready_normal_state() {
         let adapter = CodexAdapter;
-        assert!(adapter.detect_ready("codex v1.0.0"));
-        assert!(adapter.detect_ready("Ready for input"));
-        assert!(adapter.detect_ready("Some output\n> "));
+        let normal = r#"╭───────────────────────────────────────────────────╮
+│ >_ OpenAI Codex (v0.104.0)                        │
+│                                                   │
+│ model:     gpt-5.3-codex xhigh   /model to change │
+│ directory: /tmp/test                              │
+╰───────────────────────────────────────────────────╯
+
+› Find and fix a bug in @filename
+
+  ? for shortcuts                                            100% context left"#;
+
+        assert!(adapter.detect_ready(normal));
+    }
+
+    #[test]
+    fn test_detect_ready_excludes_trust_dialog() {
+        let adapter = CodexAdapter;
+        let trust_dialog = r#"> You are in /tmp/test
+
+  Do you trust the contents of this directory? Working with untrusted contents
+  comes with higher risk of prompt injection.
+
+› 1. Yes, continue
+  2. No, quit
+
+  Press enter to continue"#;
+
+        assert!(!adapter.detect_ready(trust_dialog));
+    }
+
+    #[test]
+    fn test_detect_ready_partial_matches() {
+        let adapter = CodexAdapter;
+        // 只有 >_ OpenAI Codex 也应该匹配
+        assert!(adapter.detect_ready(">_ OpenAI Codex"));
+        // 只有 ? for shortcuts 也应该匹配
+        assert!(adapter.detect_ready("? for shortcuts"));
+        // 只有 context left 也应该匹配
+        assert!(adapter.detect_ready("50% context left"));
+        // 无关内容不应该匹配
         assert!(!adapter.detect_ready("Loading..."));
+        assert!(!adapter.detect_ready("Some random output"));
     }
 
     #[test]
