@@ -758,19 +758,11 @@ pub fn format_watch_event(event: &WatchEvent) -> String {
             format!("🔧 {} 执行: {}", agent_id, tools.join(", "))
         }
         WatchEvent::Error { agent_id, message, .. } => {
-            let preview = if message.len() > 100 {
-                format!("{}...", &message[..97])
-            } else {
-                message.clone()
-            };
+            let preview = crate::infra::truncate_str(message, 97);
             format!("❌ {} 错误: {}", agent_id, preview)
         }
         WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required } => {
-            let preview = if context.len() > 200 {
-                format!("{}...", &context[..197])
-            } else {
-                context.clone()
-            };
+            let preview = crate::infra::truncate_str(context, 197);
             let decision_mark = if *is_decision_required { "⚠️" } else { "" };
             format!("⏸️ {} 等待输入 ({}){} [key:{}]:\n{}", agent_id, pattern_type, decision_mark, &dedup_key[..8.min(dedup_key.len())], preview)
         }

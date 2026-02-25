@@ -1129,11 +1129,7 @@ async fn main() -> Result<()> {
                                     println!("{}@{} ({} 条):", member_status.name, team, filtered.len());
                                     for msg in filtered.iter().take(3) {
                                         let read_mark = if msg.read { "✓" } else { "●" };
-                                        let text_preview = if msg.text.len() > 50 {
-                                            format!("{}...", &msg.text[..50])
-                                        } else {
-                                            msg.text.clone()
-                                        };
+                                        let text_preview = code_agent_monitor::truncate_str(&msg.text, 50);
                                         println!("  {} {}: {}", read_mark, msg.from, text_preview);
                                     }
                                     if filtered.len() > 3 {
@@ -1206,7 +1202,7 @@ async fn main() -> Result<()> {
                                     println!("[{}] {}@{}: {}",
                                         chrono::Local::now().format("%H:%M:%S"),
                                         msg.from, member.name,
-                                        if msg.text.len() > 80 { format!("{}...", &msg.text[..80]) } else { msg.text.clone() }
+                                        code_agent_monitor::truncate_str(&msg.text, 80)
                                     );
 
                                     // 检查是否需要通知

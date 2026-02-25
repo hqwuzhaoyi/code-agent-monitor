@@ -61,7 +61,7 @@ impl LaunchdService {
     <key>ProgramArguments</key>
     <array>
         <string>{cam_path}</string>
-        <string>watch</string>
+        <string>watch-daemon</string>
     </array>
     <key>RunAtLoad</key>
     <true/>

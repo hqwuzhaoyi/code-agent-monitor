@@ -125,7 +125,9 @@ impl Watcher {
                         if let Ok(messages) = manager.get_session_logs(&session.id, 1) {
                             if let Some(last) = messages.last() {
                                 let preview = if last.content.len() > 500 {
-                                    format!("{}...", &last.content[..500])
+                                    // 安全截断 UTF-8 字符串，避免在多字节字符中间截断
+                                    let truncated: String = last.content.chars().take(500).collect();
+                                    format!("{}...", truncated)
                                 } else {
                                     last.content.clone()
                                 };

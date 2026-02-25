@@ -16,7 +16,7 @@ pub mod notification;
 pub mod service;
 
 // Re-exports from infra (backwards compatibility)
-pub use infra::{TmuxManager, ProcessScanner};
+pub use infra::{TmuxManager, ProcessScanner, truncate_str};
 pub use infra::jsonl::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_target_from_input};
 pub use infra::input::{InputWaitDetector, InputWaitResult, InputWaitPattern};
 

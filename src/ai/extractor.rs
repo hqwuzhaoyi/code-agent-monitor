@@ -500,7 +500,7 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
   * 任何 "动词ing…" 或 "动词ing..." 格式的状态提示
   * 括号内的运行提示（如 (running stop hook)、(executing)、(loading) 等）
   * 旋转动画字符（✢✻✶✽◐◑◒◓⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏）
-  * 进度条或百分比指示器
+  * 进度条（注意：底部状态栏的 ████░░░░░░ 41% 是上下文使用量，不是进度条，不算 PROCESSING）
 - DECISION: 如果终端在等待用户做关键决策，包括：
   * 询问"你倾向哪个方向"、"哪个方案"、"偏好"
   * 询问技术栈选择（如 React、Vue、纯 HTML 等）

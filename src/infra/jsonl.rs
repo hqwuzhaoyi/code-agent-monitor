@@ -362,11 +362,7 @@ fn extract_tool_target(tool_name: &str, input: &serde_json::Value) -> Option<Str
         "Bash" => {
             input.get("command").and_then(|c| c.as_str()).map(|s| {
                 // 截断长命令
-                if s.len() > 50 {
-                    format!("{}...", &s[..47])
-                } else {
-                    s.to_string()
-                }
+                super::truncate_str(s, 47)
             })
         }
         "Glob" => {
@@ -374,20 +370,12 @@ fn extract_tool_target(tool_name: &str, input: &serde_json::Value) -> Option<Str
         }
         "Grep" => {
             input.get("pattern").and_then(|p| p.as_str()).map(|s| {
-                if s.len() > 30 {
-                    format!("{}...", &s[..27])
-                } else {
-                    s.to_string()
-                }
+                super::truncate_str(s, 27)
             })
         }
         "Task" => {
             input.get("description").and_then(|d| d.as_str()).map(|s| {
-                if s.len() > 40 {
-                    format!("{}...", &s[..37])
-                } else {
-                    s.to_string()
-                }
+                super::truncate_str(s, 37)
             })
         }
         _ => None,
