@@ -12,6 +12,15 @@ impl TmuxManager {
         Self
     }
 
+    /// 检查 tmux 是否可用
+    pub fn is_available(&self) -> bool {
+        Command::new("tmux")
+            .arg("-V")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    }
+
     /// 创建新的 tmux session 并运行命令
     pub fn create_session(&self, session_name: &str, working_dir: &str, command: &str) -> Result<()> {
         debug!(session = %session_name, working_dir = %working_dir, "Creating tmux session");

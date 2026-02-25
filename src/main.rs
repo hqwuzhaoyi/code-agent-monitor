@@ -14,7 +14,7 @@ use code_agent_monitor::{
     ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
     NotificationEvent, NotificationEventType,
     LaunchdService,
-    cli::{CodexNotifyArgs, SetupArgs},
+    cli::{CodexNotifyArgs, SetupArgs, StartArgs},
 };
 use anyhow::Result;
 
@@ -29,6 +29,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// 启动 AI 编码代理 (Claude Code 或 Codex)
+    Start(StartArgs),
     /// 列出所有正在运行的代理进程
     List {
         /// 输出 JSON 格式
@@ -371,6 +373,9 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Start(args) => {
+            code_agent_monitor::cli::handle_start(args)?;
+        }
         Commands::List { json } => {
             let scanner = ProcessScanner::new();
             let agents = scanner.scan_agents()?;
