@@ -12,6 +12,8 @@
 
 use anyhow::Result;
 use std::process::Command;
+use std::fs::OpenOptions;
+use std::io::Write;
 use tracing::{info, error, debug, warn};
 use crate::agent::extractor::extract_message_from_snapshot;
 use crate::notification::urgency::{Urgency, get_urgency};
@@ -24,6 +26,18 @@ use crate::notification::webhook::{WebhookClient, WebhookConfig};
 use crate::notification::store::{NotificationStore, NotificationRecord};
 use crate::infra::terminal::truncate_for_status;
 use std::sync::Mutex;
+
+/// 记录到 hook.log
+fn log_to_hook_file(message: &str) {
+    let log_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".config/code-agent-monitor/hook.log");
+
+    let timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
+    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+        let _ = writeln!(file, "[{}] {}", timestamp, message);
+    }
+}
 
 /// Convert NotificationEventType to a string for dedup key generation
 /// Used when terminal_snapshot is not available
@@ -338,6 +352,16 @@ impl OpenclawNotifier {
         // If a webhook is configured, prefer it (single-channel delivery).
         // This is especially important for reply-required events so OpenClaw hooks/skills can run.
         self.send_via_gateway_async(&payload.to_json())?;
+
+        // 记录详细的发送内容到 hook.log
+        log_to_hook_file(&format!("📤 Webhook sent: agent={} event={} urgency={}",
+            agent_id, event_type_str, urgency.as_str()));
+        if let Some(ref extracted) = payload.context.extracted_message {
+            log_to_hook_file(&format!("   extracted_message: {}", extracted.replace('\n', "\\n")));
+        }
+        if let Some(ref fp) = payload.context.question_fingerprint {
+            log_to_hook_file(&format!("   fingerprint: {}", fp));
+        }
 
         // 记录到本地文件（供 TUI 显示）
         let summary = match &event.event_type {
