@@ -15,7 +15,7 @@ pub use daemon::WatcherDaemon;
 pub use monitor::AgentMonitor;
 pub use event_processor::EventProcessor;
 pub use stability::{StabilityState, StabilityDetector};
-pub use extractor::{ReactExtractor, HaikuExtractor, ExtractedMessage, MessageType, ExtractionResult, IterationConfig};
+pub use extractor::{ReactExtractor, HaikuExtractor, ExtractedMessage, MessageType, ExtractionResult, IterationConfig, extract_message_from_snapshot};
 
 // Adapter exports
 pub use adapter::{

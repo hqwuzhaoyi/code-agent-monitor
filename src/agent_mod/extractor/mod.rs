@@ -17,6 +17,77 @@ use crate::infra::tmux::TmuxManager;
 pub use prompts::{message_extraction_prompt, MESSAGE_EXTRACTION_SYSTEM};
 pub use traits::{ExtractionResult, ExtractedMessage, IterationConfig, MessageExtractor, MessageType};
 
+/// 从终端快照提取格式化消息的便捷函数
+///
+/// 使用 ReAct 循环迭代扩展上下文，直到提取完整的消息。
+/// 这是供 `openclaw.rs` 等模块使用的高级 API。
+///
+/// # 参数
+/// - `terminal_snapshot`: 终端快照内容
+///
+/// # 返回
+/// - `Some((message, fingerprint))`: 成功提取到消息和指纹
+/// - `None`: Agent 正在处理中、空闲或提取失败
+pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String, String)> {
+    let extractor = match HaikuExtractor::new() {
+        Ok(e) => e,
+        Err(e) => {
+            warn!(error = %e, "Failed to create HaikuExtractor");
+            return None;
+        }
+    };
+
+    // 先检查是否在处理中
+    if extractor.is_processing(terminal_snapshot) {
+        debug!("Agent is processing, skipping extraction");
+        return None;
+    }
+
+    // ReAct 循环：逐步扩展上下文
+    let config = IterationConfig::default();
+    for (iteration, &lines) in config.context_sizes.iter().enumerate() {
+        if iteration >= config.max_iterations {
+            warn!("Max iterations reached");
+            break;
+        }
+
+        debug!(iteration = iteration, lines = lines, "ReAct iteration");
+
+        match extractor.extract(terminal_snapshot, lines) {
+            ExtractionResult::Success(message) => {
+                // 检查是否是空闲状态
+                if matches!(message.message_type, MessageType::Idle { .. }) {
+                    debug!("Agent is idle, no question");
+                    return None;
+                }
+
+                info!(
+                    fingerprint = %message.fingerprint,
+                    iterations = iteration + 1,
+                    "Message extracted successfully"
+                );
+                return Some((message.content, message.fingerprint));
+            }
+            ExtractionResult::NeedMoreContext => {
+                debug!(lines = lines, "Need more context, expanding");
+                continue;
+            }
+            ExtractionResult::Processing => {
+                debug!("Agent is processing");
+                return None;
+            }
+            ExtractionResult::Failed(reason) => {
+                warn!(reason = %reason, "Extraction failed");
+                // 继续尝试更多上下文
+                continue;
+            }
+        }
+    }
+
+    warn!("Failed to extract message after all iterations");
+    None
+}
+
 /// Haiku 提取器实现
 ///
 /// 使用 Anthropic Haiku 模型进行消息提取。
