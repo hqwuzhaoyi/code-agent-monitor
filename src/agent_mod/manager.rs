@@ -348,6 +348,7 @@ impl AgentManager {
 
         // 立即保存到 agents.json（先于 Claude Code hook 触发）
         // 这样 session_start hook 触发时能正确匹配到 agent
+        let agent_type_str = agent_type.to_string(); // 保存用于日志
         let record = AgentRecord {
             agent_id: agent_id.clone(),
             agent_type,
@@ -366,20 +367,15 @@ impl AgentManager {
             Ok(())
         })?;
 
-        // 如果有初始 prompt，等待 Claude Code 就绪后发送
+        // 如果有初始 prompt，等待 agent 就绪后发送
         if let Some(prompt) = &request.initial_prompt {
-            // 循环检测 Claude Code 是否显示提示符
+            // 使用 adapter 的 detect_ready 方法检测就绪状态
             let max_attempts = 30; // 最多等待 30 秒
             let mut ready = false;
             for _ in 0..max_attempts {
                 std::thread::sleep(std::time::Duration::from_secs(1));
                 if let Ok(output) = self.tmux.capture_pane(&tmux_session, 30) {
-                    // 检测 Claude Code 就绪的标志：
-                    // - ❯ (U+276F) 是 Claude Code 的提示符
-                    // - > (U+003E) 是旧版本的提示符
-                    // - "Welcome to" 或 "Claude Code" 表示启动完成
-                    let claude_prompt_re = regex::Regex::new(r"(?m)^[❯>]\s*$").unwrap();
-                    if claude_prompt_re.is_match(&output) || output.contains("Welcome to") || output.contains("Claude Code") {
+                    if adapter.detect_ready(&output) {
                         ready = true;
                         // 额外等待 1 秒确保完全就绪
                         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -391,7 +387,7 @@ impl AgentManager {
                 self.tmux.send_keys(&tmux_session, prompt)?;
                 debug!(agent_id = %agent_id, "Initial prompt sent");
             } else {
-                warn!(agent_id = %agent_id, "Claude Code not ready within 30s, initial prompt not sent");
+                warn!(agent_id = %agent_id, agent_type = %agent_type_str, "Agent not ready within 30s, initial prompt not sent");
             }
         }
 
