@@ -9,10 +9,17 @@ Skills location: `~/clawd/skills/code-agent-monitor/SKILL.md`
 ### 常用命令
 
 ```bash
+# Agent 启动
+cam start                         # 启动 Claude Code（当前目录）
+cam start --agent codex           # 启动 Codex
+cam start --cwd /path/to/project  # 指定工作目录
+cam start "实现 TODO 应用"         # 带初始 prompt
+cam start --resume <session_id>   # 恢复会话
+
 # Agent 管理
 cam list                          # 列出所有代理进程
 cam sessions                      # 列出历史会话
-cam resume <session_id>           # 恢复会话
+cam resume <session_id>           # 恢复会话（attach tmux）
 
 # 通知调试
 echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id test --dry-run
@@ -134,6 +141,16 @@ CAM → POST /hooks/agent → Gateway → OpenClaw 对话
 - [Agent Teams Skill](skills/agent-teams/SKILL.md) - Team 编排详细用法
 - [通知处理 Skill](skills/cam-notify/SKILL.md) - 通知类型、自动审批规则、回复路由
 - [E2E 测试 Skill](skills/cam-e2e-test/SKILL.md) - 端到端测试流程
+- [E2E 测试报告](findings/e2e-test-report.md) - 通知链路测试结果
+
+## 已知问题
+
+| 问题 | 优先级 | 状态 |
+|------|--------|------|
+| 事件名称大小写不一致 | P1 | 待修复 |
+| Skill 文档字段与实际输出不匹配 | P3 | 待修复 |
+
+详见 [E2E 测试报告](findings/e2e-test-report.md)。
 
 ## 开发原则
 
