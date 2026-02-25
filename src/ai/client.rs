@@ -48,8 +48,8 @@ pub const ANTHROPIC_VERSION: &str = "2023-06-01";
 /// 默认模型 - MiniMax (免费额度，更稳定)
 pub const DEFAULT_MODEL: &str = "MiniMax/M2.5";
 
-/// 默认超时（毫秒）
-pub const DEFAULT_TIMEOUT_MS: u64 = 5000;
+/// 默认超时（毫秒）- 消息提取 API 调用
+pub const DEFAULT_TIMEOUT_MS: u64 = 15000;
 
 /// 默认最大 tokens
 pub const DEFAULT_MAX_TOKENS: u32 = 1500;
@@ -122,6 +122,9 @@ impl Default for AnthropicConfig {
 impl AnthropicConfig {
     /// 从环境和配置文件自动加载配置
     pub fn auto_load() -> Result<Self> {
+        // 加载超时配置
+        let timeout_ms = Self::load_timeout_from_config().unwrap_or(DEFAULT_TIMEOUT_MS);
+
         // 加载 providers 配置
         let providers = Self::load_providers_from_config();
         
@@ -133,16 +136,16 @@ impl AnthropicConfig {
                 api_key: primary.api_key.clone(),
                 base_url: primary.base_url.clone(),
                 model: primary.model.clone(),
-                timeout_ms: DEFAULT_TIMEOUT_MS,
+                timeout_ms,
                 max_tokens: DEFAULT_MAX_TOKENS,
                 webhook,
                 providers,
             });
         }
-        
+
         // 降级使用旧的配置方式
         let model = Self::load_model_from_config().unwrap_or_else(|| DEFAULT_MODEL.to_string());
-        
+
         // 优先使用 MiniMax 配置
         if let Some((api_key, base_url)) = Self::load_minimax_config()? {
             let webhook = Self::load_webhook_config();
@@ -150,21 +153,21 @@ impl AnthropicConfig {
                 api_key,
                 base_url,
                 model,
-                timeout_ms: DEFAULT_TIMEOUT_MS,
+                timeout_ms,
                 max_tokens: DEFAULT_MAX_TOKENS,
                 webhook,
                 providers: Vec::new(),
             });
         }
-        
+
         let (api_key, base_url) = Self::load_api_config()?;
         let webhook = Self::load_webhook_config();
-        
+
         Ok(Self {
             api_key,
             base_url,
             model,
-            timeout_ms: DEFAULT_TIMEOUT_MS,
+            timeout_ms,
             max_tokens: DEFAULT_MAX_TOKENS,
             webhook,
             providers: Vec::new(),
@@ -221,6 +224,26 @@ impl AnthropicConfig {
                             if !model.is_empty() {
                                 debug!("Loaded model from config: {}", model);
                                 return Some(model.to_string());
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
+    /// 从配置文件加载超时设置（毫秒）
+    fn load_timeout_from_config() -> Option<u64> {
+        if let Some(home) = dirs::home_dir() {
+            let config_path = home.join(".config/code-agent-monitor/config.json");
+            if config_path.exists() {
+                if let Ok(content) = fs::read_to_string(&config_path) {
+                    if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
+                        if let Some(timeout) = config.get("extraction_timeout_ms").and_then(|t| t.as_u64()) {
+                            if timeout > 0 {
+                                debug!("Loaded extraction timeout from config: {}ms", timeout);
+                                return Some(timeout);
                             }
                         }
                     }
