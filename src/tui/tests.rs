@@ -369,4 +369,94 @@ mod tests {
         // Notification index should change
         assert_ne!(app.notification_selected, 0);
     }
+
+    #[test]
+    fn test_notification_navigation_empty() {
+        let mut app = App::new();
+        assert_eq!(app.notification_selected, 0);
+        // Should not panic on empty list
+        app.next_notification();
+        assert_eq!(app.notification_selected, 0);
+        app.prev_notification();
+        assert_eq!(app.notification_selected, 0);
+        assert!(app.selected_notification().is_none());
+    }
+
+    #[test]
+    fn test_notification_navigation_single() {
+        let mut app = App::new();
+        app.notifications = vec![crate::tui::NotificationItem {
+            timestamp: chrono::Local::now(),
+            agent_id: "cam-1".to_string(),
+            message: "msg".to_string(),
+            urgency: crate::notification::Urgency::High,
+            event_type: "test".to_string(),
+            project: None,
+            event_detail: None,
+            terminal_snapshot: None,
+            risk_level: None,
+        }];
+
+        assert_eq!(app.notification_selected, 0);
+        app.next_notification();
+        assert_eq!(app.notification_selected, 0); // wraps to 0
+        app.prev_notification();
+        assert_eq!(app.notification_selected, 0); // wraps to 0
+    }
+
+    #[test]
+    fn test_notification_selection_stable_after_insert() {
+        let mut app = App::new();
+        let now = chrono::Local::now();
+
+        app.notifications = vec![
+            crate::tui::NotificationItem {
+                timestamp: now - chrono::Duration::minutes(10),
+                agent_id: "cam-old".to_string(),
+                message: "old msg".to_string(),
+                urgency: crate::notification::Urgency::Low,
+                event_type: "stop".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+            crate::tui::NotificationItem {
+                timestamp: now - chrono::Duration::minutes(5),
+                agent_id: "cam-target".to_string(),
+                message: "target msg".to_string(),
+                urgency: crate::notification::Urgency::High,
+                event_type: "permission_request".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+        ];
+        app.notification_selected = 1;
+
+        assert_eq!(app.selected_notification().unwrap().agent_id, "cam-target");
+
+        // Simulate refresh: a new notification was inserted at the beginning
+        app.notifications.insert(
+            0,
+            crate::tui::NotificationItem {
+                timestamp: now - chrono::Duration::minutes(15),
+                agent_id: "cam-new-old".to_string(),
+                message: "new old msg".to_string(),
+                urgency: crate::notification::Urgency::Low,
+                event_type: "stop".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+        );
+
+        // Call stabilize method
+        app.stabilize_notification_selection("cam-target", now - chrono::Duration::minutes(5));
+
+        // Should still point to cam-target (now at index 2)
+        assert_eq!(app.selected_notification().unwrap().agent_id, "cam-target");
+    }
 }
