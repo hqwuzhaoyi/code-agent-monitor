@@ -189,6 +189,19 @@ impl App {
         self.notifications.get(self.notification_selected)
     }
 
+    /// 稳定通知选中项：刷新后尝试匹配之前选中的通知
+    pub fn stabilize_notification_selection(&mut self, agent_id: &str, timestamp: DateTime<Local>) {
+        if let Some(pos) = self.notifications.iter().position(|n| {
+            n.agent_id == agent_id && n.timestamp == timestamp
+        }) {
+            self.notification_selected = pos;
+        }
+        // Fallback: clamp to bounds
+        if self.notification_selected >= self.notifications.len() {
+            self.notification_selected = self.notifications.len().saturating_sub(1);
+        }
+    }
+
     /// 刷新 agent 列表
     pub fn refresh_agents(&mut self) -> AppResult<()> {
         let agent_manager = AgentManager::new();
@@ -275,6 +288,11 @@ impl App {
             return;
         }
 
+        // Save current selection identity
+        let prev_selection = self.selected_notification().map(|n| {
+            (n.agent_id.clone(), n.timestamp)
+        });
+
         self.notifications_mtime = current_mtime;
         self.notifications = NotificationStore::read_recent(20)
             .into_iter()
@@ -291,8 +309,10 @@ impl App {
             })
             .collect();
 
-        // 确保选中索引不越界
-        if self.notification_selected >= self.notifications.len() {
+        // Restore selection by identity
+        if let Some((agent_id, ts)) = prev_selection {
+            self.stabilize_notification_selection(&agent_id, ts);
+        } else if self.notification_selected >= self.notifications.len() {
             self.notification_selected = self.notifications.len().saturating_sub(1);
         }
     }
