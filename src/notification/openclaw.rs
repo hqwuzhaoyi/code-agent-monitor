@@ -10,22 +10,22 @@
 //! - `notification::terminal_cleaner` - 终端输出清理
 //! - `notification::system_event` - System Event 结构化数据
 
+use crate::agent::extractor::extract_message_from_snapshot;
+use crate::infra::terminal::truncate_for_status;
+use crate::notification::channel::SendResult;
+use crate::notification::dedup_key::generate_dedup_key;
+use crate::notification::deduplicator::NotificationDeduplicator;
+use crate::notification::event::{NotificationEvent, NotificationEventType};
+use crate::notification::payload::PayloadBuilder;
+use crate::notification::store::{NotificationRecord, NotificationStore};
+use crate::notification::urgency::{get_urgency, Urgency};
+use crate::notification::webhook::{WebhookClient, WebhookConfig};
 use anyhow::Result;
-use std::process::Command;
 use std::fs::OpenOptions;
 use std::io::Write;
-use tracing::{info, error, debug, warn};
-use crate::agent::extractor::extract_message_from_snapshot;
-use crate::notification::urgency::{Urgency, get_urgency};
-use crate::notification::payload::PayloadBuilder;
-use crate::notification::event::{NotificationEvent, NotificationEventType};
-use crate::notification::deduplicator::NotificationDeduplicator;
-use crate::notification::dedup_key::generate_dedup_key;
-use crate::notification::channel::SendResult;
-use crate::notification::webhook::{WebhookClient, WebhookConfig};
-use crate::notification::store::{NotificationStore, NotificationRecord};
-use crate::infra::terminal::truncate_for_status;
+use std::process::Command;
 use std::sync::Mutex;
+use tracing::{debug, error, info, warn};
 
 /// 记录到 hook.log
 fn log_to_hook_file(message: &str) {
@@ -43,13 +43,22 @@ fn log_to_hook_file(message: &str) {
 /// Used when terminal_snapshot is not available
 fn event_type_to_string(event_type: &NotificationEventType) -> String {
     match event_type {
-        NotificationEventType::WaitingForInput { pattern_type, is_decision_required } => {
-            format!("waiting_for_input:{}:{}", pattern_type, is_decision_required)
+        NotificationEventType::WaitingForInput {
+            pattern_type,
+            is_decision_required,
+        } => {
+            format!(
+                "waiting_for_input:{}:{}",
+                pattern_type, is_decision_required
+            )
         }
         NotificationEventType::PermissionRequest { tool_name, .. } => {
             format!("permission_request:{}", tool_name)
         }
-        NotificationEventType::Notification { notification_type, message } => {
+        NotificationEventType::Notification {
+            notification_type,
+            message,
+        } => {
             format!("notification:{}:{}", notification_type, message)
         }
         NotificationEventType::AgentExited => "agent_exited".to_string(),
@@ -70,6 +79,9 @@ pub struct OpenclawNotifier {
     no_ai: bool,
     /// Webhook client (可选，用于 HTTP 触发)
     webhook_client: Option<WebhookClient>,
+    /// Optional defaults for webhook delivery routing
+    webhook_default_channel: Option<String>,
+    webhook_default_to: Option<String>,
     /// Payload 构建器
     payload_builder: PayloadBuilder,
     /// 通知去重器
@@ -84,6 +96,8 @@ impl OpenclawNotifier {
             dry_run: false,
             no_ai: false,
             webhook_client: None,
+            webhook_default_channel: None,
+            webhook_default_to: None,
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
         }
@@ -91,12 +105,16 @@ impl OpenclawNotifier {
 
     /// 使用 webhook 配置创建通知器
     pub fn with_webhook(config: WebhookConfig) -> Result<Self, String> {
+        let webhook_default_channel = config.default_channel.clone();
+        let webhook_default_to = config.default_to.clone();
         let webhook_client = WebhookClient::new(config)?;
         Ok(Self {
             openclaw_cmd: Self::find_openclaw_path(),
             dry_run: false,
             no_ai: false,
             webhook_client: Some(webhook_client),
+            webhook_default_channel,
+            webhook_default_to,
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
         })
@@ -162,7 +180,8 @@ impl OpenclawNotifier {
         context: &str,
     ) -> serde_json::Value {
         let urgency = get_urgency(event_type, context);
-        self.payload_builder.create_payload(agent_id, event_type, pattern_or_path, context, urgency)
+        self.payload_builder
+            .create_payload(agent_id, event_type, pattern_or_path, context, urgency)
     }
 
     /// 发送事件到 channel
@@ -180,7 +199,10 @@ impl OpenclawNotifier {
         // 原因：外部会话无法远程回复，通知只会造成打扰
         if agent_id.starts_with("ext-") {
             if self.dry_run {
-                eprintln!("[DRY-RUN] External session (cannot reply remotely), skipping: {} {}", agent_id, event_type);
+                eprintln!(
+                    "[DRY-RUN] External session (cannot reply remotely), skipping: {} {}",
+                    agent_id, event_type
+                );
             }
             debug!(agent_id = %agent_id, event_type = %event_type, "Skipping external session notification");
             return Ok(SendResult::Skipped("external session".to_string()));
@@ -214,7 +236,10 @@ impl OpenclawNotifier {
             Urgency::Low => {
                 // LOW urgency: 静默处理，不发送通知
                 if self.dry_run {
-                    eprintln!("[DRY-RUN] LOW urgency, skipping: {} {}", event_type, agent_id);
+                    eprintln!(
+                        "[DRY-RUN] LOW urgency, skipping: {} {}",
+                        event_type, agent_id
+                    );
                 }
                 debug!(
                     agent_id = %agent_id,
@@ -260,7 +285,9 @@ impl OpenclawNotifier {
         let event_type_str = match &event.event_type {
             NotificationEventType::WaitingForInput { .. } => "WaitingForInput",
             NotificationEventType::PermissionRequest { .. } => "permission_request",
-            NotificationEventType::Notification { notification_type, .. } => {
+            NotificationEventType::Notification {
+                notification_type, ..
+            } => {
                 if notification_type == "idle_prompt" || notification_type == "permission_prompt" {
                     "notification"
                 } else {
@@ -275,12 +302,14 @@ impl OpenclawNotifier {
         };
 
         let context_for_urgency = match &event.event_type {
-            NotificationEventType::Notification { notification_type, message } => {
-                serde_json::json!({
-                    "notification_type": notification_type,
-                    "message": message
-                }).to_string()
-            }
+            NotificationEventType::Notification {
+                notification_type,
+                message,
+            } => serde_json::json!({
+                "notification_type": notification_type,
+                "message": message
+            })
+            .to_string(),
             _ => String::new(),
         };
 
@@ -289,7 +318,10 @@ impl OpenclawNotifier {
         // LOW urgency 静默处理
         if matches!(urgency, Urgency::Low) {
             debug!(agent_id = %agent_id, event_type = %event_type_str, "Notification skipped (LOW urgency)");
-            return Ok(SendResult::Skipped(format!("LOW urgency ({})", event_type_str)));
+            return Ok(SendResult::Skipped(format!(
+                "LOW urgency ({})",
+                event_type_str
+            )));
         }
 
         // 去重检查
@@ -299,7 +331,8 @@ impl OpenclawNotifier {
             let truncated = truncate_for_status(snapshot);
             generate_dedup_key(&truncated)
         } else {
-            let fallback_content = format!("{}:{}", event_type_to_string(&event.event_type), agent_id);
+            let fallback_content =
+                format!("{}:{}", event_type_to_string(&event.event_type), agent_id);
             generate_dedup_key(&fallback_content)
         };
 
@@ -319,9 +352,10 @@ impl OpenclawNotifier {
         // 只在确定要发送时才调用，避免浪费 API 调用
         if !self.no_ai {
             if let Some(snapshot) = &event.terminal_snapshot {
-                if matches!(event.event_type,
-                    NotificationEventType::WaitingForInput { .. } |
-                    NotificationEventType::PermissionRequest { .. }
+                if matches!(
+                    event.event_type,
+                    NotificationEventType::WaitingForInput { .. }
+                        | NotificationEventType::PermissionRequest { .. }
                 ) {
                     match extract_message_from_snapshot(snapshot) {
                         Some((message, fingerprint)) => {
@@ -345,7 +379,10 @@ impl OpenclawNotifier {
 
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send system event:");
-            eprintln!("{}", serde_json::to_string_pretty(&payload).unwrap_or_default());
+            eprintln!(
+                "{}",
+                serde_json::to_string_pretty(&payload).unwrap_or_default()
+            );
             return Ok(SendResult::Sent);
         }
 
@@ -354,10 +391,17 @@ impl OpenclawNotifier {
         self.send_via_gateway_async(&payload.to_json())?;
 
         // 记录详细的发送内容到 hook.log
-        log_to_hook_file(&format!("📤 Webhook sent: agent={} event={} urgency={}",
-            agent_id, event_type_str, urgency.as_str()));
+        log_to_hook_file(&format!(
+            "📤 Webhook sent: agent={} event={} urgency={}",
+            agent_id,
+            event_type_str,
+            urgency.as_str()
+        ));
         if let Some(ref extracted) = payload.context.extracted_message {
-            log_to_hook_file(&format!("   extracted_message: {}", extracted.replace('\n', "\\n")));
+            log_to_hook_file(&format!(
+                "   extracted_message: {}",
+                extracted.replace('\n', "\\n")
+            ));
         }
         if let Some(ref fp) = payload.context.question_fingerprint {
             log_to_hook_file(&format!("   fingerprint: {}", fp));
@@ -371,7 +415,10 @@ impl OpenclawNotifier {
             NotificationEventType::WaitingForInput { pattern_type, .. } => {
                 format!("Waiting: {}", pattern_type)
             }
-            NotificationEventType::Notification { notification_type, message } => {
+            NotificationEventType::Notification {
+                notification_type,
+                message,
+            } => {
                 if message.is_empty() {
                     notification_type.clone()
                 } else {
@@ -418,7 +465,10 @@ impl OpenclawNotifier {
 
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send via system event");
-            eprintln!("[DRY-RUN] Payload: {}", serde_json::to_string_pretty(payload).unwrap_or_default());
+            eprintln!(
+                "[DRY-RUN] Payload: {}",
+                serde_json::to_string_pretty(payload).unwrap_or_default()
+            );
             return Ok(());
         }
 
@@ -428,11 +478,15 @@ impl OpenclawNotifier {
         // 超时设置为 60 秒，足够 Agent 处理并发送通知
         let output = Command::new(&self.openclaw_cmd)
             .args([
-                "system", "event",
-                "--text", &payload_text,
-                "--mode", "now",
+                "system",
+                "event",
+                "--text",
+                &payload_text,
+                "--mode",
+                "now",
                 "--expect-final",
-                "--timeout", "60000",
+                "--timeout",
+                "60000",
             ])
             .output();
 
@@ -457,14 +511,18 @@ impl OpenclawNotifier {
     fn send_via_webhook(&self, payload: &serde_json::Value) -> anyhow::Result<()> {
         if let Some(ref client) = self.webhook_client {
             // 从 payload 中提取消息内容，优先使用格式化消息
-            let message = if payload.get("event_type").is_some() {
+            // NOTE: SystemEventPayload 使用 camelCase (eventType)，旧版 PayloadBuilder 使用 snake_case (event_type)
+            let message = if payload.get("eventType").is_some() || payload.get("event_type").is_some() {
                 // 这是 SystemEventPayload 格式，使用格式化消息
                 use crate::notification::system_event::SystemEventPayload;
                 if let Ok(sep) = serde_json::from_value::<SystemEventPayload>(payload.clone()) {
                     let mut msg = sep.to_telegram_message();
 
                     // For reply-required events, include raw JSON so hooks/skills (and humans) have full context.
-                    if matches!(sep.event_type.as_str(), "permission_request" | "waiting_for_input") {
+                    if matches!(
+                        sep.event_type.as_str(),
+                        "permission_request" | "waiting_for_input"
+                    ) {
                         let raw = serde_json::to_string_pretty(payload).unwrap_or_default();
                         let max_chars = 3500usize;
                         let raw_trunc: String = raw.chars().take(max_chars).collect();
@@ -478,19 +536,24 @@ impl OpenclawNotifier {
 
                     msg
                 } else {
-                    payload.get("message")
+                    payload
+                        .get("message")
                         .and_then(|m| m.as_str())
                         .unwrap_or("Agent notification")
                         .to_string()
                 }
             } else {
-                payload.get("message")
+                payload
+                    .get("message")
                     .and_then(|m| m.as_str())
                     .unwrap_or("Agent notification")
                     .to_string()
             };
 
-            let agent_id = payload.get("agent_id")
+            // 支持 camelCase (agentId) 和 snake_case (agent_id)
+            let agent_id = payload
+                .get("agentId")
+                .or_else(|| payload.get("agent_id"))
                 .and_then(|m| m.as_str())
                 .map(String::from);
 
@@ -500,8 +563,8 @@ impl OpenclawNotifier {
             let result = client.send_notification_blocking(
                 message,
                 agent_id,
-                None, // channel
-                None, // to
+                self.webhook_default_channel.clone(),
+                self.webhook_default_to.clone(),
             );
 
             match result {
@@ -604,7 +667,10 @@ line 1"#;
         assert_eq!(payload["agent_id"], "cam-123");
         assert_eq!(payload["project"], "/workspace");
         assert_eq!(payload["event"]["tool_name"], "Bash");
-        assert!(payload["event"]["tool_input"]["command"].as_str().unwrap().contains("rm -rf"));
+        assert!(payload["event"]["tool_input"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("rm -rf"));
         assert!(payload["summary"].as_str().unwrap().contains("Bash"));
         assert!(payload["timestamp"].as_str().is_some());
     }
@@ -626,13 +692,21 @@ line 1"#;
     fn test_create_payload_waiting_for_input() {
         let notifier = OpenclawNotifier::new();
 
-        let payload = notifier.create_payload("cam-789", "WaitingForInput", "Confirmation", "Continue? [Y/n]");
+        let payload = notifier.create_payload(
+            "cam-789",
+            "WaitingForInput",
+            "Confirmation",
+            "Continue? [Y/n]",
+        );
 
         assert_eq!(payload["urgency"], "HIGH");
         assert_eq!(payload["event_type"], "WaitingForInput");
         assert_eq!(payload["event"]["pattern_type"], "Confirmation");
         assert_eq!(payload["event"]["prompt"], "Continue? [Y/n]");
-        assert!(payload["summary"].as_str().unwrap().contains("Confirmation"));
+        assert!(payload["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Confirmation"));
     }
 
     #[test]
@@ -676,7 +750,10 @@ $ cargo build
 
         assert_eq!(payload["urgency"], "MEDIUM");
         assert!(payload["terminal_snapshot"].as_str().is_some());
-        assert!(payload["terminal_snapshot"].as_str().unwrap().contains("cargo build"));
+        assert!(payload["terminal_snapshot"]
+            .as_str()
+            .unwrap()
+            .contains("cargo build"));
     }
 
     #[test]
@@ -684,10 +761,12 @@ $ cargo build
         let notifier = OpenclawNotifier::new();
 
         // 创建超过 15 行的终端输出
-        let mut long_output = String::from(r#"{"cwd": "/tmp"}
+        let mut long_output = String::from(
+            r#"{"cwd": "/tmp"}
 
 --- 终端快照 ---
-"#);
+"#,
+        );
         for i in 1..=20 {
             long_output.push_str(&format!("line {}\n", i));
         }
@@ -711,12 +790,9 @@ $ cargo build
         let notifier = OpenclawNotifier::new().with_dry_run(true).with_no_ai(true);
 
         // 创建一个包含问题的 stop 事件
-        let event = NotificationEvent::new(
-            "cam-test".to_string(),
-            NotificationEventType::Stop,
-        )
-        .with_project_path("/workspace/test")
-        .with_terminal_snapshot("❯ 问我想要实现什么功能\n\n⏺ 你想要实现什么功能？\n\n❯ ");
+        let event = NotificationEvent::new("cam-test".to_string(), NotificationEventType::Stop)
+            .with_project_path("/workspace/test")
+            .with_terminal_snapshot("❯ 问我想要实现什么功能\n\n⏺ 你想要实现什么功能？\n\n❯ ");
 
         // 发送通知
         let result = notifier.send_notification_event(&event);
@@ -732,12 +808,9 @@ $ cargo build
         let notifier = OpenclawNotifier::new().with_dry_run(true);
 
         // 创建一个不包含问题的 stop 事件
-        let event = NotificationEvent::new(
-            "cam-test".to_string(),
-            NotificationEventType::Stop,
-        )
-        .with_project_path("/workspace/test")
-        .with_terminal_snapshot("Task completed successfully.\n\n❯ ");
+        let event = NotificationEvent::new("cam-test".to_string(), NotificationEventType::Stop)
+            .with_project_path("/workspace/test")
+            .with_terminal_snapshot("Task completed successfully.\n\n❯ ");
 
         let result = notifier.send_notification_event(&event);
 
@@ -750,7 +823,9 @@ $ cargo build
     #[test]
     fn test_event_type_to_string_produces_unique_keys() {
         // Different event types should produce different strings
-        let error_event = NotificationEventType::Error { message: "test error".to_string() };
+        let error_event = NotificationEventType::Error {
+            message: "test error".to_string(),
+        };
         let permission_event = NotificationEventType::PermissionRequest {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({"command": "ls"}),
@@ -779,7 +854,9 @@ $ cargo build
         let message1 = "Error occurred";
         let message2 = "Permission needed";
 
-        let error_event = NotificationEventType::Error { message: "API error".to_string() };
+        let error_event = NotificationEventType::Error {
+            message: "API error".to_string(),
+        };
         let permission_event = NotificationEventType::PermissionRequest {
             tool_name: "Bash".to_string(),
             tool_input: serde_json::json!({"command": "rm -rf /tmp"}),
@@ -793,21 +870,37 @@ $ cargo build
         let key2 = generate_dedup_key(&fallback2);
 
         // Keys should be different
-        assert_ne!(key1, key2, "Different events without snapshots should have different dedup keys");
+        assert_ne!(
+            key1, key2,
+            "Different events without snapshots should have different dedup keys"
+        );
     }
 
     #[test]
     fn test_same_event_type_different_message_different_keys() {
         // Same event type but different messages should get different keys
-        let event_type = NotificationEventType::Error { message: "error1".to_string() };
+        let event_type = NotificationEventType::Error {
+            message: "error1".to_string(),
+        };
 
-        let fallback1 = format!("{}:{}", event_type_to_string(&event_type), "First error message");
-        let fallback2 = format!("{}:{}", event_type_to_string(&event_type), "Second error message");
+        let fallback1 = format!(
+            "{}:{}",
+            event_type_to_string(&event_type),
+            "First error message"
+        );
+        let fallback2 = format!(
+            "{}:{}",
+            event_type_to_string(&event_type),
+            "Second error message"
+        );
 
         let key1 = generate_dedup_key(&fallback1);
         let key2 = generate_dedup_key(&fallback2);
 
-        assert_ne!(key1, key2, "Same event type with different messages should have different keys");
+        assert_ne!(
+            key1, key2,
+            "Same event type with different messages should have different keys"
+        );
     }
 
     // ==================== Passed dedup_key preference tests ====================
@@ -826,7 +919,9 @@ $ cargo build
         .with_dedup_key("watcher-generated-key-123");
 
         // Verify the dedup_key is set
-        assert_eq!(event.dedup_key, Some("watcher-generated-key-123".to_string()));
+        assert_eq!(
+            event.dedup_key,
+            Some("watcher-generated-key-123".to_string())
+        );
     }
-
 }

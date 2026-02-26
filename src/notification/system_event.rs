@@ -7,11 +7,15 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::notification::event::{NotificationEvent, NotificationEventType};
-use crate::notification::urgency::Urgency;
 use crate::notification::summarizer::NotificationSummarizer;
+use crate::notification::urgency::Urgency;
 
 /// System Event Payload - 发送给 OpenClaw 的结构化数据
+///
+/// NOTE: OpenClaw Gateway 使用 camelCase 字段名。
+/// 使用 `#[serde(rename_all = "camelCase")]` 确保序列化时转换为 camelCase。
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SystemEventPayload {
     /// 来源标识
     pub source: String,
@@ -34,18 +38,25 @@ pub struct SystemEventPayload {
 }
 
 /// 事件数据
+///
+/// NOTE: 使用 camelCase 以匹配 OpenClaw Gateway 期望的格式
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(untagged)]
+#[serde(untagged, rename_all = "camelCase")]
 pub enum EventData {
     PermissionRequest {
+        #[serde(rename = "toolName")]
         tool_name: String,
+        #[serde(rename = "toolInput")]
         tool_input: Value,
     },
     WaitingForInput {
+        #[serde(rename = "patternType")]
         pattern_type: String,
+        #[serde(rename = "isDecisionRequired")]
         is_decision_required: bool,
     },
     Notification {
+        #[serde(rename = "notificationType")]
         notification_type: String,
         message: String,
     },
@@ -56,7 +67,10 @@ pub enum EventData {
 }
 
 /// 上下文信息
+///
+/// NOTE: 使用 camelCase 以匹配 OpenClaw Gateway 期望的格式
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct EventContext {
     /// 终端快照
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -119,41 +133,48 @@ impl SystemEventPayload {
         };
 
         let event_data = match &event.event_type {
-            NotificationEventType::PermissionRequest { tool_name, tool_input } => {
-                EventData::PermissionRequest {
-                    tool_name: tool_name.clone(),
-                    tool_input: tool_input.clone(),
-                }
-            }
-            NotificationEventType::WaitingForInput { pattern_type, is_decision_required } => {
-                EventData::WaitingForInput {
-                    pattern_type: pattern_type.clone(),
-                    is_decision_required: *is_decision_required,
-                }
-            }
-            NotificationEventType::Notification { notification_type, message } => {
-                EventData::Notification {
-                    notification_type: notification_type.clone(),
-                    message: message.clone(),
-                }
-            }
-            NotificationEventType::Error { message } => {
-                EventData::Error {
-                    message: message.clone(),
-                }
-            }
+            NotificationEventType::PermissionRequest {
+                tool_name,
+                tool_input,
+            } => EventData::PermissionRequest {
+                tool_name: tool_name.clone(),
+                tool_input: tool_input.clone(),
+            },
+            NotificationEventType::WaitingForInput {
+                pattern_type,
+                is_decision_required,
+            } => EventData::WaitingForInput {
+                pattern_type: pattern_type.clone(),
+                is_decision_required: *is_decision_required,
+            },
+            NotificationEventType::Notification {
+                notification_type,
+                message,
+            } => EventData::Notification {
+                notification_type: notification_type.clone(),
+                message: message.clone(),
+            },
+            NotificationEventType::Error { message } => EventData::Error {
+                message: message.clone(),
+            },
             _ => EventData::Empty {},
         };
 
         // 计算风险等级
         let risk_level = match &event.event_type {
-            NotificationEventType::PermissionRequest { tool_name, tool_input } => {
+            NotificationEventType::PermissionRequest {
+                tool_name,
+                tool_input,
+            } => {
                 let input_str = tool_input.to_string();
                 assess_risk_level(tool_name, &input_str).to_string()
             }
             // WaitingForInput 需要用户交互
             // 如果是需要关键决策，设为 HIGH
-            NotificationEventType::WaitingForInput { is_decision_required, .. } => {
+            NotificationEventType::WaitingForInput {
+                is_decision_required,
+                ..
+            } => {
                 if *is_decision_required {
                     "HIGH".to_string()
                 } else {
@@ -207,7 +228,11 @@ impl SystemEventPayload {
                 // 优先使用 AI 提取的消息
                 if let Some(extracted) = &self.context.extracted_message {
                     extracted.clone()
-                } else if let EventData::PermissionRequest { tool_name, tool_input } = &self.event_data {
+                } else if let EventData::PermissionRequest {
+                    tool_name,
+                    tool_input,
+                } = &self.event_data
+                {
                     let cmd = tool_input
                         .get("command")
                         .or_else(|| tool_input.get("file_path"))
@@ -246,7 +271,11 @@ impl SystemEventPayload {
             }
             "notification" => {
                 // Show the actual notification message
-                if let EventData::Notification { message, notification_type } = &self.event_data {
+                if let EventData::Notification {
+                    message,
+                    notification_type,
+                } = &self.event_data
+                {
                     format!("{}: {}", notification_type, message)
                 } else {
                     "通知".to_string()
@@ -280,12 +309,7 @@ impl SystemEventPayload {
 
         format!(
             "{} *CAM* {}\n\n{}\n\n风险: {} {}\n\n{}",
-            emoji,
-            self.agent_id,
-            event_desc,
-            risk_emoji,
-            risk,
-            action_hint
+            emoji, self.agent_id, event_desc, risk_emoji, risk, action_hint
         )
     }
 }
@@ -301,13 +325,22 @@ mod tests {
 
     #[test]
     fn test_assess_risk_level_bash_high() {
-        assert_eq!(assess_risk_level("Bash", r#"{"command": "rm -rf /"}"#), "HIGH");
+        assert_eq!(
+            assess_risk_level("Bash", r#"{"command": "rm -rf /"}"#),
+            "HIGH"
+        );
     }
 
     #[test]
     fn test_assess_risk_level_write() {
-        assert_eq!(assess_risk_level("Write", r#"{"file_path": "/tmp/test.txt"}"#), "LOW");
-        assert_eq!(assess_risk_level("Write", r#"{"file_path": "/etc/passwd"}"#), "HIGH");
+        assert_eq!(
+            assess_risk_level("Write", r#"{"file_path": "/tmp/test.txt"}"#),
+            "LOW"
+        );
+        assert_eq!(
+            assess_risk_level("Write", r#"{"file_path": "/etc/passwd"}"#),
+            "HIGH"
+        );
     }
 
     #[test]
@@ -335,7 +368,14 @@ mod tests {
 
         let json = payload.to_json();
         assert_eq!(json["source"], "cam");
-        assert_eq!(json["event_type"], "error");
+        // 验证 camelCase 序列化
+        assert!(json.get("eventType").is_some(), "should use camelCase: eventType");
+        assert!(json.get("agentId").is_some(), "should use camelCase: agentId");
+        assert!(json.get("projectPath").is_some(), "should use camelCase: projectPath");
+        assert!(json.get("eventData").is_some(), "should use camelCase: eventData");
+        // 验证不存在 snake_case
+        assert!(json.get("event_type").is_none(), "should NOT use snake_case: event_type");
+        assert!(json.get("agent_id").is_none(), "should NOT use snake_case: agent_id");
     }
 
     #[test]
@@ -345,7 +385,12 @@ mod tests {
             "Bash",
             serde_json::json!({"command": "echo hi"}),
         );
-        event.terminal_snapshot = Some((1..=50).map(|i| format!("line {}", i)).collect::<Vec<_>>().join("\n"));
+        event.terminal_snapshot = Some(
+            (1..=50)
+                .map(|i| format!("line {}", i))
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
 
         let payload = SystemEventPayload::from_event(&event, Urgency::High);
         let msg = payload.to_telegram_message();

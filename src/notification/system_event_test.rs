@@ -2,8 +2,8 @@
 
 #[cfg(test)]
 mod tests {
+    use crate::notification::event::NotificationEvent;
     use crate::notification::system_event::*;
-    use crate::notification::event::{NotificationEvent, NotificationEventType};
     use crate::notification::urgency::Urgency;
     use serde_json::json;
 
@@ -13,7 +13,8 @@ mod tests {
             "cam-test",
             "Bash",
             json!({"command": "npm install"}),
-        ).with_project_path("/workspace/myapp");
+        )
+        .with_project_path("/workspace/myapp");
 
         let payload = SystemEventPayload::from_event(&event, Urgency::High);
 
@@ -24,9 +25,9 @@ mod tests {
         assert_eq!(payload.urgency, "HIGH");
         assert_eq!(payload.project_path, Some("/workspace/myapp".to_string()));
 
-        // 验证 event_data
+        // 验证 event_data (camelCase)
         let json = payload.to_json();
-        assert_eq!(json["event_data"]["tool_name"], "Bash");
+        assert_eq!(json["eventData"]["toolName"], "Bash");
     }
 
     #[test]
@@ -37,7 +38,8 @@ mod tests {
 
         assert_eq!(payload.event_type, "waiting_for_input");
         let json = payload.to_json();
-        assert_eq!(json["event_data"]["pattern_type"], "ClaudePrompt");
+        // camelCase: patternType
+        assert_eq!(json["eventData"]["patternType"], "ClaudePrompt");
     }
 
     #[test]
@@ -48,7 +50,8 @@ mod tests {
 
         assert_eq!(payload.event_type, "error");
         let json = payload.to_json();
-        assert_eq!(json["event_data"]["message"], "Connection failed");
+        // message 不需要 rename
+        assert_eq!(json["eventData"]["message"], "Connection failed");
     }
 
     #[test]
@@ -58,7 +61,8 @@ mod tests {
 
         let json_str = serde_json::to_string(&payload).unwrap();
         assert!(json_str.contains("\"source\":\"cam\""));
-        assert!(json_str.contains("\"event_type\":\"agent_exited\""));
+        // camelCase: eventType
+        assert!(json_str.contains("\"eventType\":\"agent_exited\""));
     }
 
     #[test]
@@ -73,11 +77,8 @@ mod tests {
         assert_eq!(payload.context.risk_level, "HIGH");
 
         // 低风险命令
-        let event = NotificationEvent::permission_request(
-            "cam-test",
-            "Bash",
-            json!({"command": "ls -la"}),
-        );
+        let event =
+            NotificationEvent::permission_request("cam-test", "Bash", json!({"command": "ls -la"}));
         let payload = SystemEventPayload::from_event(&event, Urgency::High);
         assert_eq!(payload.context.risk_level, "LOW");
     }
