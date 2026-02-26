@@ -75,19 +75,28 @@ fn handle_filter_key(app: &mut crate::tui::App, key: KeyEvent) {
 fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.quit(),
-        KeyCode::Char('j') | KeyCode::Down => app.next_agent(),
-        KeyCode::Char('k') | KeyCode::Up => app.prev_agent(),
+        KeyCode::Tab => app.toggle_focus(),
+        KeyCode::Char('j') | KeyCode::Down => match app.focus {
+            crate::tui::Focus::AgentList => app.next_agent(),
+            crate::tui::Focus::Notifications => app.next_notification(),
+        },
+        KeyCode::Char('k') | KeyCode::Up => match app.focus {
+            crate::tui::Focus::AgentList => app.prev_agent(),
+            crate::tui::Focus::Notifications => app.prev_notification(),
+        },
         KeyCode::Char('l') => app.toggle_view(),
         KeyCode::Char('/') => app.enter_filter_mode(),
         KeyCode::Esc => {
-            // Esc 清除过滤
             if !app.filter_input.is_empty() {
                 app.clear_filter();
+            } else if app.focus != crate::tui::Focus::AgentList {
+                app.focus = crate::tui::Focus::AgentList;
             }
         }
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         KeyCode::Enter => {
-            // Enter 跳转 tmux（在 run 函数中处理）
+            // Enter 在 Agent 焦点时跳转 tmux（在 run 函数中处理）
+            // 在 Notifications 焦点时暂无操作（预留）
         }
         _ => {}
     }

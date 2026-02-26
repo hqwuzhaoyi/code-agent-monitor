@@ -250,4 +250,53 @@ mod tests {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), None);
     }
+
+    #[test]
+    fn test_focus_toggle() {
+        use crate::tui::Focus;
+        let mut app = App::new();
+        assert_eq!(app.focus, Focus::AgentList);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::Notifications);
+        app.toggle_focus();
+        assert_eq!(app.focus, Focus::AgentList);
+    }
+
+    #[test]
+    fn test_notification_navigation() {
+        use crate::tui::Focus;
+        let mut app = App::new();
+        app.notifications = vec![
+            crate::tui::NotificationItem {
+                timestamp: chrono::Local::now(),
+                agent_id: "cam-1".to_string(),
+                message: "msg1".to_string(),
+                urgency: crate::notification::Urgency::High,
+                event_type: "permission_request".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+            crate::tui::NotificationItem {
+                timestamp: chrono::Local::now(),
+                agent_id: "cam-2".to_string(),
+                message: "msg2".to_string(),
+                urgency: crate::notification::Urgency::Medium,
+                event_type: "AgentExited".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+        ];
+
+        assert_eq!(app.notification_selected, 0);
+        app.next_notification();
+        assert_eq!(app.notification_selected, 1);
+        app.next_notification();
+        assert_eq!(app.notification_selected, 0); // wrap
+        app.prev_notification();
+        assert_eq!(app.notification_selected, 1);
+    }
 }

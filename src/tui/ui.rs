@@ -66,8 +66,11 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     // Agent 列表（使用预先计算的 filtered）
     render_agent_list_with_filtered(app, frame, main_area[0], &filtered);
 
-    // 终端预览
-    render_terminal_preview(app, frame, main_area[1]);
+    // 右侧区域：根据焦点动态切换
+    match app.focus {
+        crate::tui::Focus::AgentList => render_terminal_preview(app, frame, main_area[1]),
+        crate::tui::Focus::Notifications => render_notification_detail(app, frame, main_area[1]),
+    }
 
     // 通知区域
     render_notifications(app, frame, vertical[2]);
@@ -86,7 +89,7 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
         frame.render_widget(filter_bar, vertical[3]);
     } else {
-        let help = " [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
+        let help = " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
         let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
         frame.render_widget(help_bar, vertical[3]);
     }
@@ -127,11 +130,13 @@ fn render_agent_list_with_filtered(
         format!(" Agents ({}) ", filtered.len())
     };
 
-    // 过滤模式时边框变色
+    // 焦点和过滤模式边框变色
     let border_style = if app.filter_mode {
         Style::default().fg(Color::Cyan)
+    } else if app.focus == crate::tui::Focus::AgentList {
+        Style::default().fg(Color::Cyan)
     } else {
-        Style::default()
+        Style::default().fg(Color::DarkGray)
     };
 
     let list = List::new(items).block(
@@ -157,20 +162,32 @@ fn render_terminal_preview(app: &App, frame: &mut Frame, area: Rect) {
 fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
     use crate::notification::Urgency;
 
+    let is_focused = app.focus == crate::tui::Focus::Notifications;
+
     let items: Vec<ListItem> = app
         .notifications
         .iter()
         .rev()
         .take(5)
-        .map(|n| {
+        .enumerate()
+        .map(|(i, n)| {
             let color = match n.urgency {
                 Urgency::High => Color::Red,
                 Urgency::Medium => Color::Yellow,
                 Urgency::Low => Color::DarkGray,
             };
 
+            // 反转后的索引映射回原始索引
+            let original_idx = app.notifications.len().saturating_sub(1) - i;
+            let selected_marker = if is_focused && original_idx == app.notification_selected {
+                "→ "
+            } else {
+                "  "
+            };
+
             let text = format!(
-                "[{}] {}: {}",
+                "{}[{}] {}: {}",
+                selected_marker,
                 n.timestamp.format("%H:%M"),
                 n.agent_id,
                 n.message
@@ -179,12 +196,83 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
     let list = List::new(items).block(
         Block::default()
             .borders(Borders::ALL)
-            .title(" Notifications "),
+            .title(" Notifications ")
+            .border_style(border_style),
     );
     frame.render_widget(list, area);
+}
+
+/// 渲染通知详情（焦点在 Notifications 时替代 Terminal Preview）
+fn render_notification_detail(app: &App, frame: &mut Frame, area: Rect) {
+    let content = if let Some(n) = app.selected_notification() {
+        let mut lines = vec![
+            format!("Time:     {}", n.timestamp.format("%Y-%m-%d %H:%M:%S")),
+            format!("Agent:    {}", n.agent_id),
+            format!("Event:    {}", n.event_type),
+            format!("Urgency:  {}", n.urgency),
+        ];
+
+        if let Some(ref project) = n.project {
+            lines.push(format!("Project:  {}", project));
+        }
+        if let Some(ref risk) = n.risk_level {
+            lines.push(format!("Risk:     {}", risk));
+        }
+
+        // Event Detail
+        if let Some(ref detail) = n.event_detail {
+            lines.push(String::new());
+            lines.push("─── Event Detail ───".to_string());
+            if let Some(tool) = detail.get("tool_name").and_then(|v| v.as_str()) {
+                lines.push(format!("Tool: {}", tool));
+            }
+            if let Some(input) = detail.get("tool_input") {
+                if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
+                    lines.push(format!("Command: {}", cmd));
+                } else {
+                    lines.push(format!(
+                        "Input: {}",
+                        serde_json::to_string_pretty(input).unwrap_or_default()
+                    ));
+                }
+            }
+            if let Some(msg) = detail.get("message").and_then(|v| v.as_str()) {
+                lines.push(format!("Message: {}", msg));
+            }
+            if let Some(prompt) = detail.get("prompt").and_then(|v| v.as_str()) {
+                lines.push(format!("Prompt: {}", prompt));
+            }
+        }
+
+        // Terminal Snapshot
+        if let Some(ref snapshot) = n.terminal_snapshot {
+            lines.push(String::new());
+            lines.push("─── Terminal Snapshot ───".to_string());
+            for line in snapshot.lines() {
+                lines.push(line.to_string());
+            }
+        }
+
+        lines.join("\n")
+    } else {
+        "No notification selected".to_string()
+    };
+
+    let detail = Paragraph::new(content).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Notification Detail "),
+    );
+    frame.render_widget(detail, area);
 }
 
 /// 渲染日志视图
