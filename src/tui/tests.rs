@@ -299,4 +299,74 @@ mod tests {
         app.prev_notification();
         assert_eq!(app.notification_selected, 1);
     }
+
+    #[test]
+    fn test_mouse_scroll_respects_focus() {
+        use crate::tui::Focus;
+        use crossterm::event::{MouseEvent, MouseEventKind, KeyModifiers};
+
+        let mut app = App::new();
+        app.agents = vec![
+            AgentItem {
+                id: "a1".to_string(),
+                agent_type: "claude".to_string(),
+                project: "p1".to_string(),
+                state: AgentStatus::Processing,
+                started_at: chrono::Local::now(),
+                tmux_session: None,
+            },
+            AgentItem {
+                id: "a2".to_string(),
+                agent_type: "claude".to_string(),
+                project: "p2".to_string(),
+                state: AgentStatus::Processing,
+                started_at: chrono::Local::now(),
+                tmux_session: None,
+            },
+        ];
+        app.notifications = vec![
+            crate::tui::NotificationItem {
+                timestamp: chrono::Local::now(),
+                agent_id: "cam-1".to_string(),
+                message: "msg1".to_string(),
+                urgency: crate::notification::Urgency::High,
+                event_type: "permission_request".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+            crate::tui::NotificationItem {
+                timestamp: chrono::Local::now(),
+                agent_id: "cam-2".to_string(),
+                message: "msg2".to_string(),
+                urgency: crate::notification::Urgency::Medium,
+                event_type: "AgentExited".to_string(),
+                project: None,
+                event_detail: None,
+                terminal_snapshot: None,
+                risk_level: None,
+            },
+        ];
+
+        // Focus on Notifications
+        app.focus = Focus::Notifications;
+        let initial_agent_idx = app.selected_index;
+
+        // Simulate scroll down — should scroll notifications, not agents
+        let mouse = MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        };
+        // Reset throttle
+        app.last_scroll_time = std::time::Instant::now() - std::time::Duration::from_secs(1);
+        crate::tui::handle_mouse(&mut app, mouse);
+
+        // Agent index should NOT change
+        assert_eq!(app.selected_index, initial_agent_idx);
+        // Notification index should change
+        assert_ne!(app.notification_selected, 0);
+    }
 }

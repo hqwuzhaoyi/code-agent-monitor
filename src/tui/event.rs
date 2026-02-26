@@ -78,11 +78,11 @@ fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Tab => app.toggle_focus(),
         KeyCode::Char('j') | KeyCode::Down => match app.focus {
             crate::tui::Focus::AgentList => app.next_agent(),
-            crate::tui::Focus::Notifications => app.next_notification(),
+            crate::tui::Focus::Notifications => app.prev_notification(), // rev 显示，j=视觉下=索引减
         },
         KeyCode::Char('k') | KeyCode::Up => match app.focus {
             crate::tui::Focus::AgentList => app.prev_agent(),
-            crate::tui::Focus::Notifications => app.prev_notification(),
+            crate::tui::Focus::Notifications => app.next_notification(), // rev 显示，k=视觉上=索引加
         },
         KeyCode::Char('l') => app.toggle_view(),
         KeyCode::Char('/') => app.enter_filter_mode(),
@@ -131,8 +131,16 @@ pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
             app.last_scroll_time = std::time::Instant::now();
             match app.view {
                 crate::tui::View::Dashboard => {
-                    app.next_agent();
-                    true
+                    match app.focus {
+                        crate::tui::Focus::AgentList => {
+                            app.next_agent();
+                            true
+                        }
+                        crate::tui::Focus::Notifications => {
+                            app.prev_notification();
+                            false
+                        }
+                    }
                 }
                 crate::tui::View::Logs => {
                     app.logs_state.scroll_down();
@@ -144,8 +152,16 @@ pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
             app.last_scroll_time = std::time::Instant::now();
             match app.view {
                 crate::tui::View::Dashboard => {
-                    app.prev_agent();
-                    true
+                    match app.focus {
+                        crate::tui::Focus::AgentList => {
+                            app.prev_agent();
+                            true
+                        }
+                        crate::tui::Focus::Notifications => {
+                            app.next_notification();
+                            false
+                        }
+                    }
                 }
                 crate::tui::View::Logs => {
                     app.logs_state.scroll_up();
