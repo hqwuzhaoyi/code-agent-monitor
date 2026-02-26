@@ -3,7 +3,7 @@
 use crate::tui::{App, View};
 use ratatui::{
     prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
+    widgets::{Block, Borders, List, ListItem, Paragraph, Scrollbar, ScrollbarOrientation, ScrollbarState},
 };
 
 /// Notification panel height when unfocused
@@ -18,7 +18,7 @@ const NOTIF_VISIBLE_FOCUSED: usize = 10;
 pub(crate) const NOTIF_LOAD_COUNT: usize = 20;
 
 /// 渲染主界面
-pub fn render(app: &App, frame: &mut Frame) {
+pub fn render(app: &mut App, frame: &mut Frame) {
     match app.view {
         View::Dashboard => render_dashboard(app, frame),
         View::Logs => render_logs(app, frame),
@@ -26,18 +26,18 @@ pub fn render(app: &App, frame: &mut Frame) {
 }
 
 /// 渲染仪表盘视图
-fn render_dashboard(app: &App, frame: &mut Frame) {
+fn render_dashboard(app: &mut App, frame: &mut Frame) {
     let area = frame.area();
 
     // 预先计算过滤后的 agents（避免重复计算）
     let filtered = app.filtered_agents();
     let filtered_count = filtered.len();
-    let filter_text = app.filter_input.text();
+    let filter_text = app.filter_input.text().to_string();
     let is_filtering = !filter_text.is_empty();
 
     // 垂直分割: 状态栏 | 主区域 | 通知 | 底部栏
     let notif_height = match app.focus {
-        crate::tui::Focus::Notifications => NOTIF_HEIGHT_FOCUSED,
+        crate::tui::Focus::Notifications | crate::tui::Focus::Detail => NOTIF_HEIGHT_FOCUSED,
         _ => NOTIF_HEIGHT_UNFOCUSED,
     };
     let vertical = Layout::default()
@@ -83,8 +83,12 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
 
     // 右侧区域：根据焦点动态切换
     match app.focus {
-        crate::tui::Focus::AgentList => render_terminal_preview(app, frame, main_area[1]),
-        crate::tui::Focus::Notifications => render_notification_detail(app, frame, main_area[1]),
+        crate::tui::Focus::AgentList | crate::tui::Focus::Preview => {
+            render_terminal_preview(app, frame, main_area[1])
+        }
+        crate::tui::Focus::Notifications | crate::tui::Focus::Detail => {
+            render_notification_detail(app, frame, main_area[1])
+        }
     }
 
     // 通知区域
@@ -106,10 +110,13 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     } else {
         let help = match app.focus {
             crate::tui::Focus::AgentList => {
-                " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit "
+                " [Tab] 切换焦点  [j/k] 移动  [→/l] 预览  [Enter] tmux  [x] close  [/] filter  [q] quit "
             }
             crate::tui::Focus::Notifications => {
-                " [Tab] 切换焦点  [j/k] 移动  [Esc] 返回  [l] logs  [q] quit "
+                " [Tab] 切换焦点  [j/k] 移动  [→/l] 详情  [Esc] 返回  [q] quit "
+            }
+            crate::tui::Focus::Preview | crate::tui::Focus::Detail => {
+                " [j/k] 滚动  [Esc/←/h] 返回  [Tab] 切换焦点  [q] quit "
             }
         };
         let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
@@ -155,7 +162,7 @@ fn render_agent_list_with_filtered(
     // 焦点和过滤模式边框变色
     let border_style = if app.filter_mode {
         Style::default().fg(Color::Cyan)
-    } else if app.focus == crate::tui::Focus::AgentList {
+    } else if matches!(app.focus, crate::tui::Focus::AgentList | crate::tui::Focus::Preview) {
         Style::default().fg(Color::Cyan)
     } else {
         Style::default().fg(Color::DarkGray)
@@ -171,20 +178,56 @@ fn render_agent_list_with_filtered(
 }
 
 /// 渲染终端预览
-fn render_terminal_preview(app: &App, frame: &mut Frame, area: Rect) {
-    let preview = Paragraph::new(app.terminal_preview.as_str()).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Terminal Preview "),
-    );
+fn render_terminal_preview(app: &mut App, frame: &mut Frame, area: Rect) {
+    let is_focused = app.focus == crate::tui::Focus::Preview;
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let title = if is_focused {
+        " Terminal Preview (j/k scroll, Esc back) "
+    } else {
+        " Terminal Preview "
+    };
+
+    let content = app.terminal_preview.as_str();
+    let total_lines = content.lines().count();
+    let visible_height = area.height.saturating_sub(2) as usize;
+
+    // 限制滚动偏移
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    if app.preview_scroll_offset > max_scroll {
+        app.preview_scroll_offset = max_scroll;
+    }
+
+    let preview = Paragraph::new(content)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(border_style),
+        )
+        .scroll((app.preview_scroll_offset as u16, 0));
     frame.render_widget(preview, area);
+
+    // 滚动条
+    if total_lines > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(max_scroll)
+            .position(app.preview_scroll_offset)
+            .viewport_content_length(visible_height);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None);
+        frame.render_stateful_widget(scrollbar, area.inner(Margin { vertical: 1, horizontal: 0 }), &mut scrollbar_state);
+    }
 }
 
 /// 渲染通知区域
 fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
     use crate::notification::Urgency;
 
-    let is_focused = app.focus == crate::tui::Focus::Notifications;
+    let is_focused = matches!(app.focus, crate::tui::Focus::Notifications | crate::tui::Focus::Detail);
     let visible_count: usize = if is_focused { NOTIF_VISIBLE_FOCUSED } else { NOTIF_VISIBLE_UNFOCUSED };
 
     // 计算可见窗口：确保选中项始终在视窗内
@@ -255,12 +298,36 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
             .border_style(border_style),
     );
     frame.render_widget(list, area);
+
+    // 滚动条（仅当内容超出可见区域时显示）
+    if len > visible_count {
+        let mut scrollbar_state = ScrollbarState::new(len)
+            .position(rev_selected)
+            .viewport_content_length(visible_count);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None);
+        // 在边框内侧渲染滚动条
+        frame.render_stateful_widget(scrollbar, area.inner(Margin { vertical: 1, horizontal: 0 }), &mut scrollbar_state);
+    }
 }
 
 /// 渲染通知详情（焦点在 Notifications 时替代 Terminal Preview）
-fn render_notification_detail(app: &App, frame: &mut Frame, area: Rect) {
-    let content = if let Some(n) = app.selected_notification() {
-        let mut lines = vec![
+fn render_notification_detail(app: &mut App, frame: &mut Frame, area: Rect) {
+    let is_focused = app.focus == crate::tui::Focus::Detail;
+    let border_style = if is_focused {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default()
+    };
+    let title = if is_focused {
+        " Notification Detail (j/k scroll, Esc back) "
+    } else {
+        " Notification Detail "
+    };
+
+    let lines: Vec<String> = if let Some(n) = app.selected_notification() {
+        let mut l = vec![
             format!("Time:     {}", n.timestamp.format("%Y-%m-%d %H:%M:%S")),
             format!("Agent:    {}", n.agent_id),
             format!("Event:    {}", n.event_type),
@@ -268,57 +335,80 @@ fn render_notification_detail(app: &App, frame: &mut Frame, area: Rect) {
         ];
 
         if let Some(ref project) = n.project {
-            lines.push(format!("Project:  {}", project));
+            l.push(format!("Project:  {}", project));
         }
         if let Some(ref risk) = n.risk_level {
-            lines.push(format!("Risk:     {}", risk));
+            l.push(format!("Risk:     {}", risk));
         }
 
         // Event Detail
         if let Some(ref detail) = n.event_detail {
-            lines.push(String::new());
-            lines.push("─── Event Detail ───".to_string());
+            l.push(String::new());
+            l.push("─── Event Detail ───".to_string());
             if let Some(tool) = detail.get("tool_name").and_then(|v| v.as_str()) {
-                lines.push(format!("Tool: {}", tool));
+                l.push(format!("Tool: {}", tool));
             }
             if let Some(input) = detail.get("tool_input") {
                 if let Some(cmd) = input.get("command").and_then(|v| v.as_str()) {
-                    lines.push(format!("Command: {}", cmd));
+                    l.push(format!("Command: {}", cmd));
                 } else {
-                    lines.push(format!(
+                    l.push(format!(
                         "Input: {}",
                         serde_json::to_string_pretty(input).unwrap_or_default()
                     ));
                 }
             }
             if let Some(msg) = detail.get("message").and_then(|v| v.as_str()) {
-                lines.push(format!("Message: {}", msg));
+                l.push(format!("Message: {}", msg));
             }
             if let Some(prompt) = detail.get("prompt").and_then(|v| v.as_str()) {
-                lines.push(format!("Prompt: {}", prompt));
+                l.push(format!("Prompt: {}", prompt));
             }
         }
 
         // Terminal Snapshot
         if let Some(ref snapshot) = n.terminal_snapshot {
-            lines.push(String::new());
-            lines.push("─── Terminal Snapshot ───".to_string());
+            l.push(String::new());
+            l.push("─── Terminal Snapshot ───".to_string());
             for line in snapshot.lines() {
-                lines.push(line.to_string());
+                l.push(line.to_string());
             }
         }
 
-        lines.join("\n")
+        l
     } else {
-        "No notification selected".to_string()
+        vec!["No notification selected".to_string()]
     };
 
-    let detail = Paragraph::new(content).block(
-        Block::default()
-            .borders(Borders::ALL)
-            .title(" Notification Detail "),
-    );
+    let total_lines = lines.len();
+    let visible_height = area.height.saturating_sub(2) as usize; // 减去边框
+    // 限制滚动偏移不超过内容
+    let max_scroll = total_lines.saturating_sub(visible_height);
+    if app.detail_scroll_offset > max_scroll {
+        app.detail_scroll_offset = max_scroll;
+    }
+    let content = lines.join("\n");
+
+    let detail = Paragraph::new(content)
+        .block(
+            Block::default()
+                .borders(Borders::ALL)
+                .title(title)
+                .border_style(border_style),
+        )
+        .scroll((app.detail_scroll_offset as u16, 0));
     frame.render_widget(detail, area);
+
+    // 滚动条
+    if total_lines > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(visible_height))
+            .position(app.detail_scroll_offset)
+            .viewport_content_length(visible_height);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None);
+        frame.render_stateful_widget(scrollbar, area.inner(Margin { vertical: 1, horizontal: 0 }), &mut scrollbar_state);
+    }
 }
 
 /// 渲染日志视图
@@ -346,6 +436,8 @@ fn render_logs(app: &App, frame: &mut Frame) {
 
     // 日志内容
     let filtered = app.logs_state.filtered_lines();
+    let total_lines = filtered.len();
+    let visible_height = vertical[1].height.saturating_sub(2) as usize; // 减去边框
     let items: Vec<ListItem> = filtered
         .iter()
         .skip(app.logs_state.scroll_offset)
@@ -366,6 +458,17 @@ fn render_logs(app: &App, frame: &mut Frame) {
 
     let list = List::new(items).block(Block::default().borders(Borders::ALL));
     frame.render_widget(list, vertical[1]);
+
+    // 滚动条
+    if total_lines > visible_height {
+        let mut scrollbar_state = ScrollbarState::new(total_lines.saturating_sub(visible_height))
+            .position(app.logs_state.scroll_offset)
+            .viewport_content_length(visible_height);
+        let scrollbar = Scrollbar::new(ScrollbarOrientation::VerticalRight)
+            .begin_symbol(None)
+            .end_symbol(None);
+        frame.render_stateful_widget(scrollbar, vertical[1].inner(Margin { vertical: 1, horizontal: 0 }), &mut scrollbar_state);
+    }
 
     // 快捷键
     let help = " [j/k] 滚动  [f] 过滤级别  [G] 跳到最新  [Esc] 返回  [q] 退出 ";

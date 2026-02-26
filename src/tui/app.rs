@@ -56,6 +56,10 @@ pub struct App {
     pub focus: Focus,
     /// Notifications 选中索引
     pub notification_selected: usize,
+    /// 通知详情滚动偏移
+    pub detail_scroll_offset: usize,
+    /// 终端预览滚动偏移
+    pub preview_scroll_offset: usize,
 }
 
 /// 鼠标滚动节流间隔（毫秒）- 限制滚动频率，确保每次滚动只移动一项
@@ -79,6 +83,8 @@ impl App {
             last_scroll_time: std::time::Instant::now(),
             focus: Focus::AgentList,
             notification_selected: 0,
+            detail_scroll_offset: 0,
+            preview_scroll_offset: 0,
         }
     }
 
@@ -90,6 +96,7 @@ impl App {
     pub fn next_agent(&mut self) {
         if !self.agents.is_empty() {
             self.selected_index = (self.selected_index + 1) % self.agents.len();
+            self.preview_scroll_offset = 0;
         }
     }
 
@@ -100,6 +107,7 @@ impl App {
                 .selected_index
                 .checked_sub(1)
                 .unwrap_or(self.agents.len() - 1);
+            self.preview_scroll_offset = 0;
         }
     }
 
@@ -158,11 +166,29 @@ impl App {
         self.selected_index = 0;
     }
 
-    /// 切换焦点
+    /// 切换焦点（左侧面板之间切换）
     pub fn toggle_focus(&mut self) {
         self.focus = match self.focus {
-            Focus::AgentList => Focus::Notifications,
-            Focus::Notifications => Focus::AgentList,
+            Focus::AgentList | Focus::Preview => Focus::Notifications,
+            Focus::Notifications | Focus::Detail => Focus::AgentList,
+        };
+    }
+
+    /// 进入右侧面板
+    pub fn enter_right_panel(&mut self) {
+        self.focus = match self.focus {
+            Focus::AgentList => Focus::Preview,
+            Focus::Notifications => Focus::Detail,
+            other => other,
+        };
+    }
+
+    /// 返回左侧面板
+    pub fn exit_right_panel(&mut self) {
+        self.focus = match self.focus {
+            Focus::Preview => Focus::AgentList,
+            Focus::Detail => Focus::Notifications,
+            other => other,
         };
     }
 
@@ -171,6 +197,7 @@ impl App {
         if !self.notifications.is_empty() {
             self.notification_selected =
                 (self.notification_selected + 1) % self.notifications.len();
+            self.detail_scroll_offset = 0;
         }
     }
 
@@ -181,12 +208,33 @@ impl App {
                 .notification_selected
                 .checked_sub(1)
                 .unwrap_or(self.notifications.len() - 1);
+            self.detail_scroll_offset = 0;
         }
     }
 
     /// 获取当前选中的通知
     pub fn selected_notification(&self) -> Option<&NotificationItem> {
         self.notifications.get(self.notification_selected)
+    }
+
+    /// 详情面板向下滚动
+    pub fn detail_scroll_down(&mut self) {
+        self.detail_scroll_offset = self.detail_scroll_offset.saturating_add(1);
+    }
+
+    /// 详情面板向上滚动
+    pub fn detail_scroll_up(&mut self) {
+        self.detail_scroll_offset = self.detail_scroll_offset.saturating_sub(1);
+    }
+
+    /// 预览面板向下滚动
+    pub fn preview_scroll_down(&mut self) {
+        self.preview_scroll_offset = self.preview_scroll_offset.saturating_add(1);
+    }
+
+    /// 预览面板向上滚动
+    pub fn preview_scroll_up(&mut self) {
+        self.preview_scroll_offset = self.preview_scroll_offset.saturating_sub(1);
     }
 
     /// 稳定通知选中项：刷新后尝试匹配之前选中的通知

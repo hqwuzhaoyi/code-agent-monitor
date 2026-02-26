@@ -16,11 +16,15 @@ pub struct AgentItem {
 }
 
 /// 当前焦点区域
-#[derive(Debug, Clone, PartialEq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
 pub enum Focus {
     #[default]
     AgentList,
     Notifications,
+    /// 终端预览面板（右侧，AgentList 对应）
+    Preview,
+    /// 通知详情面板（右侧，Notifications 对应）
+    Detail,
 }
 
 /// 通知条目

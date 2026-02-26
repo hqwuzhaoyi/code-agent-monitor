@@ -73,18 +73,51 @@ fn handle_filter_key(app: &mut crate::tui::App, key: KeyEvent) {
 }
 
 fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
+    // 右侧面板（Preview/Detail）有独立的按键处理
+    match app.focus {
+        crate::tui::Focus::Preview => {
+            match key.code {
+                KeyCode::Char('q') => app.quit(),
+                KeyCode::Char('j') | KeyCode::Down => app.preview_scroll_down(),
+                KeyCode::Char('k') | KeyCode::Up => app.preview_scroll_up(),
+                KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => app.exit_right_panel(),
+                KeyCode::Tab => app.toggle_focus(),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
+                _ => {}
+            }
+            return;
+        }
+        crate::tui::Focus::Detail => {
+            match key.code {
+                KeyCode::Char('q') => app.quit(),
+                KeyCode::Char('j') | KeyCode::Down => app.detail_scroll_down(),
+                KeyCode::Char('k') | KeyCode::Up => app.detail_scroll_up(),
+                KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => app.exit_right_panel(),
+                KeyCode::Tab => app.toggle_focus(),
+                KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
+                _ => {}
+            }
+            return;
+        }
+        _ => {}
+    }
+
+    // 左侧面板按键处理
     match key.code {
         KeyCode::Char('q') => app.quit(),
         KeyCode::Tab => app.toggle_focus(),
         KeyCode::Char('j') | KeyCode::Down => match app.focus {
             crate::tui::Focus::AgentList => app.next_agent(),
-            crate::tui::Focus::Notifications => app.prev_notification(), // rev 显示，j=视觉下=索引减
+            crate::tui::Focus::Notifications => app.prev_notification(),
+            _ => {}
         },
         KeyCode::Char('k') | KeyCode::Up => match app.focus {
             crate::tui::Focus::AgentList => app.prev_agent(),
-            crate::tui::Focus::Notifications => app.next_notification(), // rev 显示，k=视觉上=索引加
+            crate::tui::Focus::Notifications => app.next_notification(),
+            _ => {}
         },
-        KeyCode::Char('l') => app.toggle_view(),
+        // → 或 l 进入右侧面板
+        KeyCode::Right | KeyCode::Char('l') => app.enter_right_panel(),
         KeyCode::Char('/') => app.enter_filter_mode(),
         KeyCode::Esc => {
             if !app.filter_input.is_empty() {
@@ -96,7 +129,6 @@ fn handle_dashboard_key(app: &mut crate::tui::App, key: KeyEvent) {
         KeyCode::Char('c') if key.modifiers.contains(KeyModifiers::CONTROL) => app.quit(),
         KeyCode::Enter => {
             // Enter 在 Agent 焦点时跳转 tmux（在 run 函数中处理）
-            // 在 Notifications 焦点时暂无操作（预留）
         }
         _ => {}
     }
@@ -140,6 +172,14 @@ pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
                             app.prev_notification();
                             false
                         }
+                        crate::tui::Focus::Preview => {
+                            app.preview_scroll_down();
+                            false
+                        }
+                        crate::tui::Focus::Detail => {
+                            app.detail_scroll_down();
+                            false
+                        }
                     }
                 }
                 crate::tui::View::Logs => {
@@ -159,6 +199,14 @@ pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
                         }
                         crate::tui::Focus::Notifications => {
                             app.next_notification();
+                            false
+                        }
+                        crate::tui::Focus::Preview => {
+                            app.preview_scroll_up();
+                            false
+                        }
+                        crate::tui::Focus::Detail => {
+                            app.detail_scroll_up();
                             false
                         }
                     }
