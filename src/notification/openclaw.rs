@@ -433,16 +433,53 @@ impl OpenclawNotifier {
             NotificationEventType::SessionStart => "Session started".to_string(),
             NotificationEventType::SessionEnd => "Session ended".to_string(),
         };
+
+        // Build event_detail JSON from event type
+        let event_detail = match &event.event_type {
+            NotificationEventType::PermissionRequest {
+                tool_name,
+                tool_input,
+            } => Some(serde_json::json!({
+                "tool_name": tool_name,
+                "tool_input": tool_input,
+            })),
+            NotificationEventType::WaitingForInput {
+                pattern_type,
+                is_decision_required,
+            } => Some(serde_json::json!({
+                "pattern_type": pattern_type,
+                "is_decision_required": is_decision_required,
+            })),
+            NotificationEventType::Notification {
+                notification_type,
+                message,
+            } => Some(serde_json::json!({
+                "notification_type": notification_type,
+                "message": message,
+            })),
+            NotificationEventType::Error { message } => Some(serde_json::json!({
+                "message": message,
+            })),
+            _ => None,
+        };
+
+        // Use extracted_message as risk_level hint if available
+        let risk_level = payload
+            .context
+            .extracted_message
+            .as_ref()
+            .and_then(|_| Some("AI_EXTRACTED".to_string()));
+
         let record = NotificationRecord {
             ts: chrono::Utc::now(),
             agent_id: agent_id.clone(),
             urgency,
             event: event_type_str.to_string(),
             summary,
-            project: None,
-            event_detail: None,
-            terminal_snapshot: None,
-            risk_level: None,
+            project: event.project_path.clone(),
+            event_detail,
+            terminal_snapshot: event.terminal_snapshot.clone(),
+            risk_level,
         };
         if let Err(e) = NotificationStore::append(&record) {
             warn!(error = %e, "Failed to write notification to local file");
