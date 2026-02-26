@@ -389,33 +389,39 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                 TuiEvent::Key(key) => {
                     // 检查是否是 Enter 键
                     if key.code == crossterm::event::KeyCode::Enter {
-                        if let Ok(Some(session)) = app.attach_selected_tmux() {
-                            // 暂时恢复终端
-                            restore_terminal(terminal)?;
+                        // 只在 Agent 焦点时 attach tmux
+                        if app.focus == Focus::AgentList {
+                            if let Ok(Some(session)) = app.attach_selected_tmux() {
+                                // 暂时恢复终端
+                                restore_terminal(terminal)?;
 
-                            // 执行 tmux attach
-                            let status = std::process::Command::new("tmux")
-                                .args(["attach-session", "-t", &session])
-                                .status();
+                                // 执行 tmux attach
+                                let status = std::process::Command::new("tmux")
+                                    .args(["attach-session", "-t", &session])
+                                    .status();
 
-                            // 重新初始化终端
-                            *terminal = init_terminal()?;
+                                // 重新初始化终端
+                                *terminal = init_terminal()?;
 
-                            // 刷新数据
-                            let _ = app.refresh_agents();
-                            last_full_refresh = std::time::Instant::now();
+                                // 刷新数据
+                                let _ = app.refresh_agents();
+                                last_full_refresh = std::time::Instant::now();
 
-                            if let Err(e) = status {
-                                eprintln!("tmux attach failed: {}", e);
+                                if let Err(e) = status {
+                                    eprintln!("tmux attach failed: {}", e);
+                                }
+                                continue;
                             }
-                            continue;
                         }
                     }
                     // 检查是否是 x 或 d 键（关闭 agent）
                     if key.code == crossterm::event::KeyCode::Char('x')
                         || key.code == crossterm::event::KeyCode::Char('d')
                     {
-                        if !app.filter_mode && app.view == View::Dashboard {
+                        if !app.filter_mode
+                            && app.view == View::Dashboard
+                            && app.focus == Focus::AgentList
+                        {
                             let _ = app.close_selected_agent();
                             // 清空终端预览，避免显示已关闭 agent 的内容
                             app.terminal_preview.clear();
@@ -428,9 +434,10 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                         }
                     }
                     let prev_selected = app.selected_index;
+                    let prev_notification = app.notification_selected;
                     handle_key(app, key);
-                    // 如果选择变化，切换 pipe-pane 并刷新终端预览
-                    if prev_selected != app.selected_index {
+                    // Agent 焦点下选择变化时刷新终端预览
+                    if app.focus == Focus::AgentList && prev_selected != app.selected_index {
                         app.switch_agent_stream();
                         let session_to_refresh = app
                             .selected_agent()
