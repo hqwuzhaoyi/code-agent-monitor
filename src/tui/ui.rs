@@ -25,13 +25,17 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     let is_filtering = !filter_text.is_empty();
 
     // 垂直分割: 状态栏 | 主区域 | 通知 | 底部栏
+    let notif_height = match app.focus {
+        crate::tui::Focus::Notifications => 12,
+        _ => 5,
+    };
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // 状态栏
-            Constraint::Min(10),   // 主区域
-            Constraint::Length(5), // 通知
-            Constraint::Length(1), // 底部栏（过滤输入或快捷键）
+            Constraint::Length(1),            // 状态栏
+            Constraint::Min(10),              // 主区域
+            Constraint::Length(notif_height), // 通知
+            Constraint::Length(1),            // 底部栏（过滤输入或快捷键）
         ])
         .split(area);
 
@@ -89,8 +93,14 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
         frame.render_widget(filter_bar, vertical[3]);
     } else {
-        let help =
-            " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
+        let help = match app.focus {
+            crate::tui::Focus::AgentList => {
+                " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit "
+            }
+            crate::tui::Focus::Notifications => {
+                " [Tab] 切换焦点  [j/k] 移动  [Enter] 跳转 agent  [Esc] 返回  [l] logs  [q] quit "
+            }
+        };
         let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
         frame.render_widget(help_bar, vertical[3]);
     }
@@ -164,12 +174,23 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
     use crate::notification::Urgency;
 
     let is_focused = app.focus == crate::tui::Focus::Notifications;
+    let visible_count: usize = if is_focused { 10 } else { 5 };
+
+    // 计算可见窗口：确保选中项始终在视窗内
+    let len = app.notifications.len();
+    let rev_selected = len.saturating_sub(1).saturating_sub(app.notification_selected);
+    let skip = if rev_selected < visible_count {
+        0
+    } else {
+        rev_selected - visible_count + 1
+    };
 
     let items: Vec<ListItem> = app
         .notifications
         .iter()
         .rev()
-        .take(5)
+        .skip(skip)
+        .take(visible_count)
         .enumerate()
         .map(|(i, n)| {
             let color = match n.urgency {
@@ -178,22 +199,34 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
                 Urgency::Low => Color::DarkGray,
             };
 
-            // 反转后的索引映射回原始索引
-            let original_idx = app.notifications.len().saturating_sub(1) - i;
-            let selected_marker = if is_focused && original_idx == app.notification_selected {
-                "→ "
-            } else {
-                "  "
+            // skip + enumerate index 映射回原始索引
+            let original_idx = len.saturating_sub(1).saturating_sub(skip + i);
+            let is_selected = is_focused && original_idx == app.notification_selected;
+            let selected_marker = if is_selected { "→ " } else { "  " };
+
+            let time_str = {
+                let today = chrono::Local::now().date_naive();
+                if n.timestamp.date_naive() == today {
+                    n.timestamp.format("%H:%M").to_string()
+                } else {
+                    n.timestamp.format("%m-%d %H:%M").to_string()
+                }
             };
 
             let text = format!(
                 "{}[{}] {}: {}",
                 selected_marker,
-                n.timestamp.format("%H:%M"),
+                time_str,
                 n.agent_id,
                 n.message
             );
-            ListItem::new(text).style(Style::default().fg(color))
+            let style = if is_selected {
+                let fg = if color == Color::DarkGray { Color::White } else { color };
+                Style::default().fg(fg).bg(Color::DarkGray)
+            } else {
+                Style::default().fg(color)
+            };
+            ListItem::new(text).style(style)
         })
         .collect();
 
