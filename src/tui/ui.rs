@@ -6,6 +6,17 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
 
+/// Notification panel height when unfocused
+const NOTIF_HEIGHT_UNFOCUSED: u16 = 5;
+/// Notification panel height when focused
+const NOTIF_HEIGHT_FOCUSED: u16 = 12;
+/// Number of visible notification items when unfocused
+const NOTIF_VISIBLE_UNFOCUSED: usize = 5;
+/// Number of visible notification items when focused
+const NOTIF_VISIBLE_FOCUSED: usize = 10;
+/// Max notifications to load from store
+pub(crate) const NOTIF_LOAD_COUNT: usize = 20;
+
 /// 渲染主界面
 pub fn render(app: &App, frame: &mut Frame) {
     match app.view {
@@ -26,8 +37,8 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
 
     // 垂直分割: 状态栏 | 主区域 | 通知 | 底部栏
     let notif_height = match app.focus {
-        crate::tui::Focus::Notifications => 12,
-        _ => 5,
+        crate::tui::Focus::Notifications => NOTIF_HEIGHT_FOCUSED,
+        _ => NOTIF_HEIGHT_UNFOCUSED,
     };
     let vertical = Layout::default()
         .direction(Direction::Vertical)
@@ -174,7 +185,7 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
     use crate::notification::Urgency;
 
     let is_focused = app.focus == crate::tui::Focus::Notifications;
-    let visible_count: usize = if is_focused { 10 } else { 5 };
+    let visible_count: usize = if is_focused { NOTIF_VISIBLE_FOCUSED } else { NOTIF_VISIBLE_UNFOCUSED };
 
     // 计算可见窗口：确保选中项始终在视窗内
     let len = app.notifications.len();

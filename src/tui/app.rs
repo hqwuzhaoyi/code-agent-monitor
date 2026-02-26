@@ -294,7 +294,7 @@ impl App {
         });
 
         self.notifications_mtime = current_mtime;
-        self.notifications = NotificationStore::read_recent(20)
+        self.notifications = NotificationStore::read_recent(super::ui::NOTIF_LOAD_COUNT)
             .into_iter()
             .map(|r| NotificationItem {
                 timestamp: Local.from_utc_datetime(&r.ts.naive_utc()),
