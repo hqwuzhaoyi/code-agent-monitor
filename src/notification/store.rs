@@ -69,7 +69,7 @@ impl NotificationStore {
         // 打开文件并加锁
         let file = OpenOptions::new().create(true).append(true).open(&path)?;
 
-        file.lock_shared()?;
+        file.lock_exclusive()?;
         let mut file = file;
         writeln!(file, "{}", serde_json::to_string(record)?)?;
         file.unlock()?;
@@ -100,9 +100,11 @@ impl NotificationStore {
             .filter_map(|line| serde_json::from_str(&line).ok())
             .collect();
 
-        // 返回最后 N 条
+        // 返回最后 N 条（按时间排序）
         let start = records.len().saturating_sub(n);
-        records[start..].to_vec()
+        let mut recent = records[start..].to_vec();
+        recent.sort_by_key(|r| r.ts);
+        recent
     }
 
     /// 定期检查并清理
