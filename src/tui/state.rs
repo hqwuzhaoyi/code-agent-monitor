@@ -15,6 +15,14 @@ pub struct AgentItem {
     pub tmux_session: Option<String>,
 }
 
+/// 当前焦点区域
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum Focus {
+    #[default]
+    AgentList,
+    Notifications,
+}
+
 /// 通知条目
 #[derive(Debug, Clone)]
 pub struct NotificationItem {
@@ -22,6 +30,16 @@ pub struct NotificationItem {
     pub agent_id: String,
     pub message: String,
     pub urgency: Urgency,
+    /// 事件类型
+    pub event_type: String,
+    /// 项目路径
+    pub project: Option<String>,
+    /// 事件详情
+    pub event_detail: Option<serde_json::Value>,
+    /// 终端快照
+    pub terminal_snapshot: Option<String>,
+    /// 风险等级
+    pub risk_level: Option<String>,
 }
 
 /// 当前视图

@@ -17,6 +17,7 @@ use crate::notification::NotificationStore;
 use crate::tui::logs::LogsState;
 use crate::tui::search::SearchInput;
 use crate::tui::state::{AgentItem, NotificationItem, View};
+use crate::tui::state::Focus;
 use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, TmuxManager};
 
@@ -51,6 +52,10 @@ pub struct App {
     pub filter_input: SearchInput,
     /// 上次鼠标滚动时间（用于节流）
     pub last_scroll_time: std::time::Instant,
+    /// 当前焦点
+    pub focus: Focus,
+    /// Notifications 选中索引
+    pub notification_selected: usize,
 }
 
 /// 鼠标滚动节流间隔（毫秒）- 限制滚动频率，确保每次滚动只移动一项
@@ -72,6 +77,8 @@ impl App {
             filter_mode: false,
             filter_input: SearchInput::new(),
             last_scroll_time: std::time::Instant::now(),
+            focus: Focus::AgentList,
+            notification_selected: 0,
         }
     }
 
@@ -149,6 +156,37 @@ impl App {
     /// 过滤输入变化时重置选择
     pub fn on_filter_change(&mut self) {
         self.selected_index = 0;
+    }
+
+    /// 切换焦点
+    pub fn toggle_focus(&mut self) {
+        self.focus = match self.focus {
+            Focus::AgentList => Focus::Notifications,
+            Focus::Notifications => Focus::AgentList,
+        };
+    }
+
+    /// 选择下一条通知
+    pub fn next_notification(&mut self) {
+        if !self.notifications.is_empty() {
+            self.notification_selected =
+                (self.notification_selected + 1) % self.notifications.len();
+        }
+    }
+
+    /// 选择上一条通知
+    pub fn prev_notification(&mut self) {
+        if !self.notifications.is_empty() {
+            self.notification_selected = self
+                .notification_selected
+                .checked_sub(1)
+                .unwrap_or(self.notifications.len() - 1);
+        }
+    }
+
+    /// 获取当前选中的通知
+    pub fn selected_notification(&self) -> Option<&NotificationItem> {
+        self.notifications.get(self.notification_selected)
     }
 
     /// 刷新 agent 列表
@@ -245,8 +283,18 @@ impl App {
                 agent_id: r.agent_id,
                 message: r.summary,
                 urgency: r.urgency,
+                event_type: r.event,
+                project: r.project,
+                event_detail: r.event_detail,
+                terminal_snapshot: r.terminal_snapshot,
+                risk_level: r.risk_level,
             })
             .collect();
+
+        // 确保选中索引不越界
+        if self.notification_selected >= self.notifications.len() {
+            self.notification_selected = self.notifications.len().saturating_sub(1);
+        }
     }
 
     /// 切换选中 agent 时启动新的 pipe-pane
