@@ -1,11 +1,11 @@
 //! 会话管理模块 - 管理 Claude Code 等代理的会话
 
-use serde::{Deserialize, Serialize};
 use anyhow::Result;
-use std::path::PathBuf;
+use chrono::{DateTime, Duration, Utc};
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{BufRead, BufReader};
-use chrono::{DateTime, Utc, Duration};
+use std::path::PathBuf;
 
 use crate::infra::tmux::TmuxManager;
 
@@ -112,7 +112,10 @@ impl SessionManager {
     }
 
     /// 列出 Claude Code 会话（带过滤）
-    pub fn list_sessions_filtered(&self, filter: Option<SessionFilter>) -> Result<Vec<SessionInfo>> {
+    pub fn list_sessions_filtered(
+        &self,
+        filter: Option<SessionFilter>,
+    ) -> Result<Vec<SessionInfo>> {
         let mut sessions = Vec::new();
 
         if !self.claude_projects_dir.exists() {
@@ -197,8 +200,11 @@ impl SessionManager {
             // 使用 claude --resume 恢复会话
             // 注意：这里只是启动命令，实际的交互需要在终端中进行
             println!("恢复会话: {} (项目: {})", session_id, project_path);
-            println!("运行命令: cd {} && claude --resume {}", project_path, session_id);
-            
+            println!(
+                "运行命令: cd {} && claude --resume {}",
+                project_path, session_id
+            );
+
             Ok(())
         } else {
             anyhow::bail!("会话 {} 不存在", session_id)
@@ -209,7 +215,11 @@ impl SessionManager {
     ///
     /// 注意：此方法仅创建 tmux 会话，不会注册到 AgentManager。
     /// 如需被监控系统追踪，请使用 AgentManager::start_agent 并设置 resume_session。
-    pub fn resume_in_tmux(&self, session_id: &str, tmux_session_name: Option<&str>) -> Result<String> {
+    pub fn resume_in_tmux(
+        &self,
+        session_id: &str,
+        tmux_session_name: Option<&str>,
+    ) -> Result<String> {
         if let Some(session) = self.get_session(session_id)? {
             let project_path = if session.project_path.is_empty() {
                 ".".to_string()
@@ -224,7 +234,8 @@ impl SessionManager {
 
             // 创建 tmux 会话并运行 claude --resume
             let cmd = format!("claude --resume {}", session_id);
-            self.tmux_manager.create_session(&tmux_name, &project_path, &cmd)?;
+            self.tmux_manager
+                .create_session(&tmux_name, &project_path, &cmd)?;
 
             Ok(tmux_name)
         } else {
@@ -246,7 +257,7 @@ impl SessionManager {
     pub fn get_session_logs(&self, session_id: &str, limit: usize) -> Result<Vec<SessionMessage>> {
         // 查找会话文件
         let jsonl_path = self.find_session_file(session_id)?;
-        
+
         if let Some(path) = jsonl_path {
             self.parse_session_logs(&path, limit)
         } else {
@@ -279,7 +290,7 @@ impl SessionManager {
         for entry in fs::read_dir(&self.claude_projects_dir)? {
             let entry = entry?;
             let path = entry.path();
-            
+
             if path.is_dir() {
                 let jsonl_path = path.join(format!("{}.jsonl", session_id));
                 if jsonl_path.exists() {

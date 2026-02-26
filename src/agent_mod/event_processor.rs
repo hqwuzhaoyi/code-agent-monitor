@@ -1,6 +1,6 @@
 //! JSONL event processing - parses and transforms agent events
 
-use crate::infra::jsonl::{JsonlParser, JsonlEvent};
+use crate::infra::jsonl::{JsonlEvent, JsonlParser};
 
 /// Processes JSONL events from agent logs
 pub struct EventProcessor {

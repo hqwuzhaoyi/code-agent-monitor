@@ -20,15 +20,21 @@ impl GenericAdapter {
         let command = match &agent_type {
             AgentType::GeminiCli => "gemini".to_string(),
             AgentType::MistralVibe => "vibe".to_string(),
-            AgentType::Mock => "sleep 3600".to_string(),  // 测试用，保持 session 存活
+            AgentType::Mock => "sleep 3600".to_string(), // 测试用，保持 session 存活
             _ => "echo".to_string(),
         };
-        Self { agent_type, command }
+        Self {
+            agent_type,
+            command,
+        }
     }
 
     /// 使用自定义命令创建适配器
     pub fn with_command(agent_type: AgentType, command: String) -> Self {
-        Self { agent_type, command }
+        Self {
+            agent_type,
+            command,
+        }
     }
 }
 
@@ -44,7 +50,10 @@ impl AgentAdapter for GenericAdapter {
     fn get_resume_command(&self, session_id: &str) -> String {
         // Validate session_id even though generic adapter doesn't use it,
         // to maintain consistent security behavior across all adapters
-        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !session_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
         }
         // 通用适配器不支持恢复会话，直接返回启动命令

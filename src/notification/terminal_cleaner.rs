@@ -51,6 +51,9 @@ Which option do you prefer?
 
 ❯
 "#;
-        assert!(!is_processing(content), "Should NOT detect idle state as processing");
+        assert!(
+            !is_processing(content),
+            "Should NOT detect idle state as processing"
+        );
     }
 }

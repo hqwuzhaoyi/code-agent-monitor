@@ -4,7 +4,7 @@ use anyhow::Result;
 use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
 
 /// Watcher Daemon 管理器
 pub struct WatcherDaemon {
@@ -164,7 +164,9 @@ mod tests {
     fn test_pid_file_path() {
         let daemon = WatcherDaemon::new();
         let path = daemon.pid_file_path();
-        assert!(path.to_string_lossy().contains(".config/code-agent-monitor"));
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/code-agent-monitor"));
         assert!(path.to_string_lossy().ends_with("watcher.pid"));
     }
 

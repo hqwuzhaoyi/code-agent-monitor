@@ -1,8 +1,8 @@
 //! 日志视图模块
 
-use std::path::PathBuf;
-use std::collections::VecDeque;
 use anyhow::Result;
+use std::collections::VecDeque;
+use std::path::PathBuf;
 
 /// 日志级别
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
@@ -30,8 +30,20 @@ impl LogLevel {
         match self {
             LogLevel::All => true,
             LogLevel::Error => line.contains("ERROR") || line.contains("❌"),
-            LogLevel::Warn => line.contains("WARN") || line.contains("⚠") || line.contains("ERROR") || line.contains("❌"),
-            LogLevel::Info => line.contains("INFO") || line.contains("✅") || line.contains("WARN") || line.contains("⚠") || line.contains("ERROR") || line.contains("❌"),
+            LogLevel::Warn => {
+                line.contains("WARN")
+                    || line.contains("⚠")
+                    || line.contains("ERROR")
+                    || line.contains("❌")
+            }
+            LogLevel::Info => {
+                line.contains("INFO")
+                    || line.contains("✅")
+                    || line.contains("WARN")
+                    || line.contains("⚠")
+                    || line.contains("ERROR")
+                    || line.contains("❌")
+            }
             LogLevel::Debug => true,
         }
     }
@@ -76,9 +88,7 @@ impl LogsState {
         self.lines
             .iter()
             .filter(|line| self.filter.matches(line))
-            .filter(|line| {
-                self.search_query.is_empty() || line.contains(&self.search_query)
-            })
+            .filter(|line| self.search_query.is_empty() || line.contains(&self.search_query))
             .map(|s| s.as_str())
             .collect()
     }

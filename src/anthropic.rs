@@ -12,8 +12,8 @@
 pub use crate::ai::*;
 
 // Re-export types from ai_types for backward compatibility
-pub use crate::ai::types::{NotificationContent, QuestionType};
 pub use crate::agent::manager::AgentStatus;
+pub use crate::ai::types::{NotificationContent, QuestionType};
 
 // Re-export constants from ai::client
 pub use crate::ai::client::{

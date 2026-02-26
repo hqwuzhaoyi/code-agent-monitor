@@ -20,7 +20,10 @@ impl AgentAdapter for CodexAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
-        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !session_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
         }
         format!("codex --resume {}", session_id)
@@ -143,7 +146,9 @@ mod tests {
         let adapter = CodexAdapter;
         let caps = adapter.capabilities();
         assert!(caps.native_hooks);
-        assert!(caps.hook_events.contains(&"agent-turn-complete".to_string()));
+        assert!(caps
+            .hook_events
+            .contains(&"agent-turn-complete".to_string()));
         assert!(caps.mcp_support);
         assert!(caps.json_output);
     }

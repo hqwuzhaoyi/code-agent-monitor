@@ -44,10 +44,7 @@ pub struct AgentPaths {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum HookEvent {
     /// 会话开始
-    SessionStart {
-        session_id: String,
-        cwd: String,
-    },
+    SessionStart { session_id: String, cwd: String },
     /// 会话结束
     SessionEnd {
         session_id: Option<String>,
@@ -66,10 +63,7 @@ pub enum HookEvent {
         cwd: String,
     },
     /// 权限回复
-    PermissionReplied {
-        tool: String,
-        approved: bool,
-    },
+    PermissionReplied { tool: String, approved: bool },
     /// 工具执行完成
     ToolExecuted {
         tool: String,
@@ -83,10 +77,7 @@ pub enum HookEvent {
         cwd: String,
     },
     /// 错误
-    Error {
-        message: String,
-        cwd: String,
-    },
+    Error { message: String, cwd: String },
     /// 自定义事件
     Custom {
         event_type: String,

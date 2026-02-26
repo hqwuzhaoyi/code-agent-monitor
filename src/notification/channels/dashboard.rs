@@ -1,10 +1,12 @@
 //! Dashboard 渠道（通过 system event 发送结构化 payload）
 
-use crate::notification::channel::{NotificationChannel, NotificationMessage, SendResult, urgency_meets_threshold};
+use crate::notification::channel::{
+    urgency_meets_threshold, NotificationChannel, NotificationMessage, SendResult,
+};
 use crate::notification::urgency::Urgency;
 use anyhow::Result;
 use std::process::Command;
-use tracing::{info, error};
+use tracing::{error, info};
 
 /// Dashboard 渠道配置
 #[derive(Debug, Clone)]
@@ -42,18 +44,16 @@ impl NotificationChannel for DashboardChannel {
 
     fn send(&self, message: &NotificationMessage) -> Result<SendResult> {
         if !self.should_send(message) {
-            return Ok(SendResult::Skipped("no payload or urgency too low".to_string()));
+            return Ok(SendResult::Skipped(
+                "no payload or urgency too low".to_string(),
+            ));
         }
 
         let payload = message.payload.as_ref().unwrap();
         let payload_text = payload.to_string();
 
         let output = Command::new(&self.config.openclaw_cmd)
-            .args([
-                "system", "event",
-                "--text", &payload_text,
-                "--mode", "now",
-            ])
+            .args(["system", "event", "--text", &payload_text, "--mode", "now"])
             .output()?;
 
         if output.status.success() {
@@ -84,11 +84,7 @@ impl NotificationChannel for DashboardChannel {
 
         // 使用 spawn() 异步发送，不阻塞调用方
         Command::new(&self.config.openclaw_cmd)
-            .args([
-                "system", "event",
-                "--text", &payload_text,
-                "--mode", "now",
-            ])
+            .args(["system", "event", "--text", &payload_text, "--mode", "now"])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()?;

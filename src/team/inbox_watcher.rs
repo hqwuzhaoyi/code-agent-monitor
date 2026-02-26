@@ -7,10 +7,10 @@ use anyhow::Result;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::time::Duration;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
 
-use crate::notification::openclaw::OpenclawNotifier;
 use super::bridge::{InboxMessage, SpecialMessage, TeamBridge};
+use crate::notification::openclaw::OpenclawNotifier;
 
 /// 通知紧急程度
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,10 +38,7 @@ impl Urgency {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NotifyDecision {
     /// 需要通知用户
-    Notify {
-        urgency: Urgency,
-        summary: String,
-    },
+    Notify { urgency: Urgency, summary: String },
     /// 静默处理
     Silent,
 }
@@ -117,7 +114,11 @@ impl InboxWatcher {
 
         // 获取 team 的 inboxes 目录
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("无法获取 home 目录"))?;
-        let inboxes_dir = home.join(".claude").join("teams").join(team).join("inboxes");
+        let inboxes_dir = home
+            .join(".claude")
+            .join("teams")
+            .join(team)
+            .join("inboxes");
 
         if !inboxes_dir.exists() {
             return Ok(new_messages);
@@ -141,7 +142,8 @@ impl InboxWatcher {
                         if last_mod.is_none() || last_mod.unwrap() < modified {
                             // 文件有变化，读取新消息
                             if let Ok(messages) = self.team_bridge.read_inbox(team, &member) {
-                                let last_count = self.last_message_count.get(&path).copied().unwrap_or(0);
+                                let last_count =
+                                    self.last_message_count.get(&path).copied().unwrap_or(0);
 
                                 if messages.len() > last_count {
                                     // 有新消息
@@ -260,7 +262,10 @@ impl InboxWatcher {
 
         // 检查是否包含错误关键词
         let text_lower = message.text.to_lowercase();
-        if text_lower.contains("error") || text_lower.contains("错误") || text_lower.contains("失败") {
+        if text_lower.contains("error")
+            || text_lower.contains("错误")
+            || text_lower.contains("失败")
+        {
             return NotifyDecision::Notify {
                 urgency: Urgency::High,
                 summary: format!("{}: {}", message.from, truncate_text(&message.text, 50)),
@@ -268,7 +273,10 @@ impl InboxWatcher {
         }
 
         // 检查是否包含完成关键词
-        if text_lower.contains("完成") || text_lower.contains("completed") || text_lower.contains("done") {
+        if text_lower.contains("完成")
+            || text_lower.contains("completed")
+            || text_lower.contains("done")
+        {
             return NotifyDecision::Notify {
                 urgency: Urgency::Medium,
                 summary: format!("{} 完成任务", message.from),
@@ -288,11 +296,18 @@ impl InboxWatcher {
     }
 
     /// 获取等待中的权限请求
-    pub fn get_pending_permission_requests(&self, team: &str) -> Result<Vec<PendingPermissionRequest>> {
+    pub fn get_pending_permission_requests(
+        &self,
+        team: &str,
+    ) -> Result<Vec<PendingPermissionRequest>> {
         let mut requests = Vec::new();
 
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("无法获取 home 目录"))?;
-        let inboxes_dir = home.join(".claude").join("teams").join(team).join("inboxes");
+        let inboxes_dir = home
+            .join(".claude")
+            .join("teams")
+            .join(team)
+            .join("inboxes");
 
         if !inboxes_dir.exists() {
             return Ok(requests);

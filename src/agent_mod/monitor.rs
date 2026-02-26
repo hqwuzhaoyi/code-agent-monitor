@@ -1,8 +1,8 @@
 //! Agent lifecycle monitoring - tmux session health checks
 
-use anyhow::Result;
 use crate::agent::manager::AgentRecord;
 use crate::infra::tmux::TmuxManager;
+use anyhow::Result;
 
 /// Monitors agent tmux sessions for health
 pub struct AgentMonitor {
@@ -11,7 +11,9 @@ pub struct AgentMonitor {
 
 impl AgentMonitor {
     pub fn new() -> Self {
-        Self { tmux: TmuxManager::new() }
+        Self {
+            tmux: TmuxManager::new(),
+        }
     }
 
     /// Check if agent's tmux session is still alive

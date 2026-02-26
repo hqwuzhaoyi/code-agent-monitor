@@ -1,20 +1,20 @@
 //! MCP Server 模块 - 提供 MCP 协议接口
 
-use serde::{Deserialize, Serialize};
-use anyhow::Result;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-use crate::{ProcessScanner, SessionManager, AgentManager, StartAgentRequest};
-use crate::infra::jsonl::{JsonlParser, JsonlEvent, format_tool_use};
 use crate::infra::input::InputWaitDetector;
+use crate::infra::jsonl::{format_tool_use, JsonlEvent, JsonlParser};
+use crate::notification::load_webhook_config_from_file;
+use crate::notification::openclaw::OpenclawNotifier;
+use crate::session::state::{ConversationStateManager, ReplyResult};
 use crate::team;
 use crate::team::task_list;
-use crate::team::{TeamBridge, InboxMessage, InboxWatcher, TeamOrchestrator};
-use crate::notification::openclaw::OpenclawNotifier;
-use crate::notification::load_webhook_config_from_file;
-use crate::session::state::{ConversationStateManager, ReplyResult};
+use crate::team::{InboxMessage, InboxWatcher, TeamBridge, TeamOrchestrator};
+use crate::{AgentManager, ProcessScanner, SessionManager, StartAgentRequest};
+use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
 // Re-export types from types module for backwards compatibility
-pub use super::types::{McpRequest, McpResponse, McpError};
+pub use super::types::{McpError, McpRequest, McpResponse};
 
 /// MCP 工具定义 (internal use)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -119,7 +119,11 @@ impl McpServer {
                 id: request.id,
                 result: None,
                 error: Some(McpError {
-                    code: if e.to_string().contains("not found") { -32601 } else { -32603 },
+                    code: if e.to_string().contains("not found") {
+                        -32601
+                    } else {
+                        -32603
+                    },
                     message: e.to_string(),
                 }),
             },
@@ -174,15 +178,18 @@ impl McpServer {
     fn handle_agent_list(&self) -> Result<serde_json::Value> {
         let agents = self.agent_manager.list_agents()?;
 
-        let agents_json: Vec<serde_json::Value> = agents.iter().map(|a| {
-            serde_json::json!({
-                "agent_id": a.agent_id,
-                "agent_type": a.agent_type.to_string(),
-                "project_path": a.project_path,
-                "tmux_session": a.tmux_session,
-                "status": format!("{:?}", a.status).to_lowercase()
+        let agents_json: Vec<serde_json::Value> = agents
+            .iter()
+            .map(|a| {
+                serde_json::json!({
+                    "agent_id": a.agent_id,
+                    "agent_type": a.agent_type.to_string(),
+                    "project_path": a.project_path,
+                    "tmux_session": a.tmux_session,
+                    "status": format!("{:?}", a.status).to_lowercase()
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(serde_json::json!({
             "agents": agents_json
@@ -229,11 +236,16 @@ impl McpServer {
             .ok_or_else(|| anyhow::anyhow!("Missing agent_id"))?;
 
         // 获取 agent 记录
-        let agent = self.agent_manager.get_agent(agent_id)?
+        let agent = self
+            .agent_manager
+            .get_agent(agent_id)?
             .ok_or_else(|| anyhow::anyhow!("Agent not found: {}", agent_id))?;
 
         // 获取终端输出
-        let terminal_output = self.agent_manager.get_logs(agent_id, 20).unwrap_or_default();
+        let terminal_output = self
+            .agent_manager
+            .get_logs(agent_id, 20)
+            .unwrap_or_default();
 
         // 检测是否在等待输入
         let input_detector = InputWaitDetector::new();
@@ -250,12 +262,12 @@ impl McpServer {
         };
 
         // 格式化工具调用
-        let tools_formatted: Vec<String> = recent_tools.iter()
-            .filter_map(format_tool_use)
-            .collect();
+        let tools_formatted: Vec<String> =
+            recent_tools.iter().filter_map(format_tool_use).collect();
 
         // 格式化错误
-        let errors_formatted: Vec<String> = recent_errors.iter()
+        let errors_formatted: Vec<String> = recent_errors
+            .iter()
             .filter_map(|e| {
                 if let JsonlEvent::Error { message, .. } = e {
                     Some(message.clone())
@@ -291,12 +303,15 @@ impl McpServer {
     fn handle_team_list(&self) -> Result<serde_json::Value> {
         let teams = team::discovery::discover_teams();
 
-        let teams_json: Vec<serde_json::Value> = teams.iter().map(|t| {
-            serde_json::json!({
-                "team_name": t.team_name,
-                "member_count": t.members.len()
+        let teams_json: Vec<serde_json::Value> = teams
+            .iter()
+            .map(|t| {
+                serde_json::json!({
+                    "team_name": t.team_name,
+                    "member_count": t.members.len()
+                })
             })
-        }).collect();
+            .collect();
 
         Ok(serde_json::json!({
             "teams": teams_json
@@ -313,13 +328,16 @@ impl McpServer {
 
         match team::discovery::get_team_members(team_name) {
             Some(members) => {
-                let members_json: Vec<serde_json::Value> = members.iter().map(|m| {
-                    serde_json::json!({
-                        "name": m.name,
-                        "agent_id": m.agent_id,
-                        "agent_type": m.agent_type
+                let members_json: Vec<serde_json::Value> = members
+                    .iter()
+                    .map(|m| {
+                        serde_json::json!({
+                            "name": m.name,
+                            "agent_id": m.agent_id,
+                            "agent_type": m.agent_type
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 Ok(serde_json::json!({
                     "team_name": team_name,
@@ -337,12 +355,8 @@ impl McpServer {
         let name = params["name"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing name"))?;
-        let description = params["description"]
-            .as_str()
-            .unwrap_or("Created by CAM");
-        let project_path = params["project_path"]
-            .as_str()
-            .unwrap_or(".");
+        let description = params["description"].as_str().unwrap_or("Created by CAM");
+        let project_path = params["project_path"].as_str().unwrap_or(".");
 
         let bridge = TeamBridge::new();
         bridge.create_team(name, description, project_path)?;
@@ -422,9 +436,7 @@ impl McpServer {
         let member = params["member"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing member"))?;
-        let from = params["from"]
-            .as_str()
-            .unwrap_or("cam");
+        let from = params["from"].as_str().unwrap_or("cam");
         let text = params["text"]
             .as_str()
             .ok_or_else(|| anyhow::anyhow!("Missing text"))?;
@@ -449,7 +461,10 @@ impl McpServer {
     }
 
     /// 处理 team/pending_requests - 获取等待中的请求
-    fn handle_team_pending_requests(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
+    fn handle_team_pending_requests(
+        &self,
+        params: Option<serde_json::Value>,
+    ) -> Result<serde_json::Value> {
         let bridge = TeamBridge::new();
 
         // 如果指定了 team，只获取该 team 的请求
@@ -504,7 +519,8 @@ impl McpServer {
         let tools = vec![
             McpTool {
                 name: "list_agents".to_string(),
-                description: "列出所有正在运行的 AI 编码代理进程 (Claude Code, OpenCode, Codex 等)".to_string(),
+                description: "列出所有正在运行的 AI 编码代理进程 (Claude Code, OpenCode, Codex 等)"
+                    .to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {},
@@ -700,7 +716,8 @@ impl McpServer {
             },
             McpTool {
                 name: "agent_status".to_string(),
-                description: "获取 Agent 的结构化状态信息，包括是否等待输入、最近工具调用、错误等".to_string(),
+                description: "获取 Agent 的结构化状态信息，包括是否等待输入、最近工具调用、错误等"
+                    .to_string(),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -1065,8 +1082,13 @@ impl McpServer {
     /// 处理 tools/call
     fn handle_tools_call(&self, params: Option<serde_json::Value>) -> Result<serde_json::Value> {
         let params = params.ok_or_else(|| anyhow::anyhow!("缺少参数"))?;
-        let name = params["name"].as_str().ok_or_else(|| anyhow::anyhow!("缺少工具名称"))?;
-        let arguments = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+        let name = params["name"]
+            .as_str()
+            .ok_or_else(|| anyhow::anyhow!("缺少工具名称"))?;
+        let arguments = params
+            .get("arguments")
+            .cloned()
+            .unwrap_or(serde_json::json!({}));
 
         match name {
             "list_agents" => {
@@ -1080,7 +1102,9 @@ impl McpServer {
                 }))
             }
             "get_agent_info" => {
-                let pid = arguments["pid"].as_u64().ok_or_else(|| anyhow::anyhow!("缺少 pid"))? as u32;
+                let pid = arguments["pid"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 pid"))? as u32;
                 let scanner = ProcessScanner::new();
                 let agent = scanner.get_agent_info(pid)?;
                 Ok(serde_json::json!({
@@ -1106,7 +1130,9 @@ impl McpServer {
                 }))
             }
             "get_session_info" => {
-                let session_id = arguments["session_id"].as_str().ok_or_else(|| anyhow::anyhow!("缺少 session_id"))?;
+                let session_id = arguments["session_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 session_id"))?;
                 let manager = SessionManager::new();
                 let session = manager.get_session(session_id)?;
                 Ok(serde_json::json!({
@@ -1117,11 +1143,14 @@ impl McpServer {
                 }))
             }
             "resume_session" => {
-                let session_id = arguments["session_id"].as_str().ok_or_else(|| anyhow::anyhow!("缺少 session_id"))?;
+                let session_id = arguments["session_id"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 session_id"))?;
 
                 // 获取会话信息以获取 project_path
                 let session_manager = SessionManager::new();
-                let session = session_manager.get_session(session_id)?
+                let session = session_manager
+                    .get_session(session_id)?
                     .ok_or_else(|| anyhow::anyhow!("会话 {} 不存在", session_id))?;
 
                 let project_path = if session.project_path.is_empty() {
@@ -1148,7 +1177,9 @@ impl McpServer {
                 }))
             }
             "kill_agent" => {
-                let pid = arguments["pid"].as_u64().ok_or_else(|| anyhow::anyhow!("缺少 pid"))? as u32;
+                let pid = arguments["pid"]
+                    .as_u64()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 pid"))? as u32;
                 let scanner = ProcessScanner::new();
                 scanner.kill_agent(pid)?;
                 Ok(serde_json::json!({
@@ -1159,8 +1190,12 @@ impl McpServer {
                 }))
             }
             "send_input" => {
-                let tmux_session = arguments["tmux_session"].as_str().ok_or_else(|| anyhow::anyhow!("缺少 tmux_session"))?;
-                let input = arguments["input"].as_str().ok_or_else(|| anyhow::anyhow!("缺少 input"))?;
+                let tmux_session = arguments["tmux_session"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 tmux_session"))?;
+                let input = arguments["input"]
+                    .as_str()
+                    .ok_or_else(|| anyhow::anyhow!("缺少 input"))?;
                 let manager = SessionManager::new();
                 manager.send_to_tmux(tmux_session, input)?;
                 Ok(serde_json::json!({
@@ -1226,24 +1261,26 @@ impl McpServer {
                 }))
             }
             "agent_by_session_id" => {
-                let session_id = arguments.get("session_id")
+                let session_id = arguments
+                    .get("session_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 session_id 参数"))?;
 
-                let result = if let Some(agent) = self.agent_manager.find_agent_by_session_id(session_id)? {
-                    serde_json::json!({
-                        "found": true,
-                        "agent_id": agent.agent_id,
-                        "tmux_session": agent.tmux_session,
-                        "project_path": agent.project_path,
-                        "status": agent.status
-                    })
-                } else {
-                    serde_json::json!({
-                        "found": false,
-                        "session_id": session_id
-                    })
-                };
+                let result =
+                    if let Some(agent) = self.agent_manager.find_agent_by_session_id(session_id)? {
+                        serde_json::json!({
+                            "found": true,
+                            "agent_id": agent.agent_id,
+                            "tmux_session": agent.tmux_session,
+                            "project_path": agent.project_path,
+                            "status": agent.status
+                        })
+                    } else {
+                        serde_json::json!({
+                            "found": false,
+                            "session_id": session_id
+                        })
+                    };
 
                 Ok(serde_json::json!({
                     "content": [{
@@ -1273,20 +1310,24 @@ impl McpServer {
             }
             // Task list tools
             "task_list" => {
-                let team_name = arguments.get("team_name")
+                let team_name = arguments
+                    .get("team_name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
 
                 let tasks = task_list::list_tasks(team_name);
-                let result: Vec<serde_json::Value> = tasks.iter().map(|t| {
-                    serde_json::json!({
-                        "id": t.id,
-                        "subject": t.subject,
-                        "status": t.status.to_string(),
-                        "owner": t.owner,
-                        "blocked_by": t.blocked_by
+                let result: Vec<serde_json::Value> = tasks
+                    .iter()
+                    .map(|t| {
+                        serde_json::json!({
+                            "id": t.id,
+                            "subject": t.subject,
+                            "status": t.status.to_string(),
+                            "owner": t.owner,
+                            "blocked_by": t.blocked_by
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 Ok(serde_json::json!({
                     "content": [{
@@ -1296,10 +1337,12 @@ impl McpServer {
                 }))
             }
             "task_get" => {
-                let team_name = arguments.get("team_name")
+                let team_name = arguments
+                    .get("team_name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
-                let task_id = arguments.get("task_id")
+                let task_id = arguments
+                    .get("task_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 task_id 参数"))?;
 
@@ -1314,13 +1357,16 @@ impl McpServer {
                 }))
             }
             "task_update" => {
-                let team_name = arguments.get("team_name")
+                let team_name = arguments
+                    .get("team_name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team_name 参数"))?;
-                let task_id = arguments.get("task_id")
+                let task_id = arguments
+                    .get("task_id")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 task_id 参数"))?;
-                let status_str = arguments.get("status")
+                let status_str = arguments
+                    .get("status")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 status 参数"))?;
 
@@ -1343,13 +1389,16 @@ impl McpServer {
             }
             // Team Bridge tools (新增)
             "team_create" => {
-                let name = arguments.get("name")
+                let name = arguments
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
-                let description = arguments.get("description")
+                let description = arguments
+                    .get("description")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 description 参数"))?;
-                let project_path = arguments.get("project_path")
+                let project_path = arguments
+                    .get("project_path")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 project_path 参数"))?;
 
@@ -1364,7 +1413,8 @@ impl McpServer {
                 }))
             }
             "team_delete" => {
-                let name = arguments.get("name")
+                let name = arguments
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
 
@@ -1379,7 +1429,8 @@ impl McpServer {
                 }))
             }
             "team_status" => {
-                let name = arguments.get("name")
+                let name = arguments
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
 
@@ -1394,10 +1445,12 @@ impl McpServer {
                 }))
             }
             "inbox_read" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
-                let member = arguments.get("member")
+                let member = arguments
+                    .get("member")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
 
@@ -1412,16 +1465,20 @@ impl McpServer {
                 }))
             }
             "inbox_send" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
-                let member = arguments.get("member")
+                let member = arguments
+                    .get("member")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
-                let message_text = arguments.get("message")
+                let message_text = arguments
+                    .get("message")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 message 参数"))?;
-                let from = arguments.get("from")
+                let from = arguments
+                    .get("from")
                     .and_then(|v| v.as_str())
                     .unwrap_or("user");
 
@@ -1444,11 +1501,11 @@ impl McpServer {
                 }))
             }
             "team_pending_requests" => {
-                let team = arguments.get("team")
-                    .and_then(|v| v.as_str());
+                let team = arguments.get("team").and_then(|v| v.as_str());
 
                 let notifier = match load_webhook_config_from_file() {
-                    Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                    Some(config) => OpenclawNotifier::with_webhook(config)
+                        .unwrap_or_else(|_| OpenclawNotifier::new()),
                     None => OpenclawNotifier::new(),
                 };
                 let watcher = InboxWatcher::new(notifier);
@@ -1467,15 +1524,18 @@ impl McpServer {
                     all_requests
                 };
 
-                let result: Vec<serde_json::Value> = requests.iter().map(|r| {
-                    serde_json::json!({
-                        "team": r.team,
-                        "member": r.member,
-                        "tool": r.tool,
-                        "input": r.input,
-                        "timestamp": r.timestamp.to_rfc3339()
+                let result: Vec<serde_json::Value> = requests
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "team": r.team,
+                            "member": r.member,
+                            "tool": r.tool,
+                            "input": r.input,
+                            "timestamp": r.timestamp.to_rfc3339()
+                        })
                     })
-                }).collect();
+                    .collect();
 
                 Ok(serde_json::json!({
                     "content": [{
@@ -1486,17 +1546,19 @@ impl McpServer {
             }
             // Team Orchestrator tools
             "team_spawn_agent" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
-                let name = arguments.get("name")
+                let name = arguments
+                    .get("name")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 name 参数"))?;
-                let agent_type = arguments.get("agent_type")
+                let agent_type = arguments
+                    .get("agent_type")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 agent_type 参数"))?;
-                let initial_prompt = arguments.get("initial_prompt")
-                    .and_then(|v| v.as_str());
+                let initial_prompt = arguments.get("initial_prompt").and_then(|v| v.as_str());
 
                 let orchestrator = TeamOrchestrator::new();
                 let result = orchestrator.spawn_agent(team, name, agent_type, initial_prompt)?;
@@ -1509,7 +1571,8 @@ impl McpServer {
                 }))
             }
             "team_progress" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
 
@@ -1524,7 +1587,8 @@ impl McpServer {
                 }))
             }
             "team_shutdown" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
 
@@ -1551,11 +1615,11 @@ impl McpServer {
                 }))
             }
             "reply_pending" => {
-                let reply = arguments.get("reply")
+                let reply = arguments
+                    .get("reply")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 reply 参数"))?;
-                let target = arguments.get("target")
-                    .and_then(|v| v.as_str());
+                let target = arguments.get("target").and_then(|v| v.as_str());
 
                 let state_manager = ConversationStateManager::new();
                 let result = state_manager.handle_reply(reply, target)?;
@@ -1601,10 +1665,12 @@ impl McpServer {
             }
             // Remote Lead Mode tools
             "team_orchestrate" => {
-                let task_desc = arguments.get("task_desc")
+                let task_desc = arguments
+                    .get("task_desc")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 task_desc 参数"))?;
-                let project = arguments.get("project")
+                let project = arguments
+                    .get("project")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 project 参数"))?;
 
@@ -1619,13 +1685,16 @@ impl McpServer {
                 }))
             }
             "team_assign_task" => {
-                let team = arguments.get("team")
+                let team = arguments
+                    .get("team")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 team 参数"))?;
-                let member = arguments.get("member")
+                let member = arguments
+                    .get("member")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 member 参数"))?;
-                let task = arguments.get("task")
+                let task = arguments
+                    .get("task")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 task 参数"))?;
 
@@ -1640,11 +1709,11 @@ impl McpServer {
                 }))
             }
             "handle_user_reply" => {
-                let reply = arguments.get("reply")
+                let reply = arguments
+                    .get("reply")
                     .and_then(|v| v.as_str())
                     .ok_or_else(|| anyhow::anyhow!("缺少 reply 参数"))?;
-                let context = arguments.get("context")
-                    .and_then(|v| v.as_str());
+                let context = arguments.get("context").and_then(|v| v.as_str());
 
                 let orchestrator = TeamOrchestrator::new();
                 let result = orchestrator.handle_user_reply(reply, context)?;
@@ -1717,7 +1786,10 @@ mod tests {
             })),
         };
         let start_response = server.handle_request(start_request).await;
-        let agent_id = start_response.result.unwrap()["agent_id"].as_str().unwrap().to_string();
+        let agent_id = start_response.result.unwrap()["agent_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
         // When: 调用 agent/send
         let send_request = McpRequest {
@@ -1746,36 +1818,42 @@ mod tests {
         let server = McpServer::new_for_test();
         cleanup_test_agents(&server);
 
-        let r1 = server.handle_request(McpRequest {
-            jsonrpc: "2.0".to_string(),
-            id: Some(serde_json::json!(1)),
-            method: "agent/start".to_string(),
-            params: Some(serde_json::json!({
-                "project_path": "/tmp/a",
-                "agent_type": "mock"
-            })),
-        }).await;
+        let r1 = server
+            .handle_request(McpRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(1)),
+                method: "agent/start".to_string(),
+                params: Some(serde_json::json!({
+                    "project_path": "/tmp/a",
+                    "agent_type": "mock"
+                })),
+            })
+            .await;
 
         // 等待一秒以确保不同的 agent_id
         tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
 
-        let r2 = server.handle_request(McpRequest {
-            jsonrpc: "2.0".to_string(),
-            id: Some(serde_json::json!(2)),
-            method: "agent/start".to_string(),
-            params: Some(serde_json::json!({
-                "project_path": "/tmp/b",
-                "agent_type": "mock"
-            })),
-        }).await;
+        let r2 = server
+            .handle_request(McpRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(2)),
+                method: "agent/start".to_string(),
+                params: Some(serde_json::json!({
+                    "project_path": "/tmp/b",
+                    "agent_type": "mock"
+                })),
+            })
+            .await;
 
         // When: 调用 agent/list
-        let response = server.handle_request(McpRequest {
-            jsonrpc: "2.0".to_string(),
-            id: Some(serde_json::json!(3)),
-            method: "agent/list".to_string(),
-            params: Some(serde_json::json!({})),
-        }).await;
+        let response = server
+            .handle_request(McpRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(3)),
+                method: "agent/list".to_string(),
+                params: Some(serde_json::json!({})),
+            })
+            .await;
 
         // Then: 返回两个 agent
         assert!(response.error.is_none());
@@ -1795,12 +1873,14 @@ mod tests {
         let server = McpServer::new_for_test();
 
         // When: 调用不存在的方法
-        let response = server.handle_request(McpRequest {
-            jsonrpc: "2.0".to_string(),
-            id: Some(serde_json::json!(1)),
-            method: "invalid/method".to_string(),
-            params: Some(serde_json::json!({})),
-        }).await;
+        let response = server
+            .handle_request(McpRequest {
+                jsonrpc: "2.0".to_string(),
+                id: Some(serde_json::json!(1)),
+                method: "invalid/method".to_string(),
+                params: Some(serde_json::json!({})),
+            })
+            .await;
 
         // Then: 返回错误
         assert!(response.error.is_some());

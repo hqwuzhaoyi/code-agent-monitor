@@ -48,10 +48,7 @@ pub fn handle_get_session_info(params: Option<Value>) -> Result<Value> {
 }
 
 /// Handle resume_session request
-pub fn handle_resume_session(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_resume_session(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let session_id = params["session_id"]

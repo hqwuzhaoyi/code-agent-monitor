@@ -20,7 +20,10 @@ impl AgentAdapter for OpenCodeAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
-        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !session_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
         }
         format!("opencode --session {}", session_id)
@@ -133,9 +136,7 @@ impl AgentAdapter for OpenCodeAdapter {
                     .get("success")
                     .and_then(|v| v.as_bool())
                     .unwrap_or(true);
-                let duration_ms = value
-                    .get("duration_ms")
-                    .and_then(|v| v.as_u64());
+                let duration_ms = value.get("duration_ms").and_then(|v| v.as_u64());
                 Some(HookEvent::ToolExecuted {
                     tool,
                     success,

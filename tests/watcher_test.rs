@@ -12,8 +12,8 @@ fn test_stability_detector_is_stable_same_content() {
     // When: checking stability with same content multiple times
     assert!(!detector.is_stable(agent_id, content)); // count = 1
     assert!(!detector.is_stable(agent_id, content)); // count = 2
-    assert!(detector.is_stable(agent_id, content));  // count = 3, stable!
-    assert!(detector.is_stable(agent_id, content));  // count = 4, still stable
+    assert!(detector.is_stable(agent_id, content)); // count = 3, stable!
+    assert!(detector.is_stable(agent_id, content)); // count = 4, still stable
 }
 
 #[test]
@@ -44,7 +44,7 @@ fn test_stability_detector_clear() {
 
     // Then: count resets
     assert!(!detector.is_stable(agent_id, content)); // count = 1 again
-    assert!(detector.is_stable(agent_id, content));  // count = 2, stable
+    assert!(detector.is_stable(agent_id, content)); // count = 2, stable
 }
 
 #[test]
@@ -55,8 +55,8 @@ fn test_stability_detector_multiple_agents() {
     // When: checking stability for different agents
     assert!(!detector.is_stable("agent-1", "content A")); // agent-1: count = 1
     assert!(!detector.is_stable("agent-2", "content B")); // agent-2: count = 1
-    assert!(detector.is_stable("agent-1", "content A"));  // agent-1: count = 2, stable
-    assert!(detector.is_stable("agent-2", "content B"));  // agent-2: count = 2, stable
+    assert!(detector.is_stable("agent-1", "content A")); // agent-1: count = 2, stable
+    assert!(detector.is_stable("agent-2", "content B")); // agent-2: count = 2, stable
 
     // Then: each agent has independent state
 }

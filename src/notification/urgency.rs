@@ -65,14 +65,15 @@ pub fn get_urgency(event_type: &str, context: &str) -> Urgency {
         // notification type needs to check specific type
         "notification" => {
             let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
-            let notification_type = json.as_ref()
+            let notification_type = json
+                .as_ref()
                 .and_then(|j| j.get("notification_type"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
             match notification_type {
-                "permission_prompt" => Urgency::High,  // Permission confirmation
-                "idle_prompt" => Urgency::Medium,      // Idle waiting
-                _ => Urgency::Low
+                "permission_prompt" => Urgency::High, // Permission confirmation
+                "idle_prompt" => Urgency::Medium,     // Idle waiting
+                _ => Urgency::Low,
             }
         }
         // Error must be forwarded - needs intervention
@@ -188,6 +189,9 @@ line 1"#;
         assert_eq!(normalize_event_type("waiting_for_input"), "waitingforinput");
         assert_eq!(normalize_event_type("agent_exited"), "agentexited");
         // Mixed case
-        assert_eq!(normalize_event_type("Permission_Request"), "permissionrequest");
+        assert_eq!(
+            normalize_event_type("Permission_Request"),
+            "permissionrequest"
+        );
     }
 }

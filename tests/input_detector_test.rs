@@ -92,7 +92,10 @@ fn test_detect_claude_code_yes_no_format() {
 
     let result = detector.detect_immediate(output);
 
-    assert!(result.is_waiting, "Should detect Claude Code [Y]es / [N]o format");
+    assert!(
+        result.is_waiting,
+        "Should detect Claude Code [Y]es / [N]o format"
+    );
     assert_eq!(result.pattern_type, Some(InputWaitPattern::Other));
 }
 

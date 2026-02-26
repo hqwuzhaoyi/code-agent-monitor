@@ -38,10 +38,10 @@ cam reply y --all                 # 批准所有待处理
 cam reply y --agent "cam-*"       # 批准匹配的 agent
 cam reply y --risk low            # 批准所有低风险请求
 
-# 手动触发检测
+# 手动触发检测（调试用，不影响 watcher 自动检测）
 cam watch-trigger --agent-id <id>           # 触发检测并发送通知
-cam watch-trigger --agent-id <id> --force   # 强制发送（绕过 AI 检测）
-cam watch-trigger --agent-id <id> --no-dedup # 跳过去重
+cam watch-trigger --agent-id <id> --force   # 强制发送（绕过 AI 检测，自动跳过去重）
+cam watch-trigger --agent-id <id> --no-dedup # 显式跳过去重
 
 # 服务管理
 cam install                       # 安装 watcher 为系统服务
@@ -51,6 +51,14 @@ cam service status                # 查看服务状态
 cam service restart               # 重启服务（开发后使用）
 cam service logs                  # 查看服务日志
 cam service logs -f               # 跟踪日志
+
+# 通知问题排查（按顺序检查，不要直接手动触发）
+cam service status                # 1. 确认 watcher 服务运行中
+cam service logs 2>&1 | tail -50  # 2. 查看最近日志，确认是否检测到等待状态
+cat ~/.config/code-agent-monitor/dedup_state.json  # 3. 检查去重状态，是否被 lock
+tail -20 ~/.config/code-agent-monitor/hook.log     # 4. 检查 webhook 发送记录
+tail -50 ~/.openclaw/logs/gateway.log              # 5. 检查 OpenClaw Gateway 是否收到请求
+# 只有确认以上都正常但仍有问题时，才使用 watch-trigger 手动触发调试
 ```
 
 ### 构建和更新

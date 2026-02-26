@@ -185,7 +185,10 @@ impl JsonlParser {
     }
 
     /// 解析 assistant 消息内容
-    fn parse_assistant_content(content: &serde_json::Value, timestamp: Option<&str>) -> Option<JsonlEvent> {
+    fn parse_assistant_content(
+        content: &serde_json::Value,
+        timestamp: Option<&str>,
+    ) -> Option<JsonlEvent> {
         match content {
             serde_json::Value::Array(arr) => {
                 // 遍历内容数组，找到第一个有意义的事件
@@ -195,9 +198,15 @@ impl JsonlParser {
 
                         match content_type {
                             "tool_use" => {
-                                let tool_name = obj.get("name").and_then(|n| n.as_str())?.to_string();
-                                let tool_id = obj.get("id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                let input = obj.get("input").cloned().unwrap_or(serde_json::Value::Null);
+                                let tool_name =
+                                    obj.get("name").and_then(|n| n.as_str())?.to_string();
+                                let tool_id = obj
+                                    .get("id")
+                                    .and_then(|i| i.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let input =
+                                    obj.get("input").cloned().unwrap_or(serde_json::Value::Null);
 
                                 return Some(JsonlEvent::ToolUse {
                                     tool_name,
@@ -207,8 +216,15 @@ impl JsonlParser {
                                 });
                             }
                             "tool_result" => {
-                                let tool_id = obj.get("tool_use_id").and_then(|i| i.as_str()).unwrap_or("").to_string();
-                                let is_error = obj.get("is_error").and_then(|e| e.as_bool()).unwrap_or(false);
+                                let tool_id = obj
+                                    .get("tool_use_id")
+                                    .and_then(|i| i.as_str())
+                                    .unwrap_or("")
+                                    .to_string();
+                                let is_error = obj
+                                    .get("is_error")
+                                    .and_then(|e| e.as_bool())
+                                    .unwrap_or(false);
                                 let output = obj.get("content").and_then(|c| {
                                     if let Some(s) = c.as_str() {
                                         Some(s.to_string())
@@ -333,7 +349,10 @@ impl JsonlParser {
 
 /// 格式化工具调用为人类可读的字符串
 pub fn format_tool_use(event: &JsonlEvent) -> Option<String> {
-    if let JsonlEvent::ToolUse { tool_name, input, .. } = event {
+    if let JsonlEvent::ToolUse {
+        tool_name, input, ..
+    } = event
+    {
         let target = extract_tool_target(tool_name, input);
         if let Some(target) = target {
             Some(format!("{} {}", tool_name, target))
@@ -346,7 +365,10 @@ pub fn format_tool_use(event: &JsonlEvent) -> Option<String> {
 }
 
 /// 从工具输入中提取目标（文件路径、命令等）- 公开版本
-pub fn extract_tool_target_from_input(tool_name: &str, input: &serde_json::Value) -> Option<String> {
+pub fn extract_tool_target_from_input(
+    tool_name: &str,
+    input: &serde_json::Value,
+) -> Option<String> {
     extract_tool_target(tool_name, input)
 }
 
@@ -365,19 +387,18 @@ fn extract_tool_target(tool_name: &str, input: &serde_json::Value) -> Option<Str
                 super::truncate_str(s, 47)
             })
         }
-        "Glob" => {
-            input.get("pattern").and_then(|p| p.as_str()).map(|s| s.to_string())
-        }
-        "Grep" => {
-            input.get("pattern").and_then(|p| p.as_str()).map(|s| {
-                super::truncate_str(s, 27)
-            })
-        }
-        "Task" => {
-            input.get("description").and_then(|d| d.as_str()).map(|s| {
-                super::truncate_str(s, 37)
-            })
-        }
+        "Glob" => input
+            .get("pattern")
+            .and_then(|p| p.as_str())
+            .map(|s| s.to_string()),
+        "Grep" => input
+            .get("pattern")
+            .and_then(|p| p.as_str())
+            .map(|s| super::truncate_str(s, 27)),
+        "Task" => input
+            .get("description")
+            .and_then(|d| d.as_str())
+            .map(|s| super::truncate_str(s, 37)),
         _ => None,
     }
 }
@@ -393,7 +414,12 @@ mod tests {
         let event = JsonlParser::parse_line(line).unwrap();
 
         match event {
-            JsonlEvent::ToolUse { tool_name, tool_id, input, .. } => {
+            JsonlEvent::ToolUse {
+                tool_name,
+                tool_id,
+                input,
+                ..
+            } => {
                 assert_eq!(tool_name, "Edit");
                 assert_eq!(tool_id, "test-id");
                 assert_eq!(input["file_path"], "src/main.rs");

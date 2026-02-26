@@ -1,15 +1,15 @@
 //! 基础设施层 - tmux、进程、终端、解析器
 
-pub mod tmux;
+pub mod input;
+pub mod jsonl;
 pub mod process;
 pub mod terminal;
-pub mod jsonl;
-pub mod input;
+pub mod tmux;
 
-pub use tmux::TmuxManager;
+pub use input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
+pub use jsonl::{extract_tool_target_from_input, format_tool_use, JsonlEvent, JsonlParser};
 pub use process::ProcessScanner;
-pub use jsonl::{JsonlParser, JsonlEvent, format_tool_use, extract_tool_target_from_input};
-pub use input::{InputWaitDetector, InputWaitResult, InputWaitPattern};
+pub use tmux::TmuxManager;
 
 /// 安全截断 UTF-8 字符串，避免在多字节字符中间截断
 ///

@@ -1,8 +1,8 @@
 //! TUI 状态数据结构
 
-use chrono::{DateTime, Local};
-use crate::AgentStatus;
 use crate::notification::Urgency;
+use crate::AgentStatus;
+use chrono::{DateTime, Local};
 
 /// Agent 信息（TUI 显示用）
 #[derive(Debug, Clone)]

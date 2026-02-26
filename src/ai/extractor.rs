@@ -5,10 +5,10 @@
 use anyhow::{anyhow, Result};
 use tracing::{debug, info, trace, warn};
 
+use crate::agent::manager::AgentStatus;
 use crate::ai::client::{AnthropicClient, AnthropicConfig};
 use crate::ai::quality::{assess_question_extraction, assess_status_detection, thresholds};
 use crate::ai::types::{NotificationContent, QuestionType};
-use crate::agent::manager::AgentStatus;
 use crate::infra::terminal::truncate_for_status;
 use crate::notification::webhook::{load_webhook_config_from_file, WebhookClient};
 
@@ -99,7 +99,10 @@ pub fn extract_notification_content(terminal_snapshot: &str) -> Result<Notificat
 
     let response = client.complete(&prompt, Some(system))?;
     let elapsed = start.elapsed();
-    info!(elapsed_ms = elapsed.as_millis(), "Haiku extract_notification_content completed");
+    info!(
+        elapsed_ms = elapsed.as_millis(),
+        "Haiku extract_notification_content completed"
+    );
 
     // 解析 JSON 响应
     let json_str = extract_json_from_output(&response)
@@ -529,14 +532,14 @@ pub fn is_agent_processing(terminal_snapshot: &str) -> AgentStatus {
 
     let elapsed = start.elapsed();
     debug!(elapsed_ms = elapsed.as_millis(), response = %response.trim(), "is_agent_processing completed");
-    
+
     // 记录完整的 AI 响应以便调试
     let response_trimmed = response.trim();
     info!(ai_response = %response_trimmed, "AI status detection result");
 
     // 完全信任 AI 的判断 - 看 AI 返回的是 WAITING、PROCESSING 还是 DECISION
     let response_upper = response.trim().to_uppercase();
-    
+
     let status = if response_upper.contains("DECISION") {
         AgentStatus::DecisionRequired
     } else if response_upper.contains("WAITING") {
@@ -634,9 +637,15 @@ pub enum SimpleExtractionResult {
     /// 成功提取到格式化消息
     /// - message: 格式化的通知消息
     /// - fingerprint: 问题的语义指纹（用于去重，如 "react-todo-enhance-or-fresh"）
-    Message { message: String, fingerprint: String },
+    Message {
+        message: String,
+        fingerprint: String,
+    },
     /// Agent 空闲，无问题需要回答
-    Idle { status: String, last_action: Option<String> },
+    Idle {
+        status: String,
+        last_action: Option<String>,
+    },
     /// 提取失败
     Failed,
 }
@@ -721,7 +730,8 @@ fn extract_formatted_message_with_context(
     // 将 "❯ 用户输入内容" 替换为 "❯ [用户正在输入...]"
     let cleaned = clean_user_input_line(&truncated);
 
-    let system = r#"你是终端输出分析专家。从 AI Agent 终端快照中提取最新的问题，格式化为简洁的通知消息。"#;
+    let system =
+        r#"你是终端输出分析专家。从 AI Agent 终端快照中提取最新的问题，格式化为简洁的通知消息。"#;
 
     let prompt = format!(
         r#"分析以下 AI Agent 终端输出，提取最新的问题。
@@ -839,7 +849,10 @@ has_question=false 时：message 和 fingerprint 留空
             .unwrap_or("")
             .to_string();
 
-        Ok(SimpleExtractionResult::Message { message, fingerprint })
+        Ok(SimpleExtractionResult::Message {
+            message,
+            fingerprint,
+        })
     } else {
         // 无问题，返回空闲状态
         let status = parsed
@@ -852,7 +865,10 @@ has_question=false 时：message 和 fingerprint 留空
             .and_then(|v| v.as_str())
             .map(|s| s.to_string());
 
-        Ok(SimpleExtractionResult::Idle { status, last_action })
+        Ok(SimpleExtractionResult::Idle {
+            status,
+            last_action,
+        })
     }
 }
 

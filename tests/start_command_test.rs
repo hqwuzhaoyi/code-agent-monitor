@@ -3,7 +3,7 @@
 //! 测试 cam start 命令的参数解析、配置验证和错误处理。
 
 use code_agent_monitor::agent::{AgentManager, AgentType, StartAgentRequest, StartAgentResponse};
-use code_agent_monitor::cli::{StartArgs, StartOutput, handle_start};
+use code_agent_monitor::cli::{handle_start, StartArgs, StartOutput};
 
 // ============================================================================
 // 参数解析测试
@@ -104,8 +104,14 @@ mod agent_type_parsing {
     fn test_parse_claude_variants() {
         // 测试 claude 的各种别名
         assert_eq!("claude".parse::<AgentType>().unwrap(), AgentType::Claude);
-        assert_eq!("claude-code".parse::<AgentType>().unwrap(), AgentType::Claude);
-        assert_eq!("claudecode".parse::<AgentType>().unwrap(), AgentType::Claude);
+        assert_eq!(
+            "claude-code".parse::<AgentType>().unwrap(),
+            AgentType::Claude
+        );
+        assert_eq!(
+            "claudecode".parse::<AgentType>().unwrap(),
+            AgentType::Claude
+        );
         assert_eq!("CLAUDE".parse::<AgentType>().unwrap(), AgentType::Claude);
     }
 
@@ -117,22 +123,43 @@ mod agent_type_parsing {
 
     #[test]
     fn test_parse_opencode() {
-        assert_eq!("opencode".parse::<AgentType>().unwrap(), AgentType::OpenCode);
-        assert_eq!("OPENCODE".parse::<AgentType>().unwrap(), AgentType::OpenCode);
+        assert_eq!(
+            "opencode".parse::<AgentType>().unwrap(),
+            AgentType::OpenCode
+        );
+        assert_eq!(
+            "OPENCODE".parse::<AgentType>().unwrap(),
+            AgentType::OpenCode
+        );
     }
 
     #[test]
     fn test_parse_gemini_variants() {
         assert_eq!("gemini".parse::<AgentType>().unwrap(), AgentType::GeminiCli);
-        assert_eq!("gemini-cli".parse::<AgentType>().unwrap(), AgentType::GeminiCli);
-        assert_eq!("geminicli".parse::<AgentType>().unwrap(), AgentType::GeminiCli);
+        assert_eq!(
+            "gemini-cli".parse::<AgentType>().unwrap(),
+            AgentType::GeminiCli
+        );
+        assert_eq!(
+            "geminicli".parse::<AgentType>().unwrap(),
+            AgentType::GeminiCli
+        );
     }
 
     #[test]
     fn test_parse_mistral_variants() {
-        assert_eq!("mistral".parse::<AgentType>().unwrap(), AgentType::MistralVibe);
-        assert_eq!("mistral-vibe".parse::<AgentType>().unwrap(), AgentType::MistralVibe);
-        assert_eq!("mistralvibe".parse::<AgentType>().unwrap(), AgentType::MistralVibe);
+        assert_eq!(
+            "mistral".parse::<AgentType>().unwrap(),
+            AgentType::MistralVibe
+        );
+        assert_eq!(
+            "mistral-vibe".parse::<AgentType>().unwrap(),
+            AgentType::MistralVibe
+        );
+        assert_eq!(
+            "mistralvibe".parse::<AgentType>().unwrap(),
+            AgentType::MistralVibe
+        );
     }
 
     #[test]
@@ -145,7 +172,10 @@ mod agent_type_parsing {
         // 无效的 agent 类型应该返回错误
         let result = "invalid-agent".parse::<AgentType>();
         assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unknown agent type"));
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Unknown agent type"));
     }
 }
 

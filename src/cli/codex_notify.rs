@@ -52,12 +52,11 @@ pub async fn handle_codex_notify(args: CodexNotifyArgs) -> Result<()> {
                     info!(?watch_event, "Watch event detected");
 
                     // 发送通知
-                    let notifier =
-                        match crate::notification::load_webhook_config_from_file() {
-                            Some(config) => crate::OpenclawNotifier::with_webhook(config)
-                                .unwrap_or_else(|_| crate::OpenclawNotifier::new()),
-                            None => crate::OpenclawNotifier::new(),
-                        };
+                    let notifier = match crate::notification::load_webhook_config_from_file() {
+                        Some(config) => crate::OpenclawNotifier::with_webhook(config)
+                            .unwrap_or_else(|_| crate::OpenclawNotifier::new()),
+                        None => crate::OpenclawNotifier::new(),
+                    };
 
                     if let crate::WatchEvent::WaitingForInput {
                         agent_id,
@@ -67,14 +66,15 @@ pub async fn handle_codex_notify(args: CodexNotifyArgs) -> Result<()> {
                         is_decision_required,
                     } = watch_event
                     {
-                        let notification_event = crate::NotificationEvent::waiting_for_input_with_decision(
-                            &agent_id,
-                            &pattern_type,
-                            is_decision_required,
-                        )
-                        .with_project_path(cwd)
-                        .with_terminal_snapshot(context)
-                        .with_dedup_key(dedup_key);
+                        let notification_event =
+                            crate::NotificationEvent::waiting_for_input_with_decision(
+                                &agent_id,
+                                &pattern_type,
+                                is_decision_required,
+                            )
+                            .with_project_path(cwd)
+                            .with_terminal_snapshot(context)
+                            .with_dedup_key(dedup_key);
 
                         match notifier.send_notification_event(&notification_event) {
                             Ok(result) => info!(?result, "Notification sent"),
@@ -101,7 +101,8 @@ mod tests {
     #[test]
     fn test_codex_notify_args() {
         // 验证参数结构
-        let payload = r#"{"type":"agent-turn-complete","thread-id":"abc","turn-id":"def","cwd":"/tmp"}"#;
+        let payload =
+            r#"{"type":"agent-turn-complete","thread-id":"abc","turn-id":"def","cwd":"/tmp"}"#;
         let args = CodexNotifyArgs {
             payload: payload.to_string(),
         };

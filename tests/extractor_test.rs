@@ -3,7 +3,7 @@
 //! 测试 ReAct 循环逻辑、边界条件和错误处理。
 
 use code_agent_monitor::agent::extractor::{
-    ExtractionResult, ExtractedMessage, IterationConfig, MessageExtractor, MessageType,
+    ExtractedMessage, ExtractionResult, IterationConfig, MessageExtractor, MessageType,
     ReactExtractor,
 };
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -475,7 +475,11 @@ fn test_message_type_deserialization_open_ended() {
 fn test_message_type_deserialization_idle() {
     let json = r#"{"idle":{"status":"completed","last_action":"Created file"}}"#;
     let msg_type: MessageType = serde_json::from_str(json).unwrap();
-    if let MessageType::Idle { status, last_action } = msg_type {
+    if let MessageType::Idle {
+        status,
+        last_action,
+    } = msg_type
+    {
         assert_eq!(status, "completed");
         assert_eq!(last_action, Some("Created file".to_string()));
     } else {
@@ -514,7 +518,11 @@ fn test_extracted_message_with_idle_type() {
 
     let msg: ExtractedMessage = serde_json::from_str(json).unwrap();
     assert!(msg.content.is_empty());
-    if let MessageType::Idle { status, last_action } = msg.message_type {
+    if let MessageType::Idle {
+        status,
+        last_action,
+    } = msg.message_type
+    {
         assert_eq!(status, "idle");
         assert!(last_action.is_none());
     } else {

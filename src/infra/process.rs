@@ -1,9 +1,9 @@
 //! 进程扫描模块 - 扫描系统中的 AI 编码代理进程
 
 use crate::agent::AgentType;
-use serde::{Deserialize, Serialize};
-use sysinfo::{System, Process, Pid};
 use anyhow::Result;
+use serde::{Deserialize, Serialize};
+use sysinfo::{Pid, Process, System};
 
 /// 代理进程信息
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +75,11 @@ impl ProcessScanner {
     /// 解析进程信息，判断是否为 AI 代理
     fn parse_agent_process(&self, pid: &Pid, process: &Process) -> Option<AgentInfo> {
         let name = process.name().to_string_lossy().to_lowercase();
-        let cmd: Vec<String> = process.cmd().iter().map(|s| s.to_string_lossy().to_string()).collect();
+        let cmd: Vec<String> = process
+            .cmd()
+            .iter()
+            .map(|s| s.to_string_lossy().to_string())
+            .collect();
         let cmd_str = cmd.join(" ").to_lowercase();
 
         // 检测代理类型
@@ -95,12 +99,13 @@ impl ProcessScanner {
 
         // 提取会话 ID
         let session_id = self.extract_session_id(&cmd);
-        
+
         // 提取模型
         let model = self.extract_model(&cmd);
 
         // 获取工作目录
-        let working_dir = process.cwd()
+        let working_dir = process
+            .cwd()
             .map(|p| p.to_string_lossy().to_string())
             .unwrap_or_else(|| "unknown".to_string());
 

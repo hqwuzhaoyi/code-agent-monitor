@@ -55,10 +55,7 @@ impl NotificationStore {
         }
 
         // 打开文件并加锁
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(&path)?;
+        let file = OpenOptions::new().create(true).append(true).open(&path)?;
 
         file.lock_shared()?;
         let mut file = file;

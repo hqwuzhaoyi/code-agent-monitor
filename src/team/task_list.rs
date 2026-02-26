@@ -73,7 +73,10 @@ pub fn list_tasks(team_name: &str) -> Vec<Task> {
             let path = entry.path();
             if path.is_file() && path.extension().is_some_and(|e| e == "json") {
                 // 跳过 .lock 文件
-                if path.file_name().is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.'))) {
+                if path
+                    .file_name()
+                    .is_some_and(|n| n.to_str().is_some_and(|s| s.starts_with('.')))
+                {
                     continue;
                 }
                 if let Ok(content) = std::fs::read_to_string(&path) {
@@ -110,8 +113,8 @@ pub fn get_task(team_name: &str, task_id: &str) -> Option<Task> {
 
 /// 更新任务状态
 pub fn update_task_status(team_name: &str, task_id: &str, status: TaskStatus) -> Result<()> {
-    let tasks_dir = get_team_tasks_dir(team_name)
-        .ok_or_else(|| anyhow::anyhow!("无法获取 tasks 目录"))?;
+    let tasks_dir =
+        get_team_tasks_dir(team_name).ok_or_else(|| anyhow::anyhow!("无法获取 tasks 目录"))?;
     let task_path = tasks_dir.join(format!("{}.json", task_id));
 
     if !task_path.exists() {

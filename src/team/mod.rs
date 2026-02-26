@@ -16,15 +16,17 @@
 //! - `config.json` - Team 配置和成员列表
 //! - `inboxes/{member-name}.json` - 成员 inbox 消息
 
-pub mod discovery;
 pub mod bridge;
-pub mod orchestrator;
+pub mod discovery;
 pub mod inbox_watcher;
+pub mod orchestrator;
 pub mod task_list;
 
 // Re-export commonly used types
-pub use discovery::{TeamConfig, TeamMember, discover_teams, get_team_members, get_active_team_members};
-pub use bridge::{TeamBridge, InboxMessage, SpecialMessage, AgentId};
-pub use orchestrator::{TeamOrchestrator, SpawnResult, TeamProgress};
-pub use inbox_watcher::{InboxWatcher, Urgency, NotifyDecision};
-pub use task_list::{Task, TaskStatus, list_tasks, get_task, update_task_status, list_team_names};
+pub use bridge::{AgentId, InboxMessage, SpecialMessage, TeamBridge};
+pub use discovery::{
+    discover_teams, get_active_team_members, get_team_members, TeamConfig, TeamMember,
+};
+pub use inbox_watcher::{InboxWatcher, NotifyDecision, Urgency};
+pub use orchestrator::{SpawnResult, TeamOrchestrator, TeamProgress};
+pub use task_list::{get_task, list_tasks, list_team_names, update_task_status, Task, TaskStatus};

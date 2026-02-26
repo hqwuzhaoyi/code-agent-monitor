@@ -3,5 +3,8 @@
 pub mod manager;
 pub mod state;
 
-pub use manager::{SessionManager, SessionFilter};
-pub use state::{ConversationStateManager, ConversationState, PendingConfirmation, ConfirmationType, AgentContext, ReplyResult, BatchFilter, BatchReplyResult};
+pub use manager::{SessionFilter, SessionManager};
+pub use state::{
+    AgentContext, BatchFilter, BatchReplyResult, ConfirmationType, ConversationState,
+    ConversationStateManager, PendingConfirmation, ReplyResult,
+};

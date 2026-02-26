@@ -27,11 +27,13 @@ fn clear_proxy_env() {
     // 设置 NO_PROXY 绕过所有代理
     env::set_var("NO_PROXY", "*");
     env::set_var("no_proxy", "*");
-    
+
     // Debug: 打印当前代理设置
-    debug!("Proxy settings after clear: HTTPS_PROXY={:?}, NO_PROXY={:?}", 
-        env::var("HTTPS_PROXY").ok(), 
-        env::var("NO_PROXY").ok());
+    debug!(
+        "Proxy settings after clear: HTTPS_PROXY={:?}, NO_PROXY={:?}",
+        env::var("HTTPS_PROXY").ok(),
+        env::var("NO_PROXY").ok()
+    );
 }
 
 #[allow(dead_code)]
@@ -127,7 +129,7 @@ impl AnthropicConfig {
 
         // 加载 providers 配置
         let providers = Self::load_providers_from_config();
-        
+
         // 如果有 providers 配置，使用第一个作为主配置
         if !providers.is_empty() {
             let primary = &providers[0];
@@ -181,7 +183,8 @@ impl AnthropicConfig {
             if config_path.exists() {
                 if let Ok(content) = fs::read_to_string(&config_path) {
                     if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(providers) = config.get("providers").and_then(|p| p.as_array()) {
+                        if let Some(providers) = config.get("providers").and_then(|p| p.as_array())
+                        {
                             let mut result = Vec::new();
                             for p in providers {
                                 if let (Some(api_key), Some(base_url), Some(model)) = (
@@ -189,7 +192,8 @@ impl AnthropicConfig {
                                     p.get("base_url").and_then(|u| u.as_str()),
                                     p.get("model").and_then(|m| m.as_str()),
                                 ) {
-                                    let api_type = p.get("api_type")
+                                    let api_type = p
+                                        .get("api_type")
                                         .and_then(|t| t.as_str())
                                         .unwrap_or("anthropic")
                                         .to_string();
@@ -240,7 +244,9 @@ impl AnthropicConfig {
             if config_path.exists() {
                 if let Ok(content) = fs::read_to_string(&config_path) {
                     if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
-                        if let Some(timeout) = config.get("extraction_timeout_ms").and_then(|t| t.as_u64()) {
+                        if let Some(timeout) =
+                            config.get("extraction_timeout_ms").and_then(|t| t.as_u64())
+                        {
                             if timeout > 0 {
                                 debug!("Loaded extraction timeout from config: {}ms", timeout);
                                 return Some(timeout);
@@ -277,7 +283,9 @@ impl AnthropicConfig {
                                             format!("{}/v1/messages", u)
                                         }
                                     })
-                                    .unwrap_or_else(|| "https://api.minimaxi.com/anthropic/v1/messages".to_string());
+                                    .unwrap_or_else(|| {
+                                        "https://api.minimaxi.com/anthropic/v1/messages".to_string()
+                                    });
                                 debug!("Using MiniMax API: key=***, base_url={}", url);
                                 return Ok(Some((key.to_string(), url)));
                             }
@@ -363,11 +371,7 @@ impl AnthropicConfig {
                             .get("models")
                             .and_then(|m| m.get("providers"))
                             .and_then(|p| p.get("anthropic"))
-                            .or_else(|| {
-                                config
-                                    .get("providers")
-                                    .and_then(|p| p.get("anthropic"))
-                            });
+                            .or_else(|| config.get("providers").and_then(|p| p.get("anthropic")));
 
                         if let Some(ac) = anthropic_config {
                             let key = ac.get("apiKey").and_then(|k| k.as_str());
@@ -416,18 +420,21 @@ impl AnthropicConfig {
                 if let Ok(content) = fs::read_to_string(&config_path) {
                     if let Ok(config) = serde_json::from_str::<serde_json::Value>(&content) {
                         if let Some(webhook) = config.get("webhook") {
-                            let gateway_url = webhook.get("gateway_url")
+                            let gateway_url = webhook
+                                .get("gateway_url")
                                 .and_then(|u| u.as_str())
                                 .unwrap_or("http://localhost:18789")
                                 .to_string();
-                            let hook_token = webhook.get("hook_token")
+                            let hook_token = webhook
+                                .get("hook_token")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("")
                                 .to_string();
-                            let timeout_secs = webhook.get("timeout_secs")
+                            let timeout_secs = webhook
+                                .get("timeout_secs")
                                 .and_then(|t| t.as_u64())
                                 .unwrap_or(30);
-                            
+
                             if !hook_token.is_empty() {
                                 debug!("Loaded webhook config from ~/.config/code-agent-monitor/config.json");
                                 return Some(WebhookConfig {
@@ -441,7 +448,7 @@ impl AnthropicConfig {
                 }
             }
         }
-        
+
         // 从环境变量加载
         if let Ok(url) = std::env::var("CAM_WEBHOOK_URL") {
             if let Ok(token) = std::env::var("CAM_WEBHOOK_TOKEN") {
@@ -454,7 +461,7 @@ impl AnthropicConfig {
                 }
             }
         }
-        
+
         None
     }
 }
@@ -514,7 +521,7 @@ impl AnthropicClient {
     pub fn new(config: AnthropicConfig) -> Result<Self> {
         // 清除代理环境变量 - 确保在 Client 创建之前清除
         clear_proxy_env();
-        
+
         // 创建一个不使用系统代理配置的 client
         let client = reqwest::blocking::Client::builder()
             .timeout(Duration::from_millis(config.timeout_ms))
@@ -537,10 +544,10 @@ impl AnthropicClient {
         if !self.config.providers.is_empty() {
             for (i, provider) in self.config.providers.iter().enumerate() {
                 debug!(provider = i, model = %provider.model, "Trying provider");
-                
+
                 // 获取完整的 API URL
                 let full_url = provider.get_full_url();
-                
+
                 // 创建临时配置
                 let temp_config = AnthropicConfig {
                     api_key: provider.api_key.clone(),
@@ -551,7 +558,7 @@ impl AnthropicClient {
                     webhook: None,
                     providers: Vec::new(),
                 };
-                
+
                 // 尝试这个 provider
                 let temp_client = match AnthropicClient::new(temp_config) {
                     Ok(c) => c,
@@ -560,7 +567,7 @@ impl AnthropicClient {
                         continue;
                     }
                 };
-                
+
                 match temp_client.send_anthropic_request(prompt, system) {
                     Ok(result) => {
                         info!(provider = i, model = %provider.model, "Provider succeeded");
@@ -571,22 +578,25 @@ impl AnthropicClient {
                     }
                 }
             }
-            
+
             // 所有 providers 都失败
-            return Err(anyhow!("All {} providers failed", self.config.providers.len()));
+            return Err(anyhow!(
+                "All {} providers failed",
+                self.config.providers.len()
+            ));
         }
-        
+
         // 降级到旧的处理方式
         // 首先尝试 Anthropic 格式
         if let Ok(result) = self.send_anthropic_request(prompt, system) {
             return Ok(result);
         }
-        
+
         // 如果失败，尝试 OpenAI 格式 (用于 MiniMax)
         debug!("Anthropic format failed, trying OpenAI format");
         self.send_openai_request(prompt)
     }
-    
+
     /// 发送 Anthropic 格式请求
     fn send_anthropic_request(&self, prompt: &str, system: Option<&str>) -> Result<String> {
         let request = MessagesRequest {
@@ -621,7 +631,10 @@ impl AnthropicClient {
                 anyhow!("API request failed after {}ms: {}", elapsed.as_millis(), e)
             })?;
 
-        debug!(elapsed_ms = start.elapsed().as_millis(), "API request completed");
+        debug!(
+            elapsed_ms = start.elapsed().as_millis(),
+            "API request completed"
+        );
 
         let status = response.status();
         let body = response
@@ -631,7 +644,11 @@ impl AnthropicClient {
         if !status.is_success() {
             // 尝试解析错误响应
             if let Ok(error_resp) = serde_json::from_str::<ErrorResponse>(&body) {
-                return Err(anyhow!("API error ({}): {}", status, error_resp.error.message));
+                return Err(anyhow!(
+                    "API error ({}): {}",
+                    status,
+                    error_resp.error.message
+                ));
             }
             return Err(anyhow!("API error ({}): {}", status, body));
         }
@@ -665,13 +682,17 @@ impl AnthropicClient {
 
         if text.is_empty() {
             // 打印调试信息
-            let content_types: Vec<&str> = response.content.iter().map(|c| c.content_type.as_str()).collect();
+            let content_types: Vec<&str> = response
+                .content
+                .iter()
+                .map(|c| c.content_type.as_str())
+                .collect();
             warn!(content_types = ?content_types, "Empty response from Anthropic API - no text or thinking content found");
         }
 
         Ok(text)
     }
-    
+
     /// 发送 OpenAI 格式请求 (用于 MiniMax)
     fn send_openai_request(&self, prompt: &str) -> Result<String> {
         // 构建 OpenAI 格式请求
@@ -682,27 +703,34 @@ impl AnthropicClient {
                 {"role": "user", "content": prompt}
             ]
         });
-        
+
         // 尝试多个可能的端点
         let endpoints = vec![
-            format!("{}/v1/chat/completions", self.config.base_url.trim_end_matches("/v1/messages")),
-            format!("{}/chat/completions", self.config.base_url.trim_end_matches("/v1")),
+            format!(
+                "{}/v1/chat/completions",
+                self.config.base_url.trim_end_matches("/v1/messages")
+            ),
+            format!(
+                "{}/chat/completions",
+                self.config.base_url.trim_end_matches("/v1")
+            ),
             "https://api.minimaxi.com/v1/chat/completions".to_string(),
         ];
-        
+
         let mut last_error = None;
-        
+
         for url in endpoints {
             debug!(url = %url, "Trying OpenAI endpoint");
-            
+
             let start = std::time::Instant::now();
-            let result = self.client
+            let result = self
+                .client
                 .post(&url)
                 .header("Authorization", format!("Bearer {}", self.config.api_key))
                 .header("content-type", "application/json")
                 .json(&request)
                 .send();
-            
+
             match result {
                 Ok(response) => {
                     let status = response.status();
@@ -711,23 +739,29 @@ impl AnthropicClient {
                         last_error = Some(anyhow!("API error ({}): {}", status, body));
                         continue;
                     }
-                    
-                    let body = response.text().map_err(|e| anyhow!("Failed to read response: {}", e))?;
-                    
+
+                    let body = response
+                        .text()
+                        .map_err(|e| anyhow!("Failed to read response: {}", e))?;
+
                     // 解析 OpenAI 格式响应
                     if let Ok(resp) = serde_json::from_str::<serde_json::Value>(&body) {
-                        if let Some(content) = resp.get("choices")
+                        if let Some(content) = resp
+                            .get("choices")
                             .and_then(|c| c.as_array())
                             .and_then(|arr| arr.first())
                             .and_then(|c| c.get("message"))
                             .and_then(|m| m.get("content"))
                             .and_then(|c| c.as_str())
                         {
-                            debug!(elapsed_ms = start.elapsed().as_millis(), "OpenAI request succeeded");
+                            debug!(
+                                elapsed_ms = start.elapsed().as_millis(),
+                                "OpenAI request succeeded"
+                            );
                             return Ok(content.to_string());
                         }
                     }
-                    
+
                     last_error = Some(anyhow!("Failed to parse OpenAI response: {}", body));
                 }
                 Err(e) => {
@@ -735,7 +769,7 @@ impl AnthropicClient {
                 }
             }
         }
-        
+
         Err(last_error.unwrap_or_else(|| anyhow!("All endpoints failed")))
     }
 }

@@ -18,40 +18,44 @@
 //! dispatcher.send_sync(&message)?;
 //! ```
 
-pub mod channel;
-pub mod dispatcher;
-pub mod channels;
 pub mod builder;
-pub mod urgency;
-pub mod payload;
-pub mod terminal_cleaner;
-pub mod deduplicator;
+pub mod channel;
+pub mod channels;
 pub mod dedup_key;
+pub mod deduplicator;
+pub mod dispatcher;
 pub mod event;
-pub mod summarizer;
-pub mod throttle;
-pub mod watcher;
 pub mod openclaw;
-pub mod system_event;
-pub mod webhook;
+pub mod payload;
 pub mod store;
+pub mod summarizer;
+pub mod system_event;
+pub mod terminal_cleaner;
+pub mod throttle;
+pub mod urgency;
+pub mod watcher;
+pub mod webhook;
 
 #[cfg(test)]
 mod system_event_test;
 
-pub use channel::{NotificationChannel, NotificationMessage, SendResult, MessageMetadata};
-pub use dispatcher::NotificationDispatcher;
 pub use builder::NotificationBuilder;
-pub use urgency::{Urgency, get_urgency};
-pub use payload::PayloadBuilder;
-pub use terminal_cleaner::is_processing;
-pub use deduplicator::{NotificationDeduplicator, NotifyAction};
-pub use event::{NotificationEvent, NotificationEventType, NotificationEventBuilder};
-pub use summarizer::{NotificationSummarizer, RiskLevel, PermissionSummary, ErrorSummary, CompletionSummary};
-pub use throttle::{NotifyThrottle, ThrottledEvent, MergedNotification};
-pub use watcher::{Watcher, Notifier, NotifyEvent};
-pub use openclaw::OpenclawNotifier;
+pub use channel::{MessageMetadata, NotificationChannel, NotificationMessage, SendResult};
 pub use dedup_key::{generate_dedup_key, normalize_terminal_content};
+pub use deduplicator::{NotificationDeduplicator, NotifyAction};
+pub use dispatcher::NotificationDispatcher;
+pub use event::{NotificationEvent, NotificationEventBuilder, NotificationEventType};
+pub use openclaw::OpenclawNotifier;
+pub use payload::PayloadBuilder;
+pub use store::{NotificationRecord, NotificationStore};
+pub use summarizer::{
+    CompletionSummary, ErrorSummary, NotificationSummarizer, PermissionSummary, RiskLevel,
+};
 pub use system_event::SystemEventPayload;
-pub use webhook::{WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse, load_webhook_config_from_file};
-pub use store::{NotificationStore, NotificationRecord};
+pub use terminal_cleaner::is_processing;
+pub use throttle::{MergedNotification, NotifyThrottle, ThrottledEvent};
+pub use urgency::{get_urgency, Urgency};
+pub use watcher::{Notifier, NotifyEvent, Watcher};
+pub use webhook::{
+    load_webhook_config_from_file, WebhookClient, WebhookConfig, WebhookPayload, WebhookResponse,
+};

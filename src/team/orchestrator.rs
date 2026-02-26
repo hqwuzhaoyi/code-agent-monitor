@@ -9,13 +9,13 @@
 
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use tracing::{info, error};
+use tracing::{error, info};
 
-use crate::agent::{AgentManager, StartAgentRequest};
-use crate::session::state::{ConversationStateManager, ReplyResult};
-use crate::infra::input::InputWaitDetector;
-use super::bridge::{TeamBridge, InboxMessage};
+use super::bridge::{InboxMessage, TeamBridge};
 use super::discovery::TeamMember;
+use crate::agent::{AgentManager, StartAgentRequest};
+use crate::infra::input::InputWaitDetector;
+use crate::session::state::{ConversationStateManager, ReplyResult};
 
 /// Team 中 Agent 的启动结果
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,18 +75,28 @@ pub struct TaskAssignmentResult {
 #[derive(Debug, Clone, PartialEq)]
 pub enum UserIntent {
     /// 创建 Team
-    CreateTeam { task_desc: String, project: String },
+    CreateTeam {
+        task_desc: String,
+        project: String,
+    },
     /// 查看进度
-    CheckProgress { team: Option<String> },
+    CheckProgress {
+        team: Option<String>,
+    },
     /// 分配任务
-    AssignTask { member: String, task: String },
+    AssignTask {
+        member: String,
+        task: String,
+    },
     /// 批准/拒绝
     Approve,
     Reject,
     /// 选择选项
     SelectOption(usize),
     /// 关闭 Team
-    ShutdownTeam { team: String },
+    ShutdownTeam {
+        team: String,
+    },
     /// 未知意图
     Unknown(String),
 }
@@ -228,8 +238,7 @@ impl TeamOrchestrator {
                 let agents = self.agent_manager.list_agents()?;
                 for agent in agents {
                     // 检查 tmux_session 是否匹配
-                    if agent.tmux_session == member.agent_id ||
-                       agent.agent_id == member.agent_id {
+                    if agent.tmux_session == member.agent_id || agent.agent_id == member.agent_id {
                         let _ = self.agent_manager.stop_agent(&agent.agent_id);
                     }
                 }
@@ -263,7 +272,8 @@ impl TeamOrchestrator {
         let team_name = self.generate_team_name(project);
 
         // 创建 Team
-        self.team_bridge.create_team(&team_name, task_desc, project)?;
+        self.team_bridge
+            .create_team(&team_name, task_desc, project)?;
 
         // 分析任务，决定需要的角色
         let roles = self.analyze_task_roles(task_desc);
@@ -316,7 +326,8 @@ impl TeamOrchestrator {
                 "subject": task,
                 "description": task,
                 "assigned_by": "user"
-            }).to_string(),
+            })
+            .to_string(),
             summary: Some(format!("任务: {}", truncate_text(task, 30))),
             timestamp: chrono::Utc::now(),
             color: None,
@@ -342,33 +353,27 @@ impl TeamOrchestrator {
             UserIntent::Approve => {
                 let state_manager = ConversationStateManager::new();
                 match state_manager.handle_reply("y", None)? {
-                    ReplyResult::Sent { agent_id, .. } => {
-                        Ok(format!("已批准 {} 的请求", agent_id))
-                    }
-                    ReplyResult::NoPending => {
-                        Ok("没有待处理的确认请求".to_string())
-                    }
+                    ReplyResult::Sent { agent_id, .. } => Ok(format!("已批准 {} 的请求", agent_id)),
+                    ReplyResult::NoPending => Ok("没有待处理的确认请求".to_string()),
                     ReplyResult::NeedSelection { options } => {
-                        let list: Vec<String> = options.iter()
+                        let list: Vec<String> = options
+                            .iter()
                             .map(|o| format!("- {} ({})", o.agent_id, o.context))
                             .collect();
-                        Ok(format!("有多个待处理请求，请指定目标：\n{}", list.join("\n")))
+                        Ok(format!(
+                            "有多个待处理请求，请指定目标：\n{}",
+                            list.join("\n")
+                        ))
                     }
-                    ReplyResult::InvalidSelection(msg) => {
-                        Err(anyhow!("无效选择: {}", msg))
-                    }
+                    ReplyResult::InvalidSelection(msg) => Err(anyhow!("无效选择: {}", msg)),
                 }
             }
             UserIntent::Reject => {
                 let state_manager = ConversationStateManager::new();
                 match state_manager.handle_reply("n", None)? {
-                    ReplyResult::Sent { agent_id, .. } => {
-                        Ok(format!("已拒绝 {} 的请求", agent_id))
-                    }
-                    ReplyResult::NoPending => {
-                        Ok("没有待处理的确认请求".to_string())
-                    }
-                    _ => Ok("已处理".to_string())
+                    ReplyResult::Sent { agent_id, .. } => Ok(format!("已拒绝 {} 的请求", agent_id)),
+                    ReplyResult::NoPending => Ok("没有待处理的确认请求".to_string()),
+                    _ => Ok("已处理".to_string()),
                 }
             }
             UserIntent::SelectOption(n) => {
@@ -377,7 +382,7 @@ impl TeamOrchestrator {
                     ReplyResult::Sent { agent_id, reply } => {
                         Ok(format!("已发送选项 {} 到 {}", reply, agent_id))
                     }
-                    _ => Ok("已处理".to_string())
+                    _ => Ok("已处理".to_string()),
                 }
             }
             UserIntent::CheckProgress { team } => {
@@ -412,14 +417,22 @@ impl TeamOrchestrator {
                     "已创建 Team '{}'\n  项目: {}\n  成员: {}",
                     result.team_name,
                     result.project_path,
-                    result.members.iter().map(|m| m.member_name.clone()).collect::<Vec<_>>().join(", ")
+                    result
+                        .members
+                        .iter()
+                        .map(|m| m.member_name.clone())
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ))
             }
             UserIntent::AssignTask { member, task } => {
                 // 需要从 context 获取 team 名称
                 let team = context.unwrap_or("default");
                 let result = self.assign_task(team, &member, &task)?;
-                Ok(format!("已分配任务 '{}' 给 {}", result.subject, result.assigned_to))
+                Ok(format!(
+                    "已分配任务 '{}' 给 {}",
+                    result.subject, result.assigned_to
+                ))
             }
             UserIntent::ShutdownTeam { team } => {
                 self.shutdown_team(&team)?;
@@ -432,10 +445,8 @@ impl TeamOrchestrator {
                     ReplyResult::Sent { agent_id, reply } => {
                         Ok(format!("已发送 '{}' 到 {}", reply, agent_id))
                     }
-                    ReplyResult::NoPending => {
-                        Ok(format!("未识别的命令: {}", text))
-                    }
-                    _ => Ok("已处理".to_string())
+                    ReplyResult::NoPending => Ok(format!("未识别的命令: {}", text)),
+                    _ => Ok("已处理".to_string()),
                 }
             }
         }
@@ -446,10 +457,16 @@ impl TeamOrchestrator {
         let input_lower = input.to_lowercase().trim().to_string();
 
         // 批准/拒绝
-        if matches!(input_lower.as_str(), "y" | "yes" | "是" | "好" | "可以" | "确认" | "同意" | "允许" | "批准") {
+        if matches!(
+            input_lower.as_str(),
+            "y" | "yes" | "是" | "好" | "可以" | "确认" | "同意" | "允许" | "批准"
+        ) {
             return UserIntent::Approve;
         }
-        if matches!(input_lower.as_str(), "n" | "no" | "否" | "不" | "取消" | "拒绝" | "不允许") {
+        if matches!(
+            input_lower.as_str(),
+            "n" | "no" | "否" | "不" | "取消" | "拒绝" | "不允许"
+        ) {
             return UserIntent::Reject;
         }
 
@@ -461,17 +478,25 @@ impl TeamOrchestrator {
         }
 
         // 查看进度
-        if input_lower.contains("进度") || input_lower.contains("状态") || input_lower.contains("progress") || input_lower.contains("status") {
+        if input_lower.contains("进度")
+            || input_lower.contains("状态")
+            || input_lower.contains("progress")
+            || input_lower.contains("status")
+        {
             // 尝试提取 team 名称
             let team = self.extract_team_name(&input_lower);
             return UserIntent::CheckProgress { team };
         }
 
         // 创建 Team
-        if input_lower.contains("启动") && (input_lower.contains("团队") || input_lower.contains("team")) {
+        if input_lower.contains("启动")
+            && (input_lower.contains("团队") || input_lower.contains("team"))
+        {
             // 尝试提取任务描述和项目路径
             let task_desc = input.to_string();
-            let project = self.extract_project_path(&input_lower).unwrap_or_else(|| ".".to_string());
+            let project = self
+                .extract_project_path(&input_lower)
+                .unwrap_or_else(|| ".".to_string());
             return UserIntent::CreateTeam { task_desc, project };
         }
 
@@ -483,8 +508,11 @@ impl TeamOrchestrator {
         }
 
         // 关闭 Team
-        if (input_lower.contains("关闭") || input_lower.contains("停止") || input_lower.contains("shutdown"))
-            && (input_lower.contains("团队") || input_lower.contains("team")) {
+        if (input_lower.contains("关闭")
+            || input_lower.contains("停止")
+            || input_lower.contains("shutdown"))
+            && (input_lower.contains("团队") || input_lower.contains("team"))
+        {
             if let Some(team) = self.extract_team_name(&input_lower) {
                 return UserIntent::ShutdownTeam { team };
             }
@@ -511,18 +539,30 @@ impl TeamOrchestrator {
 
         // 默认添加一个 developer
         let dev_prompt = format!("你是一个开发者，负责完成以下任务：{}", task_desc);
-        roles.push(("developer".to_string(), "general-purpose".to_string(), dev_prompt));
+        roles.push((
+            "developer".to_string(),
+            "general-purpose".to_string(),
+            dev_prompt,
+        ));
 
         // 如果涉及测试，添加 tester
         if task_lower.contains("测试") || task_lower.contains("test") {
             let test_prompt = format!("你是一个测试工程师，负责测试以下功能：{}", task_desc);
-            roles.push(("tester".to_string(), "general-purpose".to_string(), test_prompt));
+            roles.push((
+                "tester".to_string(),
+                "general-purpose".to_string(),
+                test_prompt,
+            ));
         }
 
         // 如果涉及代码审查，添加 reviewer
         if task_lower.contains("审查") || task_lower.contains("review") {
             let review_prompt = format!("你是一个代码审查员，负责审查以下代码：{}", task_desc);
-            roles.push(("reviewer".to_string(), "general-purpose".to_string(), review_prompt));
+            roles.push((
+                "reviewer".to_string(),
+                "general-purpose".to_string(),
+                review_prompt,
+            ));
         }
 
         roles
@@ -564,7 +604,8 @@ impl TeamOrchestrator {
             for (i, part) in parts.iter().enumerate() {
                 if *part == "给" && i + 1 < parts.len() {
                     let member = parts[i + 1].to_string();
-                    let task = parts.iter()
+                    let task = parts
+                        .iter()
                         .filter(|p| **p != "给" && **p != member && **p != "分配")
                         .cloned()
                         .collect::<Vec<_>>()
@@ -613,12 +654,8 @@ mod tests {
     fn test_spawn_agent_team_not_exists() {
         let (orchestrator, _temp) = create_test_orchestrator();
 
-        let result = orchestrator.spawn_agent(
-            "nonexistent-team",
-            "developer",
-            "general-purpose",
-            None,
-        );
+        let result =
+            orchestrator.spawn_agent("nonexistent-team", "developer", "general-purpose", None);
 
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("does not exist"));
@@ -638,12 +675,8 @@ mod tests {
         std::thread::sleep(std::time::Duration::from_secs(1));
 
         // 启动 agent
-        let result = orchestrator.spawn_agent(
-            "test-team-spawn",
-            "developer",
-            "general-purpose",
-            None,
-        );
+        let result =
+            orchestrator.spawn_agent("test-team-spawn", "developer", "general-purpose", None);
 
         assert!(result.is_ok(), "spawn_agent failed: {:?}", result.err());
         let spawn_result = result.unwrap();
@@ -652,7 +685,10 @@ mod tests {
         assert_eq!(spawn_result.member_name, "developer");
 
         // 验证成员已添加到 team
-        let status = orchestrator.team_bridge().get_team_status("test-team-spawn").unwrap();
+        let status = orchestrator
+            .team_bridge()
+            .get_team_status("test-team-spawn")
+            .unwrap();
         assert_eq!(status.members.len(), 1);
         assert_eq!(status.members[0].name, "developer");
         assert_eq!(status.members[0].agent_id, "developer@test-team-spawn");
@@ -700,7 +736,9 @@ mod tests {
             .unwrap();
 
         // 获取进度（空 team）
-        let progress = orchestrator.get_team_progress("test-team-progress").unwrap();
+        let progress = orchestrator
+            .get_team_progress("test-team-progress")
+            .unwrap();
         assert_eq!(progress.team_name, "test-team-progress");
         assert_eq!(progress.total_members, 0);
         assert_eq!(progress.active_members, 0);
@@ -722,11 +760,18 @@ mod tests {
 
         // 启动 agent
         let spawn_result = orchestrator
-            .spawn_agent("test-team-progress-members", "developer", "general-purpose", None)
+            .spawn_agent(
+                "test-team-progress-members",
+                "developer",
+                "general-purpose",
+                None,
+            )
             .expect("spawn_agent failed");
 
         // 获取进度
-        let progress = orchestrator.get_team_progress("test-team-progress-members").unwrap();
+        let progress = orchestrator
+            .get_team_progress("test-team-progress-members")
+            .unwrap();
         assert_eq!(progress.total_members, 1);
         assert_eq!(progress.active_members, 1);
 

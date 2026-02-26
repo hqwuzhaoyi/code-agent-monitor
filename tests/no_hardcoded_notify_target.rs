@@ -8,4 +8,3 @@ fn notify_rs_should_not_hardcode_telegram_chat_id() {
         "src/notification/watcher.rs still contains a hardcoded Telegram chat id"
     );
 }
-

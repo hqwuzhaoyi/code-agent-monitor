@@ -11,9 +11,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use crate::agent::AgentManager;
-use crate::notification::summarizer::RiskLevel;
-use crate::team::{TeamBridge, InboxMessage};
 use crate::infra::tmux::TmuxManager;
+use crate::notification::summarizer::RiskLevel;
+use crate::team::{InboxMessage, TeamBridge};
 
 /// 确认类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -88,14 +88,9 @@ pub struct ConversationState {
 #[derive(Debug, Clone)]
 pub enum ReplyResult {
     /// 回复已发送
-    Sent {
-        agent_id: String,
-        reply: String,
-    },
+    Sent { agent_id: String, reply: String },
     /// 需要选择目标
-    NeedSelection {
-        options: Vec<PendingConfirmation>,
-    },
+    NeedSelection { options: Vec<PendingConfirmation> },
     /// 没有待处理的确认
     NoPending,
     /// 无效的选择
@@ -300,7 +295,11 @@ impl ConversationStateManager {
     }
 
     /// Handle batch reply to multiple pending confirmations
-    pub fn handle_reply_batch(&self, reply: &str, filter: BatchFilter) -> Result<Vec<BatchReplyResult>> {
+    pub fn handle_reply_batch(
+        &self,
+        reply: &str,
+        filter: BatchFilter,
+    ) -> Result<Vec<BatchReplyResult>> {
         let pending = self.get_pending_confirmations()?;
         let normalized_reply = self.normalize_reply(reply);
         let mut results = Vec::new();
@@ -320,9 +319,7 @@ impl ConversationStateManager {
                         c.agent_id == *pattern
                     }
                 }
-                BatchFilter::Risk(risk) => {
-                    c.risk_level.map(|r| r == *risk).unwrap_or(false)
-                }
+                BatchFilter::Risk(risk) => c.risk_level.map(|r| r == *risk).unwrap_or(false),
             })
             .cloned()
             .collect();
@@ -360,7 +357,9 @@ impl ConversationStateManager {
         let reply_lower = reply.to_lowercase().trim().to_string();
 
         match reply_lower.as_str() {
-            "y" | "yes" | "是" | "好" | "可以" | "确认" | "同意" | "允许" => "y".to_string(),
+            "y" | "yes" | "是" | "好" | "可以" | "确认" | "同意" | "允许" => {
+                "y".to_string()
+            }
             "n" | "no" | "否" | "不" | "取消" | "拒绝" | "不允许" => "n".to_string(),
             "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" => reply_lower,
             _ => reply.to_string(),
@@ -596,7 +595,10 @@ mod tests {
         let (manager, _temp) = create_test_manager();
 
         manager.set_current_team(Some("my-team")).unwrap();
-        assert_eq!(manager.get_current_team().unwrap(), Some("my-team".to_string()));
+        assert_eq!(
+            manager.get_current_team().unwrap(),
+            Some("my-team".to_string())
+        );
 
         manager.set_current_team(None).unwrap();
         assert_eq!(manager.get_current_team().unwrap(), None);

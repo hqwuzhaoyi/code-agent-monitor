@@ -167,6 +167,40 @@ if is_processing(terminal_content) {
 }
 ```
 
+## 配置示例（Webhook → OpenClaw）
+
+`code-agent-monitor` 会从 `~/.config/code-agent-monitor/config.json` 读取 webhook 配置，用于将 CAM 事件通过 OpenClaw Gateway 的 `/hooks/agent` 投递到你的聊天窗口。
+
+最小可用示例：
+
+```json
+{
+  "webhook": {
+    "gateway_url": "http://127.0.0.1:18789",
+    "hook_token": "<OPENCLAW_HOOKS_TOKEN>",
+    "timeout_secs": 30
+  }
+}
+```
+
+如果你希望 **强制**把 webhook 回复投递到某个 channel/收件人（避免依赖 "last" 路由），可以加：
+
+```json
+{
+  "webhook": {
+    "gateway_url": "http://127.0.0.1:18789",
+    "hook_token": "<OPENCLAW_HOOKS_TOKEN>",
+    "timeout_secs": 30,
+    "default_channel": "telegram",
+    "default_to": "1440537501"
+  }
+}
+```
+
+说明：
+- `default_channel`：OpenClaw 的消息通道名（如 `telegram`/`whatsapp`/`discord`…）。
+- `default_to`：通道对应的接收者标识（Telegram 用 chat id）。
+
 ## 使用示例
 
 ### 完整流程

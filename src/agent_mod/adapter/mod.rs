@@ -52,9 +52,9 @@ pub fn get_adapter(agent_type: &AgentType) -> Box<dyn AgentAdapter> {
 
 pub mod claude;
 pub mod codex;
-pub mod opencode;
-pub mod generic;
 pub mod config_manager;
+pub mod generic;
+pub mod opencode;
 
 #[cfg(test)]
 mod tests {

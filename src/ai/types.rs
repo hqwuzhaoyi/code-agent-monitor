@@ -74,7 +74,10 @@ impl NotificationContent {
     pub fn options(question: &str, options: Vec<String>) -> Self {
         let reply_hint = if options.len() <= 5 {
             // For small number of options, show all: "1/2/3"
-            (1..=options.len()).map(|n| n.to_string()).collect::<Vec<_>>().join("/")
+            (1..=options.len())
+                .map(|n| n.to_string())
+                .collect::<Vec<_>>()
+                .join("/")
         } else {
             // For many options, show range: "1-N"
             format!("1-{}", options.len())

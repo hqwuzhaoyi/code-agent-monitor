@@ -63,7 +63,11 @@ fn test_update_agent_status_method_exists() {
     use code_agent_monitor::agent::manager::AgentManager;
 
     // This will fail to compile if the method signature is wrong
-    fn _verify_signature(manager: &AgentManager, id: &str, status: AgentStatus) -> anyhow::Result<bool> {
+    fn _verify_signature(
+        manager: &AgentManager,
+        id: &str,
+        status: AgentStatus,
+    ) -> anyhow::Result<bool> {
         manager.update_agent_status(id, status)
     }
 

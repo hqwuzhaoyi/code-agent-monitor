@@ -2,7 +2,7 @@
 
 use anyhow::{anyhow, Result};
 use std::process::Command;
-use tracing::{info, error, debug};
+use tracing::{debug, error, info};
 
 /// tmux 管理器
 pub struct TmuxManager;
@@ -22,15 +22,22 @@ impl TmuxManager {
     }
 
     /// 创建新的 tmux session 并运行命令
-    pub fn create_session(&self, session_name: &str, working_dir: &str, command: &str) -> Result<()> {
+    pub fn create_session(
+        &self,
+        session_name: &str,
+        working_dir: &str,
+        command: &str,
+    ) -> Result<()> {
         debug!(session = %session_name, working_dir = %working_dir, "Creating tmux session");
 
         let status = Command::new("tmux")
             .args([
                 "new-session",
-                "-d",           // detached
-                "-s", session_name,
-                "-c", working_dir,
+                "-d", // detached
+                "-s",
+                session_name,
+                "-c",
+                working_dir,
                 command,
             ])
             .status()?;
@@ -66,7 +73,11 @@ impl TmuxManager {
             Ok(())
         } else {
             error!(old = %old_name, new = %new_name, "Failed to rename tmux session");
-            Err(anyhow!("Failed to rename session {} to {}", old_name, new_name))
+            Err(anyhow!(
+                "Failed to rename session {} to {}",
+                old_name,
+                new_name
+            ))
         }
     }
 
@@ -120,16 +131,21 @@ impl TmuxManager {
         let output = Command::new("tmux")
             .args([
                 "capture-pane",
-                "-t", session_name,
-                "-p",           // print to stdout
-                "-S", &format!("-{}", lines),  // start from N lines back
+                "-t",
+                session_name,
+                "-p", // print to stdout
+                "-S",
+                &format!("-{}", lines), // start from N lines back
             ])
             .output()?;
 
         if output.status.success() {
             Ok(String::from_utf8_lossy(&output.stdout).to_string())
         } else {
-            Err(anyhow!("Failed to capture pane from session: {}", session_name))
+            Err(anyhow!(
+                "Failed to capture pane from session: {}",
+                session_name
+            ))
         }
     }
 
@@ -230,7 +246,9 @@ mod tests {
         // Given: 一个运行中的 session
         let manager = TmuxManager::new();
         let session_name = unique_session_name("cam-test");
-        manager.create_session(&session_name, "/tmp", "cat").unwrap();
+        manager
+            .create_session(&session_name, "/tmp", "cat")
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         // When: 发送输入
@@ -248,7 +266,9 @@ mod tests {
         // Given: 一个有输出的 session
         let manager = TmuxManager::new();
         let session_name = unique_session_name("cam-test");
-        manager.create_session(&session_name, "/tmp", "echo 'test output'; sleep 60").unwrap();
+        manager
+            .create_session(&session_name, "/tmp", "echo 'test output'; sleep 60")
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(500));
 
         // When: 捕获输出
@@ -276,8 +296,12 @@ mod tests {
         let manager = TmuxManager::new();
         let session1 = unique_session_name("cam-test-list");
         let session2 = unique_session_name("cam-test-list");
-        manager.create_session(&session1, "/tmp", "sleep 60").unwrap();
-        manager.create_session(&session2, "/tmp", "sleep 60").unwrap();
+        manager
+            .create_session(&session1, "/tmp", "sleep 60")
+            .unwrap();
+        manager
+            .create_session(&session2, "/tmp", "sleep 60")
+            .unwrap();
 
         // When: 列出 cam- 前缀的 session
         let sessions = manager.list_cam_sessions().unwrap();

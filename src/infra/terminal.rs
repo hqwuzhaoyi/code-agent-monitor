@@ -34,7 +34,10 @@ mod tests {
 
     #[test]
     fn test_truncate_last_lines() {
-        let text = (1..=100).map(|i| format!("line{}", i)).collect::<Vec<_>>().join("\n");
+        let text = (1..=100)
+            .map(|i| format!("line{}", i))
+            .collect::<Vec<_>>()
+            .join("\n");
         let result = truncate_last_lines(&text, 10);
         assert!(result.starts_with("line91"));
         assert!(result.ends_with("line100"));

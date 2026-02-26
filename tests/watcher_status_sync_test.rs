@@ -74,4 +74,3 @@ fn test_watcher_updates_status_on_change() {
     // Verify Unknown should notify (important for alerting on AI failures)
     assert!(AgentStatus::Unknown.should_notify());
 }
-

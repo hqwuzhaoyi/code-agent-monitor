@@ -23,7 +23,10 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
-        if !session_id.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+        if !session_id
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '-' || c == '_')
+        {
             panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
         }
         format!("claude --resume {}", session_id)

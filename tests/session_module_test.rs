@@ -1,6 +1,6 @@
 //! session 模块测试 - TDD
 
-use code_agent_monitor::session::{SessionManager, ConversationStateManager};
+use code_agent_monitor::session::{ConversationStateManager, SessionManager};
 
 #[test]
 fn test_session_module_exports_manager() {

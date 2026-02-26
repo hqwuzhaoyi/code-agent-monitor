@@ -86,14 +86,19 @@ mod tests {
 
     #[test]
     fn test_mcp_response_success() {
-        let response = McpResponse::success(Some(serde_json::json!(1)), serde_json::json!({"ok": true}));
+        let response =
+            McpResponse::success(Some(serde_json::json!(1)), serde_json::json!({"ok": true}));
         assert!(response.error.is_none());
         assert!(response.result.is_some());
     }
 
     #[test]
     fn test_mcp_response_error() {
-        let response = McpResponse::error(Some(serde_json::json!(1)), -32600, "Invalid request".to_string());
+        let response = McpResponse::error(
+            Some(serde_json::json!(1)),
+            -32600,
+            "Invalid request".to_string(),
+        );
         assert!(response.error.is_some());
         assert!(response.result.is_none());
         assert_eq!(response.error.unwrap().code, -32600);

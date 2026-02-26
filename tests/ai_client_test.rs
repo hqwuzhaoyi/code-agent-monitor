@@ -7,8 +7,8 @@
 
 // 使用正确的导出路径
 use code_agent_monitor::anthropic::{
-    AnthropicConfig, AnthropicClient,
-    ANTHROPIC_API_URL, ANTHROPIC_VERSION, DEFAULT_MODEL, DEFAULT_TIMEOUT_MS, DEFAULT_MAX_TOKENS,
+    AnthropicClient, AnthropicConfig, ANTHROPIC_API_URL, ANTHROPIC_VERSION, DEFAULT_MAX_TOKENS,
+    DEFAULT_MODEL, DEFAULT_TIMEOUT_MS,
 };
 
 // ============================================================================
@@ -212,7 +212,10 @@ mod fallback_tests {
             api_type: "anthropic".to_string(),
         };
 
-        assert_eq!(provider.get_full_url(), "https://api.anthropic.com/v1/messages");
+        assert_eq!(
+            provider.get_full_url(),
+            "https://api.anthropic.com/v1/messages"
+        );
     }
 
     #[test]
@@ -224,7 +227,10 @@ mod fallback_tests {
             api_type: "openai".to_string(),
         };
 
-        assert_eq!(provider.get_full_url(), "https://api.openai.com/chat/completions");
+        assert_eq!(
+            provider.get_full_url(),
+            "https://api.openai.com/chat/completions"
+        );
     }
 
     #[test]
@@ -236,7 +242,10 @@ mod fallback_tests {
             api_type: "".to_string(), // 空类型默认为 anthropic
         };
 
-        assert_eq!(provider.get_full_url(), "https://custom.api.com/v1/messages");
+        assert_eq!(
+            provider.get_full_url(),
+            "https://custom.api.com/v1/messages"
+        );
     }
 
     #[test]
@@ -249,7 +258,10 @@ mod fallback_tests {
         };
 
         // 应该正确处理尾部斜杠
-        assert_eq!(provider.get_full_url(), "https://api.example.com/v1/messages");
+        assert_eq!(
+            provider.get_full_url(),
+            "https://api.example.com/v1/messages"
+        );
     }
 }
 

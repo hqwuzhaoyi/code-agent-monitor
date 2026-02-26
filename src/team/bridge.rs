@@ -187,7 +187,10 @@ impl TeamBridge {
         });
 
         let config_path = self.get_config_path(name);
-        fs::write(&config_path, serde_json::to_string_pretty(&config_with_path)?)?;
+        fs::write(
+            &config_path,
+            serde_json::to_string_pretty(&config_with_path)?,
+        )?;
 
         Ok(config)
     }
@@ -387,10 +390,7 @@ impl TeamBridge {
                 .and_then(|n| n.as_str())
                 .unwrap_or("")
                 .to_string();
-            let is_active = m
-                .get("isActive")
-                .and_then(|n| n.as_bool())
-                .unwrap_or(false);
+            let is_active = m.get("isActive").and_then(|n| n.as_bool()).unwrap_or(false);
 
             // 统计未读消息
             let unread_count = self
@@ -420,10 +420,8 @@ impl TeamBridge {
                     if path.is_file() && path.extension().is_some_and(|e| e == "json") {
                         if let Ok(content) = fs::read_to_string(&path) {
                             if let Ok(task) = serde_json::from_str::<serde_json::Value>(&content) {
-                                let status = task
-                                    .get("status")
-                                    .and_then(|s| s.as_str())
-                                    .unwrap_or("");
+                                let status =
+                                    task.get("status").and_then(|s| s.as_str()).unwrap_or("");
                                 match status {
                                     "pending" | "in_progress" => pending += 1,
                                     "completed" => completed += 1,
@@ -517,9 +515,7 @@ mod tests {
     fn test_create_team_already_exists() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "First", "/path1")
-            .unwrap();
+        bridge.create_team("test-team", "First", "/path1").unwrap();
         let result = bridge.create_team("test-team", "Second", "/path2");
 
         assert!(result.is_err());
@@ -530,9 +526,7 @@ mod tests {
     fn test_delete_team() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
         assert!(bridge.team_exists("test-team"));
 
         let result = bridge.delete_team("test-team");
@@ -553,9 +547,7 @@ mod tests {
     fn test_spawn_member() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
 
         let member = TeamMember {
             name: "developer".to_string(),
@@ -581,9 +573,7 @@ mod tests {
     fn test_spawn_member_duplicate() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
 
         let member = TeamMember {
             name: "developer".to_string(),
@@ -607,9 +597,7 @@ mod tests {
     fn test_send_to_inbox() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
 
         let message = InboxMessage {
             from: "team-lead".to_string(),
@@ -651,9 +639,7 @@ mod tests {
     fn test_read_inbox_empty() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
 
         let messages = bridge.read_inbox("test-team", "developer").unwrap();
         assert!(messages.is_empty());
@@ -671,9 +657,7 @@ mod tests {
     fn test_mark_as_read() {
         let (bridge, _temp) = create_test_bridge();
 
-        bridge
-            .create_team("test-team", "Test", "/path")
-            .unwrap();
+        bridge.create_team("test-team", "Test", "/path").unwrap();
 
         // 发送两条消息
         for i in 0..2 {
@@ -811,7 +795,9 @@ mod tests {
         let bridge = Arc::new(TeamBridge::new_with_base_dir(temp.path().to_path_buf()));
 
         // Create team
-        bridge.create_team("concurrent-test", "Test", "/path").unwrap();
+        bridge
+            .create_team("concurrent-test", "Test", "/path")
+            .unwrap();
 
         let num_threads = 10;
         let messages_per_thread = 20;
@@ -832,7 +818,9 @@ mod tests {
                             read: false,
                         };
                         // This should not fail or corrupt data
-                        bridge.send_to_inbox("concurrent-test", "developer", message).unwrap();
+                        bridge
+                            .send_to_inbox("concurrent-test", "developer", message)
+                            .unwrap();
                     }
                 })
             })
@@ -901,7 +889,10 @@ mod tests {
         // assert_eq!(agent_id.cam_id(), Some("cam-1234567890-0"));
 
         // For now, test that parsing works correctly
-        assert!(AgentId::parse(cam_id).is_none(), "CAM ID should not parse as AgentId");
+        assert!(
+            AgentId::parse(cam_id).is_none(),
+            "CAM ID should not parse as AgentId"
+        );
         assert_eq!(team_id.to_string(), "developer@my-team");
 
         // TODO: This test should be updated when unified ID handling is implemented
@@ -941,7 +932,9 @@ mod tests {
         let status = bridge.get_team_status("lookup-test").unwrap();
 
         // Current behavior: We can only find by team ID format
-        let found_by_team_id = status.members.iter()
+        let found_by_team_id = status
+            .members
+            .iter()
             .find(|m| m.agent_id == "developer@lookup-test");
         assert!(found_by_team_id.is_some());
 

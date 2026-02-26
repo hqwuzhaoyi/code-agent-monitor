@@ -35,7 +35,10 @@ impl NotificationChannel for LocalFileChannel {
     fn send(&self, message: &NotificationMessage) -> Result<SendResult> {
         let record = NotificationRecord {
             ts: Utc::now(),
-            agent_id: message.agent_id.clone().unwrap_or_else(|| "unknown".to_string()),
+            agent_id: message
+                .agent_id
+                .clone()
+                .unwrap_or_else(|| "unknown".to_string()),
             urgency: message.urgency,
             event: message.metadata.event_type.clone(),
             summary: truncate_summary(&message.content, 100),

@@ -11,12 +11,12 @@
 //! 去重状态持久化到 `~/.config/code-agent-monitor/dedup_state.json`，
 //! 使用 fs2 文件锁确保跨进程并发安全。
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use serde::{Deserialize, Serialize};
-use tracing::debug;
 use fs2::FileExt;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::io::{Read, Write};
+use std::path::PathBuf;
+use tracing::debug;
 
 /// 通知动作
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,7 +205,7 @@ impl NotificationDeduplicator {
     /// Uses the unified dedup_key module for consistent normalization across
     /// all notification paths (watcher, hook).
     fn content_fingerprint(content: &str) -> u64 {
-        use super::dedup_key::{normalize_terminal_content, hash_content};
+        use super::dedup_key::{hash_content, normalize_terminal_content};
         let normalized = normalize_terminal_content(content);
         hash_content(&normalized)
     }
@@ -291,12 +291,15 @@ impl NotificationDeduplicator {
         }
 
         // 首次通知
-        self.locks.insert(agent_id.to_string(), NotificationLock {
-            first_notified_at: now,
-            locked_at: now,
-            content_fingerprint: fingerprint,
-            reminder_sent: false,
-        });
+        self.locks.insert(
+            agent_id.to_string(),
+            NotificationLock {
+                first_notified_at: now,
+                locked_at: now,
+                content_fingerprint: fingerprint,
+                reminder_sent: false,
+            },
+        );
         self.save_state();
         NotifyAction::Send
     }
@@ -388,12 +391,15 @@ mod tests {
 
         // 创建初始状态
         let mut locks = HashMap::new();
-        locks.insert("agent-1".to_string(), NotificationLock {
-            first_notified_at: 1000,
-            locked_at: 1000,
-            content_fingerprint: 12345,
-            reminder_sent: false,
-        });
+        locks.insert(
+            "agent-1".to_string(),
+            NotificationLock {
+                first_notified_at: 1000,
+                locked_at: 1000,
+                content_fingerprint: 12345,
+                reminder_sent: false,
+            },
+        );
         let state = DedupState { locks };
 
         // 保存
@@ -485,7 +491,9 @@ mod tests {
 
         // 应该被永久抑制
         let action = dedup.should_send(agent_id, content);
-        assert!(matches!(action, NotifyAction::Suppressed(reason) if reason.contains("max duration")));
+        assert!(
+            matches!(action, NotifyAction::Suppressed(reason) if reason.contains("max duration"))
+        );
     }
 
     // ==================== 其他测试 ====================
@@ -511,7 +519,10 @@ mod tests {
         assert_eq!(dedup.should_send(agent_id, content), NotifyAction::Send);
 
         // 锁定期内被抑制
-        assert!(matches!(dedup.should_send(agent_id, content), NotifyAction::Suppressed(_)));
+        assert!(matches!(
+            dedup.should_send(agent_id, content),
+            NotifyAction::Suppressed(_)
+        ));
 
         // 清除锁定
         dedup.clear_lock(agent_id);
@@ -537,7 +548,9 @@ mod tests {
         let path = NotificationDeduplicator::state_file_path();
         assert!(path.is_some());
         let path = path.unwrap();
-        assert!(path.to_string_lossy().contains(".config/code-agent-monitor"));
+        assert!(path
+            .to_string_lossy()
+            .contains(".config/code-agent-monitor"));
         assert!(path.to_string_lossy().contains("dedup_state.json"));
     }
 
@@ -553,12 +566,15 @@ mod tests {
 
         // Simulate process 1: creates a lock
         let mut locks1 = HashMap::new();
-        locks1.insert("agent-1".to_string(), NotificationLock {
-            first_notified_at: NotificationDeduplicator::current_timestamp(),
-            locked_at: NotificationDeduplicator::current_timestamp(),
-            content_fingerprint: NotificationDeduplicator::content_fingerprint("Question?"),
-            reminder_sent: false,
-        });
+        locks1.insert(
+            "agent-1".to_string(),
+            NotificationLock {
+                first_notified_at: NotificationDeduplicator::current_timestamp(),
+                locked_at: NotificationDeduplicator::current_timestamp(),
+                content_fingerprint: NotificationDeduplicator::content_fingerprint("Question?"),
+                reminder_sent: false,
+            },
+        );
         let state1 = DedupState { locks: locks1 };
         let content = serde_json::to_string(&state1).unwrap();
         std::fs::write(&state_path, &content).unwrap();
@@ -569,7 +585,11 @@ mod tests {
 
         assert!(loaded_state.locks.contains_key("agent-1"));
         assert_eq!(
-            loaded_state.locks.get("agent-1").unwrap().content_fingerprint,
+            loaded_state
+                .locks
+                .get("agent-1")
+                .unwrap()
+                .content_fingerprint,
             NotificationDeduplicator::content_fingerprint("Question?")
         );
     }
@@ -610,14 +630,22 @@ mod tests {
         // === Simulate WATCHER process ===
         // Watcher detects a question and creates a lock
         {
-            let mut watcher_dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
+            let mut watcher_dedup =
+                NotificationDeduplicator::new_with_state_path(state_path.clone());
 
             // First notification from watcher - should send
             let action = watcher_dedup.should_send("agent-1", "Do you want to proceed?");
-            assert_eq!(action, NotifyAction::Send, "Watcher should send first notification");
+            assert_eq!(
+                action,
+                NotifyAction::Send,
+                "Watcher should send first notification"
+            );
 
             // Verify state file was created
-            assert!(state_path.exists(), "State file should be created after first notification");
+            assert!(
+                state_path.exists(),
+                "State file should be created after first notification"
+            );
         }
         // Watcher dedup instance dropped here, simulating process end
 
@@ -686,7 +714,11 @@ mod tests {
         {
             let mut dedup = NotificationDeduplicator::new_with_state_path(state_path.clone());
             let action = dedup.should_send("agent-2", "Question for agent 2?");
-            assert_eq!(action, NotifyAction::Send, "Different agent should not be affected");
+            assert_eq!(
+                action,
+                NotifyAction::Send,
+                "Different agent should not be affected"
+            );
         }
 
         // === Process 3: agent-1 still locked ===

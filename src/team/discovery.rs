@@ -32,7 +32,11 @@ pub struct TeamMember {
     pub color: Option<String>,
     #[serde(default, rename = "isActive", skip_serializing_if = "Option::is_none")]
     pub is_active: Option<bool>,
-    #[serde(default, rename = "tmuxPaneId", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        rename = "tmuxPaneId",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub tmux_pane_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
@@ -60,7 +64,8 @@ pub fn discover_teams() -> Vec<TeamConfig> {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.is_dir() {
-                let team_name = path.file_name()
+                let team_name = path
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .map(|s| s.to_string());
 
@@ -97,7 +102,8 @@ pub fn get_team_members(team_name: &str) -> Option<Vec<TeamMember>> {
 /// 获取指定 team 的活跃成员
 pub fn get_active_team_members(team_name: &str) -> Option<Vec<TeamMember>> {
     get_team_members(team_name).map(|members| {
-        members.into_iter()
+        members
+            .into_iter()
             .filter(|m| m.is_active.unwrap_or(false))
             .collect()
     })
@@ -196,8 +202,14 @@ mod tests {
         }"#;
 
         let config: TeamConfigFile = serde_json::from_str(json).unwrap();
-        assert_eq!(config.description, Some("Test team description".to_string()));
-        assert_eq!(config.lead_agent_id, Some("team-lead@test-team".to_string()));
+        assert_eq!(
+            config.description,
+            Some("Test team description".to_string())
+        );
+        assert_eq!(
+            config.lead_agent_id,
+            Some("team-lead@test-team".to_string())
+        );
         assert_eq!(config.created_at, Some(1770481532431));
         assert_eq!(config.members[0].model, Some("claude-opus-4-6".to_string()));
         assert_eq!(config.members[0].tmux_pane_id, Some("%1".to_string()));

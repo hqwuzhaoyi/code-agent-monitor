@@ -3,8 +3,8 @@
 //!
 //! 启动 Claude Code 或 Codex agent，并自动注册到 CAM 进行监控。
 
-use crate::agent::{AgentManager, AgentType, StartAgentRequest};
 use crate::agent::adapter::get_adapter;
+use crate::agent::{AgentManager, AgentType, StartAgentRequest};
 use crate::infra::tmux::TmuxManager;
 use anyhow::{anyhow, Result};
 use clap::Args;
@@ -50,11 +50,16 @@ pub struct StartOutput {
 /// 处理 start 命令
 pub fn handle_start(args: StartArgs) -> Result<()> {
     // 1. 参数验证
-    let agent_type: AgentType = args.agent.parse()
-        .map_err(|_| anyhow!("不支持的 agent 类型: {}，可选: claude-code, codex", args.agent))?;
+    let agent_type: AgentType = args.agent.parse().map_err(|_| {
+        anyhow!(
+            "不支持的 agent 类型: {}，可选: claude-code, codex",
+            args.agent
+        )
+    })?;
 
     // 获取工作目录
-    let cwd = args.cwd
+    let cwd = args
+        .cwd
         .map(|p| {
             // 展开 ~ 为 home 目录
             if p.starts_with("~/") {
@@ -65,9 +70,11 @@ pub fn handle_start(args: StartArgs) -> Result<()> {
                 p
             }
         })
-        .unwrap_or_else(|| std::env::current_dir()
-            .map(|p| p.to_string_lossy().into_owned())
-            .unwrap_or_else(|_| ".".to_string()));
+        .unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().into_owned())
+                .unwrap_or_else(|_| ".".to_string())
+        });
 
     // 验证工作目录存在
     if !Path::new(&cwd).exists() {
@@ -77,7 +84,9 @@ pub fn handle_start(args: StartArgs) -> Result<()> {
     // 2. 检查依赖
     let tmux = TmuxManager::new();
     if !tmux.is_available() {
-        return Err(anyhow!("tmux 未安装或不可用\n请先安装 tmux: brew install tmux"));
+        return Err(anyhow!(
+            "tmux 未安装或不可用\n请先安装 tmux: brew install tmux"
+        ));
     }
 
     let adapter = get_adapter(&agent_type);
@@ -87,7 +96,11 @@ pub fn handle_start(args: StartArgs) -> Result<()> {
             AgentType::Codex => "npm install -g @openai/codex",
             _ => "请参考官方文档安装",
         };
-        return Err(anyhow!("{} 命令未找到\n请先安装: {}", args.agent, install_hint));
+        return Err(anyhow!(
+            "{} 命令未找到\n请先安装: {}",
+            args.agent,
+            install_hint
+        ));
     }
 
     // 3. 构建启动请求

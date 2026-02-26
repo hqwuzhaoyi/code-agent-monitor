@@ -59,8 +59,9 @@ impl BackupManager {
             .with_context(|| format!("Failed to create backup directory: {:?}", tool_backup_dir))?;
 
         // 复制文件
-        fs::copy(original_path, &backup_path)
-            .with_context(|| format!("Failed to backup {:?} to {:?}", original_path, backup_path))?;
+        fs::copy(original_path, &backup_path).with_context(|| {
+            format!("Failed to backup {:?} to {:?}", original_path, backup_path)
+        })?;
 
         // 清理旧备份
         self.cleanup_old_backups(tool, filename)?;
@@ -79,9 +80,8 @@ impl BackupManager {
             .get_latest_backup(tool, filename)?
             .ok_or_else(|| anyhow::anyhow!("No backup found for {} in {}", filename, tool))?;
 
-        fs::copy(&latest, target_path).with_context(|| {
-            format!("Failed to rollback {:?} from {:?}", target_path, latest)
-        })?;
+        fs::copy(&latest, target_path)
+            .with_context(|| format!("Failed to rollback {:?} from {:?}", target_path, latest))?;
 
         Ok(())
     }
@@ -128,11 +128,7 @@ impl BackupManager {
     }
 
     /// 列出指定文件的所有备份
-    fn list_backups_for_file(
-        &self,
-        tool_dir: &Path,
-        filename: &str,
-    ) -> Result<Vec<fs::DirEntry>> {
+    fn list_backups_for_file(&self, tool_dir: &Path, filename: &str) -> Result<Vec<fs::DirEntry>> {
         let entries = fs::read_dir(tool_dir)
             .with_context(|| format!("Failed to read backup directory: {:?}", tool_dir))?;
 
@@ -231,13 +227,19 @@ mod tests {
 
         // 修改原文件
         fs::write(&config_path, "modified content").unwrap();
-        assert_eq!(fs::read_to_string(&config_path).unwrap(), "modified content");
+        assert_eq!(
+            fs::read_to_string(&config_path).unwrap(),
+            "modified content"
+        );
 
         // 回滚
         manager.rollback("test-tool", &config_path).unwrap();
 
         // 验证内容恢复
-        assert_eq!(fs::read_to_string(&config_path).unwrap(), "original content");
+        assert_eq!(
+            fs::read_to_string(&config_path).unwrap(),
+            "original content"
+        );
     }
 
     #[test]

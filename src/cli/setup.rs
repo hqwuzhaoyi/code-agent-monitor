@@ -42,7 +42,10 @@ pub fn handle_setup(args: SetupArgs) -> Result<()> {
 
     // 检查工具是否已安装
     if !adapter.is_installed() {
-        println!("⚠️  {} is not installed, but will configure anyway", args.tool);
+        println!(
+            "⚠️  {} is not installed, but will configure anyway",
+            args.tool
+        );
     }
 
     // 生成新配置
@@ -179,8 +182,8 @@ fn apply_hook_config(tool: &str, config_path: &Path, new_config: &str) -> Result
 
 /// 合并 Claude 配置（保留现有配置，添加 CAM hooks）
 fn merge_claude_config(existing: &str, new_config: &str) -> Result<String> {
-    let mut existing_json: serde_json::Value = serde_json::from_str(existing)
-        .unwrap_or_else(|_| serde_json::json!({}));
+    let mut existing_json: serde_json::Value =
+        serde_json::from_str(existing).unwrap_or_else(|_| serde_json::json!({}));
     let new_json: serde_json::Value = serde_json::from_str(new_config)?;
 
     // 获取或创建 hooks 对象
@@ -191,7 +194,10 @@ fn merge_claude_config(existing: &str, new_config: &str) -> Result<String> {
         .or_insert_with(|| serde_json::json!({}));
 
     // 合并新的 hooks
-    if let (Some(hooks_obj), Some(new_hooks)) = (hooks.as_object_mut(), new_json.get("hooks").and_then(|h| h.as_object())) {
+    if let (Some(hooks_obj), Some(new_hooks)) = (
+        hooks.as_object_mut(),
+        new_json.get("hooks").and_then(|h| h.as_object()),
+    ) {
         for (key, value) in new_hooks {
             if !hooks_obj.contains_key(key) {
                 hooks_obj.insert(key.clone(), value.clone());

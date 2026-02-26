@@ -5,8 +5,8 @@ use std::time::SystemTime;
 
 use anyhow::Result;
 use crossterm::{
+    event::{DisableMouseCapture, EnableMouseCapture},
     execute,
-    event::{EnableMouseCapture, DisableMouseCapture},
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::prelude::*;
@@ -89,7 +89,10 @@ impl App {
     /// 选择上一个 agent
     pub fn prev_agent(&mut self) {
         if !self.agents.is_empty() {
-            self.selected_index = self.selected_index.checked_sub(1).unwrap_or(self.agents.len() - 1);
+            self.selected_index = self
+                .selected_index
+                .checked_sub(1)
+                .unwrap_or(self.agents.len() - 1);
         }
     }
 
@@ -188,7 +191,8 @@ impl App {
         self.last_refresh = std::time::Instant::now();
 
         // 更新终端预览
-        let session_to_refresh = self.selected_agent()
+        let session_to_refresh = self
+            .selected_agent()
             .and_then(|agent| agent.tmux_session.clone());
         if let Some(session) = session_to_refresh {
             self.refresh_terminal_preview(&session)?;
@@ -247,7 +251,8 @@ impl App {
 
     /// 切换选中 agent 时启动新的 pipe-pane
     pub fn switch_agent_stream(&mut self) {
-        let session = self.selected_agent()
+        let session = self
+            .selected_agent()
             .and_then(|agent| agent.tmux_session.clone());
         if let Some(session) = session {
             // 尝试启动 pipe-pane，失败则忽略（会降级到轮询）
@@ -307,11 +312,15 @@ pub fn init_terminal() -> AppResult<Tui> {
 /// 恢复终端
 pub fn restore_terminal(terminal: &mut Tui) -> AppResult<()> {
     disable_raw_mode()?;
-    execute!(terminal.backend_mut(), DisableMouseCapture, LeaveAlternateScreen)?;
+    execute!(
+        terminal.backend_mut(),
+        DisableMouseCapture,
+        LeaveAlternateScreen
+    )?;
     Ok(())
 }
 
-use crate::tui::{render, poll_event, handle_key, handle_mouse, TuiEvent};
+use crate::tui::{handle_key, handle_mouse, poll_event, render, TuiEvent};
 use std::time::Duration;
 
 /// 运行 TUI 主循环
@@ -375,7 +384,8 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                     // 如果选择变化，切换 pipe-pane 并刷新终端预览
                     if prev_selected != app.selected_index {
                         app.switch_agent_stream();
-                        let session_to_refresh = app.selected_agent()
+                        let session_to_refresh = app
+                            .selected_agent()
                             .and_then(|agent| agent.tmux_session.clone());
                         if let Some(session) = session_to_refresh {
                             let _ = app.refresh_terminal_preview(&session);
@@ -389,7 +399,8 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                     // 如果选择变化，切换 pipe-pane 并刷新终端预览
                     if selection_changed && prev_selected != app.selected_index {
                         app.switch_agent_stream();
-                        let session_to_refresh = app.selected_agent()
+                        let session_to_refresh = app
+                            .selected_agent()
                             .and_then(|agent| agent.tmux_session.clone());
                         if let Some(session) = session_to_refresh {
                             let _ = app.refresh_terminal_preview(&session);

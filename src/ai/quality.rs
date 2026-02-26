@@ -6,8 +6,8 @@
 //! - 内容合理性评估
 //! - 置信度计算
 
-use crate::ai::types::{NotificationContent, QuestionType};
 use crate::agent::manager::AgentStatus;
+use crate::ai::types::{NotificationContent, QuestionType};
 use tracing::warn;
 
 /// 质量评估结果
@@ -178,7 +178,16 @@ pub fn assess_status_detection(status: &AgentStatus, snapshot: &str) -> QualityA
     match status {
         AgentStatus::Processing | AgentStatus::Running => {
             // 处理中状态应该有处理指示器
-            let processing_hints = ["…", "...", "Thinking", "Brewing", "Running", "Loading", "Streaming", "Executing"];
+            let processing_hints = [
+                "…",
+                "...",
+                "Thinking",
+                "Brewing",
+                "Running",
+                "Loading",
+                "Streaming",
+                "Executing",
+            ];
             let has_processing_hint = processing_hints.iter().any(|h| snapshot.contains(h));
 
             // 检查是否有等待输入的指示器（与 Processing 状态矛盾）

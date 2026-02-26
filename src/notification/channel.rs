@@ -1,8 +1,8 @@
 //! 通知渠道 trait 定义
 
+use super::urgency::Urgency;
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use super::urgency::Urgency;
 
 /// 通知消息
 #[derive(Debug, Clone, Serialize, Deserialize)]

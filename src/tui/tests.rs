@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::tui::{App, AgentItem, View, LogLevel, LogsState};
+    use crate::tui::{AgentItem, App, LogLevel, LogsState, View};
     use crate::AgentStatus;
 
     #[test]
@@ -211,16 +211,14 @@ mod tests {
     #[test]
     fn test_selected_agent() {
         let mut app = App::new();
-        app.agents = vec![
-            AgentItem {
-                id: "test-1".to_string(),
-                agent_type: "claude".to_string(),
-                project: "project".to_string(),
-                state: AgentStatus::Processing,
-                started_at: chrono::Local::now(),
-                tmux_session: Some("cam-test".to_string()),
-            },
-        ];
+        app.agents = vec![AgentItem {
+            id: "test-1".to_string(),
+            agent_type: "claude".to_string(),
+            project: "project".to_string(),
+            state: AgentStatus::Processing,
+            started_at: chrono::Local::now(),
+            tmux_session: Some("cam-test".to_string()),
+        }];
 
         let agent = app.selected_agent().unwrap();
         assert_eq!(agent.id, "test-1");
@@ -230,16 +228,14 @@ mod tests {
     #[test]
     fn test_close_selected_agent_returns_id() {
         let mut app = App::new();
-        app.agents = vec![
-            AgentItem {
-                id: "cam-test-close".to_string(),
-                agent_type: "claude".to_string(),
-                project: "test".to_string(),
-                state: AgentStatus::Processing,
-                started_at: chrono::Local::now(),
-                tmux_session: Some("cam-test-close".to_string()),
-            },
-        ];
+        app.agents = vec![AgentItem {
+            id: "cam-test-close".to_string(),
+            agent_type: "claude".to_string(),
+            project: "test".to_string(),
+            state: AgentStatus::Processing,
+            started_at: chrono::Local::now(),
+            tmux_session: Some("cam-test-close".to_string()),
+        }];
 
         // close_selected_agent should return the agent ID
         let result = app.close_selected_agent();

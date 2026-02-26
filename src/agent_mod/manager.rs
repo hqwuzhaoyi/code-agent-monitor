@@ -1,8 +1,8 @@
 //! Agent 管理模块 - Agent 生命周期管理
 
-use crate::infra::tmux::TmuxManager;
-use crate::agent::daemon::WatcherDaemon;
 use crate::agent::adapter::get_adapter;
+use crate::agent::daemon::WatcherDaemon;
+use crate::infra::tmux::TmuxManager;
 use anyhow::{anyhow, Result};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -10,7 +10,7 @@ use std::fs::{self, OpenOptions};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tracing::{info, warn, debug};
+use tracing::{debug, info, warn};
 
 /// 全局计数器，确保 agent_id 唯一性（即使在同一毫秒内）
 static AGENT_ID_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -24,8 +24,8 @@ pub enum AgentType {
     Codex,
     GeminiCli,
     MistralVibe,
-    Mock,     // 用于测试
-    Unknown,  // 未知类型（进程扫描时使用）
+    Mock,    // 用于测试
+    Unknown, // 未知类型（进程扫描时使用）
 }
 
 impl std::fmt::Display for AgentType {
@@ -85,7 +85,10 @@ impl Default for AgentStatus {
 impl AgentStatus {
     /// 是否应该发送通知
     pub fn should_notify(&self) -> bool {
-        matches!(self, Self::WaitingForInput | Self::DecisionRequired | Self::Unknown)
+        matches!(
+            self,
+            Self::WaitingForInput | Self::DecisionRequired | Self::Unknown
+        )
     }
 
     /// 获取 TUI 显示图标
@@ -183,7 +186,8 @@ impl AgentManager {
     /// 创建用于测试的 AgentManager（每次调用创建独立的数据目录）
     pub fn new_for_test() -> Self {
         let counter = AGENT_ID_COUNTER.fetch_add(1, Ordering::SeqCst);
-        let data_dir = std::env::temp_dir().join(format!("cam-test-{}-{}", std::process::id(), counter));
+        let data_dir =
+            std::env::temp_dir().join(format!("cam-test-{}-{}", std::process::id(), counter));
         let _ = fs::create_dir_all(&data_dir);
 
         Self {
@@ -305,18 +309,17 @@ impl AgentManager {
 
     /// 启动 Agent
     pub fn start_agent(&self, request: StartAgentRequest) -> Result<StartAgentResponse> {
-        let agent_type: AgentType = request.agent_type
-            .as_deref()
-            .unwrap_or("claude")
-            .parse()?;
+        let agent_type: AgentType = request.agent_type.as_deref().unwrap_or("claude").parse()?;
 
         // 使用传入的 agent_id，或生成新的
-        let agent_id = request.agent_id
+        let agent_id = request
+            .agent_id
             .clone()
             .unwrap_or_else(|| self.generate_agent_id());
 
         // 使用传入的 tmux_session，或使用 agent_id
-        let tmux_session = request.tmux_session
+        let tmux_session = request
+            .tmux_session
             .clone()
             .unwrap_or_else(|| agent_id.clone());
 
@@ -341,7 +344,8 @@ impl AgentManager {
 
         if !session_exists {
             // 创建 tmux session
-            self.tmux.create_session(&tmux_session, &request.project_path, &command)?;
+            self.tmux
+                .create_session(&tmux_session, &request.project_path, &command)?;
         } else {
             info!(tmux_session = %tmux_session, "Tmux session already exists, reusing");
         }
@@ -408,12 +412,17 @@ impl AgentManager {
     }
 
     /// 使用自定义命令启动 agent（用于测试）
-    pub fn start_agent_with_command(&self, project_path: String, command: &str) -> Result<StartAgentResponse> {
+    pub fn start_agent_with_command(
+        &self,
+        project_path: String,
+        command: &str,
+    ) -> Result<StartAgentResponse> {
         let agent_id = self.generate_agent_id();
         let tmux_session = agent_id.clone();
 
         // 创建 tmux session
-        self.tmux.create_session(&tmux_session, &project_path, command)?;
+        self.tmux
+            .create_session(&tmux_session, &project_path, command)?;
 
         // 保存到 agents.json
         let record = AgentRecord {
@@ -446,7 +455,9 @@ impl AgentManager {
 
         // 在锁保护下查找 agent 并获取 tmux_session
         let tmux_session = self.with_locked_agents_file(|file| {
-            let agent = file.agents.iter()
+            let agent = file
+                .agents
+                .iter()
                 .find(|a| a.agent_id == agent_id)
                 .ok_or_else(|| anyhow!("Agent not found: {}", agent_id))?;
             let session = agent.tmux_session.clone();
@@ -468,7 +479,9 @@ impl AgentManager {
     pub fn send_input(&self, agent_id: &str, input: &str) -> Result<()> {
         let file = self.read_agents_file()?;
 
-        let agent = file.agents.iter()
+        let agent = file
+            .agents
+            .iter()
             .find(|a| a.agent_id == agent_id)
             .ok_or_else(|| anyhow!("Agent not found: {}", agent_id))?;
 
@@ -481,7 +494,9 @@ impl AgentManager {
     pub fn get_logs(&self, agent_id: &str, lines: u32) -> Result<String> {
         let file = self.read_agents_file()?;
 
-        let agent = file.agents.iter()
+        let agent = file
+            .agents
+            .iter()
             .find(|a| a.agent_id == agent_id)
             .ok_or_else(|| anyhow!("Agent not found: {}", agent_id))?;
 
@@ -492,7 +507,9 @@ impl AgentManager {
     pub fn list_agents(&self) -> Result<Vec<AgentRecord>> {
         self.with_locked_agents_file(|file| {
             // 过滤已死亡的 session
-            let live_agents: Vec<AgentRecord> = file.agents.iter()
+            let live_agents: Vec<AgentRecord> = file
+                .agents
+                .iter()
                 .filter(|a| self.tmux.session_exists(&a.tmux_session))
                 .cloned()
                 .collect();
@@ -512,7 +529,9 @@ impl AgentManager {
     /// 通过 session_id 查找 Agent
     pub fn find_agent_by_session_id(&self, session_id: &str) -> Result<Option<AgentRecord>> {
         let agents = self.list_agents()?;
-        Ok(agents.into_iter().find(|a| a.session_id.as_deref() == Some(session_id)))
+        Ok(agents
+            .into_iter()
+            .find(|a| a.session_id.as_deref() == Some(session_id)))
     }
 
     /// 通过 cwd 更新 Agent 的 session_id
@@ -523,12 +542,19 @@ impl AgentManager {
 
         self.with_locked_agents_file(|file| {
             // 检查是否有多个匹配的 agent（潜在的歧义）
-            let matching_count = file.agents.iter()
-                .filter(|a| canonicalize_path(&a.project_path) == cwd_canonical && a.session_id.is_none())
+            let matching_count = file
+                .agents
+                .iter()
+                .filter(|a| {
+                    canonicalize_path(&a.project_path) == cwd_canonical && a.session_id.is_none()
+                })
                 .count();
 
             if matching_count > 1 {
-                eprintln!("警告: 发现 {} 个 agent 匹配路径 {}，将使用第一个匹配", matching_count, cwd);
+                eprintln!(
+                    "警告: 发现 {} 个 agent 匹配路径 {}，将使用第一个匹配",
+                    matching_count, cwd
+                );
             }
 
             let mut updated = false;
@@ -549,7 +575,9 @@ impl AgentManager {
     pub fn find_agent_by_cwd(&self, cwd: &str) -> Result<Option<AgentRecord>> {
         let agents = self.list_agents()?;
         let cwd_canonical = canonicalize_path(cwd);
-        Ok(agents.into_iter().find(|a| canonicalize_path(&a.project_path) == cwd_canonical))
+        Ok(agents
+            .into_iter()
+            .find(|a| canonicalize_path(&a.project_path) == cwd_canonical))
     }
 
     /// 注册外部（非 CAM 管理）的 Claude Code 会话
@@ -622,7 +650,9 @@ fn canonicalize_path(path: &str) -> String {
             for component in path.split('/') {
                 match component {
                     "" | "." => continue,
-                    ".." => { components.pop(); }
+                    ".." => {
+                        components.pop();
+                    }
                     c => components.push(c),
                 }
             }
@@ -685,14 +715,16 @@ mod tests {
         cleanup_test_agents(&manager);
 
         // When: 启动 agent
-        let response = manager.start_agent(StartAgentRequest {
-            project_path: "/tmp".to_string(),
-            agent_type: Some("mock".to_string()),
-            resume_session: None,
-            initial_prompt: None,
-            agent_id: None,
-            tmux_session: None,
-        }).unwrap();
+        let response = manager
+            .start_agent(StartAgentRequest {
+                project_path: "/tmp".to_string(),
+                agent_type: Some("mock".to_string()),
+                resume_session: None,
+                initial_prompt: None,
+                agent_id: None,
+                tmux_session: None,
+            })
+            .unwrap();
 
         // Then: agents.json 包含该记录
         let agents = manager.list_agents().unwrap();
@@ -708,14 +740,16 @@ mod tests {
         let manager = AgentManager::new_for_test();
         cleanup_test_agents(&manager);
 
-        let response = manager.start_agent(StartAgentRequest {
-            project_path: "/tmp".to_string(),
-            agent_type: Some("mock".to_string()),
-            resume_session: None,
-            initial_prompt: None,
-            agent_id: None,
-            tmux_session: None,
-        }).unwrap();
+        let response = manager
+            .start_agent(StartAgentRequest {
+                project_path: "/tmp".to_string(),
+                agent_type: Some("mock".to_string()),
+                resume_session: None,
+                initial_prompt: None,
+                agent_id: None,
+                tmux_session: None,
+            })
+            .unwrap();
 
         // When: 停止 agent
         let result = manager.stop_agent(&response.agent_id);
@@ -733,10 +767,9 @@ mod tests {
         let manager = AgentManager::new_for_test();
         cleanup_test_agents(&manager);
 
-        let response = manager.start_agent_with_command(
-            "/tmp".to_string(),
-            "cat",
-        ).unwrap();
+        let response = manager
+            .start_agent_with_command("/tmp".to_string(), "cat")
+            .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(300));
 
         // When: 发送输入
@@ -760,14 +793,16 @@ mod tests {
         let manager = AgentManager::new_for_test();
         cleanup_test_agents(&manager);
 
-        let response = manager.start_agent(StartAgentRequest {
-            project_path: "/tmp".to_string(),
-            agent_type: Some("mock".to_string()),
-            resume_session: None,
-            initial_prompt: None,
-            agent_id: None,
-            tmux_session: None,
-        }).unwrap();
+        let response = manager
+            .start_agent(StartAgentRequest {
+                project_path: "/tmp".to_string(),
+                agent_type: Some("mock".to_string()),
+                resume_session: None,
+                initial_prompt: None,
+                agent_id: None,
+                tmux_session: None,
+            })
+            .unwrap();
 
         // 手动 kill tmux (模拟意外退出)
         manager.tmux.kill_session(&response.tmux_session).unwrap();
@@ -828,7 +863,11 @@ mod tests {
         assert_eq!(result.unwrap(), agent_id);
 
         let file = manager.read_agents_file().unwrap();
-        let count = file.agents.iter().filter(|a| a.agent_id == agent_id).count();
+        let count = file
+            .agents
+            .iter()
+            .filter(|a| a.agent_id == agent_id)
+            .count();
         assert_eq!(count, 1);
 
         // Cleanup
@@ -843,7 +882,9 @@ mod tests {
         let _ = std::fs::remove_file(manager.agents_file_path());
 
         let session_id = "remove12-f02a-45d6-b349-995d4d848765";
-        let agent_id = manager.register_external_session(session_id, "/tmp").unwrap();
+        let agent_id = manager
+            .register_external_session(session_id, "/tmp")
+            .unwrap();
 
         // When: 移除记录
         let result = manager.remove_agent(&agent_id);

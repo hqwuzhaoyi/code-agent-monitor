@@ -15,7 +15,9 @@ use crate::ai::extractor::is_agent_processing;
 use crate::infra::tmux::TmuxManager;
 
 pub use prompts::{message_extraction_prompt, MESSAGE_EXTRACTION_SYSTEM};
-pub use traits::{ExtractionResult, ExtractedMessage, IterationConfig, MessageExtractor, MessageType};
+pub use traits::{
+    ExtractedMessage, ExtractionResult, IterationConfig, MessageExtractor, MessageType,
+};
 
 /// 从终端快照提取格式化消息的便捷函数
 ///
@@ -153,7 +155,10 @@ impl MessageExtractor for HaikuExtractor {
 
         let prompt = message_extraction_prompt(&cleaned);
 
-        let response = match self.client.complete(&prompt, Some(MESSAGE_EXTRACTION_SYSTEM)) {
+        let response = match self
+            .client
+            .complete(&prompt, Some(MESSAGE_EXTRACTION_SYSTEM))
+        {
             Ok(r) => r,
             Err(e) => {
                 warn!(error = %e, "Haiku API call failed");
@@ -245,7 +250,10 @@ impl MessageExtractor for HaikuExtractor {
                 content: String::new(),
                 fingerprint: String::new(),
                 context_complete: true,
-                message_type: MessageType::Idle { status, last_action },
+                message_type: MessageType::Idle {
+                    status,
+                    last_action,
+                },
             })
         }
     }

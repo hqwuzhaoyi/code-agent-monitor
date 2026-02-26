@@ -5,8 +5,8 @@
 use anyhow::Result;
 use serde_json::Value;
 
-use crate::notification::openclaw::OpenclawNotifier;
 use crate::notification::load_webhook_config_from_file;
+use crate::notification::openclaw::OpenclawNotifier;
 use crate::team::{discovery, InboxMessage, InboxWatcher, TeamBridge, TeamOrchestrator};
 
 /// Handle team/list request
@@ -351,10 +351,14 @@ pub fn handle_user_reply(params: Option<Value>) -> Result<Value> {
 
 /// Handle get_pending_permission_requests (via InboxWatcher)
 pub fn handle_get_pending_permission_requests(params: Option<Value>) -> Result<Value> {
-    let team = params.as_ref().and_then(|p| p.get("team").and_then(|v| v.as_str()));
+    let team = params
+        .as_ref()
+        .and_then(|p| p.get("team").and_then(|v| v.as_str()));
 
     let notifier = match load_webhook_config_from_file() {
-        Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+        Some(config) => {
+            OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new())
+        }
         None => OpenclawNotifier::new(),
     };
     let watcher = InboxWatcher::new(notifier);

@@ -15,6 +15,9 @@ pub struct WebhookConfig {
     pub hook_token: String,
     /// 超时时间 (秒)
     pub timeout_secs: u64,
+    /// Optional delivery defaults for `/hooks/agent`
+    pub default_channel: Option<String>,
+    pub default_to: Option<String>,
 }
 
 impl Default for WebhookConfig {
@@ -23,6 +26,8 @@ impl Default for WebhookConfig {
             gateway_url: "http://localhost:9080".to_string(),
             hook_token: String::new(),
             timeout_secs: 30,
+            default_channel: None,
+            default_to: None,
         }
     }
 }
@@ -47,21 +52,35 @@ pub fn load_webhook_config_from_file() -> Option<WebhookConfig> {
     let webhook = json.get("webhook")?;
 
     Some(WebhookConfig {
-        gateway_url: webhook.get("gateway_url")
+        gateway_url: webhook
+            .get("gateway_url")
             .and_then(|v| v.as_str())
             .unwrap_or("http://localhost:18789")
             .to_string(),
-        hook_token: webhook.get("hook_token")
+        hook_token: webhook
+            .get("hook_token")
             .and_then(|v| v.as_str())
             .unwrap_or("")
             .to_string(),
-        timeout_secs: webhook.get("timeout_secs")
+        timeout_secs: webhook
+            .get("timeout_secs")
             .and_then(|v| v.as_u64())
             .unwrap_or(30),
+        default_channel: webhook
+            .get("default_channel")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
+        default_to: webhook
+            .get("default_to")
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string()),
     })
 }
 
 /// Webhook 请求载荷
+///
+/// NOTE: OpenClaw Gateway 的 `/hooks/agent` 使用 camelCase 字段名（如 `agentId`, `wakeMode`）。
+/// 这里用 serde rename 保持 Rust 侧字段命名风格不变，同时确保网关能正确解析。
 #[derive(Debug, Serialize)]
 pub struct WebhookPayload {
     /// 消息内容
@@ -70,10 +89,10 @@ pub struct WebhookPayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
     /// 目标 Agent ID
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "agentId")]
     pub agent_id: Option<String>,
     /// 唤醒模式: "now" | "next-heartbeat"
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", rename = "wakeMode")]
     pub wake_mode: Option<String>,
     /// 是否发送回复
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -146,7 +165,10 @@ impl WebhookClient {
 
         let response = blocking_client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.hook_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.config.hook_token),
+            )
             .header("Content-Type", "application/json")
             .json(&payload)
             .send()
@@ -159,7 +181,9 @@ impl WebhookClient {
         if webhook_response.ok {
             Ok(webhook_response)
         } else {
-            Err(webhook_response.error.unwrap_or_else(|| "Unknown error".to_string()))
+            Err(webhook_response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string()))
         }
     }
 
@@ -192,7 +216,10 @@ impl WebhookClient {
         let response = self
             .client
             .post(&url)
-            .header("Authorization", format!("Bearer {}", self.config.hook_token))
+            .header(
+                "Authorization",
+                format!("Bearer {}", self.config.hook_token),
+            )
             .header("Content-Type", "application/json")
             .json(&payload)
             .send()
@@ -207,7 +234,9 @@ impl WebhookClient {
         if webhook_response.ok {
             Ok(webhook_response)
         } else {
-            Err(webhook_response.error.unwrap_or_else(|| "Unknown error".to_string()))
+            Err(webhook_response
+                .error
+                .unwrap_or_else(|| "Unknown error".to_string()))
         }
     }
 
@@ -216,14 +245,18 @@ impl WebhookClient {
         &self,
         event_data: &serde_json::Value,
     ) -> Result<WebhookResponse, String> {
-        let message = format!("CAM Event: {}", serde_json::to_string(event_data).unwrap_or_default());
-        
+        let message = format!(
+            "CAM Event: {}",
+            serde_json::to_string(event_data).unwrap_or_default()
+        );
+
         self.send_notification(
             message,
             Some("cam-handler".to_string()),
             Some("telegram".to_string()),
             None,
-        ).await
+        )
+        .await
     }
 }
 
@@ -236,6 +269,8 @@ mod tests {
         let config = WebhookConfig::default();
         assert_eq!(config.gateway_url, "http://localhost:9080");
         assert_eq!(config.timeout_secs, 30);
+        assert!(config.default_channel.is_none());
+        assert!(config.default_to.is_none());
     }
 
     #[test]
@@ -244,9 +279,28 @@ mod tests {
             hook_token: String::new(),
             ..Default::default()
         };
-        
+
         let result = WebhookClient::new(config);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("hook_token"));
+    }
+
+    #[test]
+    fn test_webhook_payload_uses_camel_case_for_gateway() {
+        let payload = WebhookPayload {
+            message: "hi".to_string(),
+            name: Some("CAM".to_string()),
+            agent_id: Some("hooks".to_string()),
+            wake_mode: Some("now".to_string()),
+            deliver: Some(true),
+            channel: Some("telegram".to_string()),
+            to: Some("1440537501".to_string()),
+        };
+
+        let json = serde_json::to_value(&payload).unwrap();
+        assert!(json.get("agentId").is_some());
+        assert!(json.get("wakeMode").is_some());
+        assert!(json.get("agent_id").is_none());
+        assert!(json.get("wake_mode").is_none());
     }
 }

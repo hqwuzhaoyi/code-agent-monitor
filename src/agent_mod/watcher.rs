@@ -5,21 +5,21 @@
 //! See `crate::agent::watcher::EventProcessor` for JSONL event processing.
 //! See `crate::agent::watcher::StabilityDetector` for terminal stability detection.
 
-use crate::agent::{AgentManager, AgentRecord};
+use crate::agent::adapter::{get_adapter, DetectionStrategy};
+use crate::agent::extractor::{HaikuExtractor, MessageType, ReactExtractor};
 use crate::agent::manager::AgentStatus;
 use crate::agent::monitor::AgentMonitor;
-use crate::agent::adapter::{get_adapter, DetectionStrategy};
-use crate::agent::extractor::{ReactExtractor, HaikuExtractor, MessageType};
+use crate::agent::{AgentManager, AgentRecord};
 use crate::infra::input::{InputWaitDetector, InputWaitPattern, InputWaitResult};
 use crate::infra::jsonl::{JsonlEvent, JsonlParser};
-use crate::infra::tmux::TmuxManager;
 use crate::infra::terminal::truncate_for_status;
-use crate::notification::{NotificationDeduplicator, NotifyAction, generate_dedup_key};
+use crate::infra::tmux::TmuxManager;
+use crate::notification::{generate_dedup_key, NotificationDeduplicator, NotifyAction};
 // Import new watcher module for future migration
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{info, debug, error};
+use tracing::{debug, error, info};
 
 /// 监控事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,9 +60,7 @@ pub enum WatchEvent {
         is_decision_required: bool,
     },
     /// Agent 恢复运行（从等待状态）
-    AgentResumed {
-        agent_id: String,
-    },
+    AgentResumed { agent_id: String },
 }
 
 /// Agent 状态快照
@@ -242,8 +240,8 @@ impl AgentWatcher {
 
     /// 计算内容指纹（用于稳定性检测）
     fn content_fingerprint(content: &str) -> u64 {
-        use std::hash::{Hash, Hasher};
         use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
 
         // 规范化内容：移除动画字符和时间相关内容
         let normalized = Self::normalize_content(content);
@@ -296,7 +294,10 @@ impl AgentWatcher {
         }
 
         // Condition 4: Recent hook event - let hook flow handle it
-        if self.hook_tracker.is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS) {
+        if self
+            .hook_tracker
+            .is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS)
+        {
             return false;
         }
 
@@ -310,7 +311,10 @@ impl AgentWatcher {
             "already_checked"
         } else if !stability.is_stable(now, Self::STABILITY_THRESHOLD_SECS) {
             "not_stable_yet"
-        } else if self.hook_tracker.is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS) {
+        } else if self
+            .hook_tracker
+            .is_in_quiet_period(agent_id, now, Self::HOOK_QUIET_PERIOD_SECS)
+        {
             "recent_hook_event"
         } else {
             "unknown"
@@ -328,7 +332,9 @@ impl AgentWatcher {
             if let Ok(content) = std::fs::read_to_string(&hook_file) {
                 if let Ok(events) = serde_json::from_str::<HashMap<String, u64>>(&content) {
                     for (agent_id, timestamp) in events {
-                        self.hook_tracker.last_hook_times.insert(agent_id, timestamp);
+                        self.hook_tracker
+                            .last_hook_times
+                            .insert(agent_id, timestamp);
                     }
                 }
             }
@@ -389,7 +395,8 @@ impl AgentWatcher {
 
             // 2. 解析 JSONL 新事件
             if let Some(ref jsonl_path) = agent.jsonl_path {
-                let parser = self.jsonl_parsers
+                let parser = self
+                    .jsonl_parsers
                     .entry(agent.agent_id.clone())
                     .or_insert_with(|| {
                         let mut p = JsonlParser::new(jsonl_path);
@@ -400,8 +407,16 @@ impl AgentWatcher {
                 if let Ok(new_events) = parser.read_new_events() {
                     for event in new_events {
                         match &event {
-                            JsonlEvent::ToolUse { tool_name, input, timestamp, .. } => {
-                                let tool_target = crate::infra::jsonl::extract_tool_target_from_input(tool_name, input);
+                            JsonlEvent::ToolUse {
+                                tool_name,
+                                input,
+                                timestamp,
+                                ..
+                            } => {
+                                let tool_target =
+                                    crate::infra::jsonl::extract_tool_target_from_input(
+                                        tool_name, input,
+                                    );
                                 events.push(WatchEvent::ToolUse {
                                     agent_id: agent.agent_id.clone(),
                                     tool_name: tool_name.clone(),
@@ -429,7 +444,8 @@ impl AgentWatcher {
                 let agent_id = agent.agent_id.clone();
 
                 // Update stability state
-                let stability = self.stability_states
+                let stability = self
+                    .stability_states
                     .entry(agent_id.clone())
                     .or_insert_with(|| StabilityState::new(content_hash, now));
                 let content_changed = stability.update(content_hash, now);
@@ -439,7 +455,11 @@ impl AgentWatcher {
                 let is_stable = stability.is_stable(now, Self::STABILITY_THRESHOLD_SECS);
 
                 // Check if AI detection should be performed
-                let in_quiet_period = self.hook_tracker.is_in_quiet_period(&agent_id, now, Self::HOOK_QUIET_PERIOD_SECS);
+                let in_quiet_period = self.hook_tracker.is_in_quiet_period(
+                    &agent_id,
+                    now,
+                    Self::HOOK_QUIET_PERIOD_SECS,
+                );
 
                 let should_check = !content_changed && !ai_checked && is_stable && !in_quiet_period;
 
@@ -461,7 +481,11 @@ impl AgentWatcher {
                     );
 
                     // Still need to track waiting state for resume detection
-                    let was_waiting = self.last_waiting_state.get(&agent_id).copied().unwrap_or(false);
+                    let was_waiting = self
+                        .last_waiting_state
+                        .get(&agent_id)
+                        .copied()
+                        .unwrap_or(false);
                     if was_waiting {
                         // Content changed while waiting - might have resumed
                         // Will be detected on next stable check
@@ -477,7 +501,11 @@ impl AgentWatcher {
                     stability.mark_ai_checked();
                 }
 
-                let was_waiting = self.last_waiting_state.get(&agent_id).copied().unwrap_or(false);
+                let was_waiting = self
+                    .last_waiting_state
+                    .get(&agent_id)
+                    .copied()
+                    .unwrap_or(false);
 
                 debug!(
                     agent_id = %agent_id,
@@ -498,7 +526,10 @@ impl AgentWatcher {
 
                 // Sync status to agents.json if changed
                 if agent.status != new_status {
-                    if let Err(e) = self.agent_manager.update_agent_status(&agent_id, new_status.clone()) {
+                    if let Err(e) = self
+                        .agent_manager
+                        .update_agent_status(&agent_id, new_status.clone())
+                    {
                         error!(agent_id = %agent_id, error = %e, "Failed to update agent status");
                     } else {
                         debug!(agent_id = %agent_id, old_status = ?agent.status, new_status = ?new_status, "Agent status updated");
@@ -514,7 +545,8 @@ impl AgentWatcher {
 
                     match action {
                         NotifyAction::Send => {
-                            let pattern_type = wait_result.pattern_type
+                            let pattern_type = wait_result
+                                .pattern_type
                                 .as_ref()
                                 .map(|p| format!("{:?}", p))
                                 .unwrap_or_else(|| "Unknown".to_string());
@@ -535,7 +567,8 @@ impl AgentWatcher {
                             });
                         }
                         NotifyAction::SendReminder => {
-                            let pattern_type = wait_result.pattern_type
+                            let pattern_type = wait_result
+                                .pattern_type
                                 .as_ref()
                                 .map(|p| format!("{:?}", p))
                                 .unwrap_or_else(|| "Unknown".to_string());
@@ -574,7 +607,8 @@ impl AgentWatcher {
                     }
                 }
 
-                self.last_waiting_state.insert(agent_id, wait_result.is_waiting);
+                self.last_waiting_state
+                    .insert(agent_id, wait_result.is_waiting);
             }
         }
 
@@ -589,7 +623,11 @@ impl AgentWatcher {
     }
 
     /// 手动触发一次输入等待检测（不受稳定性/去重影响）
-    pub fn trigger_wait_check(&mut self, agent_id: &str, force_send: bool) -> Result<Option<WatchEvent>> {
+    pub fn trigger_wait_check(
+        &mut self,
+        agent_id: &str,
+        force_send: bool,
+    ) -> Result<Option<WatchEvent>> {
         let agent = match self.agent_manager.get_agent(agent_id)? {
             Some(a) => a,
             None => return Ok(None),
@@ -622,7 +660,8 @@ impl AgentWatcher {
         let (context, pattern_type, is_decision_required) = if wait_result.is_waiting {
             (
                 wait_result.context,
-                wait_result.pattern_type
+                wait_result
+                    .pattern_type
                     .as_ref()
                     .map(|p| format!("{:?}", p))
                     .unwrap_or_else(|| "Unknown".to_string()),
@@ -665,7 +704,8 @@ impl AgentWatcher {
         };
 
         // 检测输入等待状态
-        let waiting_for_input = if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50) {
+        let waiting_for_input = if let Ok(output) = self.tmux.capture_pane(&agent.tmux_session, 50)
+        {
             let result = self.input_detector.detect_immediate(&output);
             if result.is_waiting {
                 Some(result)
@@ -677,14 +717,13 @@ impl AgentWatcher {
         };
 
         // 获取最后活动时间
-        let last_activity = recent_tools.last()
-            .and_then(|e| {
-                if let JsonlEvent::ToolUse { timestamp, .. } = e {
-                    timestamp.clone()
-                } else {
-                    None
-                }
-            });
+        let last_activity = recent_tools.last().and_then(|e| {
+            if let JsonlEvent::ToolUse { timestamp, .. } = e {
+                timestamp.clone()
+            } else {
+                None
+            }
+        });
 
         Ok(Some(AgentSnapshot {
             record: agent,
@@ -735,12 +774,14 @@ impl AgentWatcher {
 
         Ok(all_events
             .into_iter()
-            .filter(|e| matches!(
-                e,
-                WatchEvent::AgentExited { .. } |
-                WatchEvent::Error { .. } |
-                WatchEvent::WaitingForInput { .. }
-            ))
+            .filter(|e| {
+                matches!(
+                    e,
+                    WatchEvent::AgentExited { .. }
+                        | WatchEvent::Error { .. }
+                        | WatchEvent::WaitingForInput { .. }
+                )
+            })
             .collect())
     }
 
@@ -792,27 +833,52 @@ impl Default for AgentWatcher {
 /// 格式化 WatchEvent 为人类可读的通知消息
 pub fn format_watch_event(event: &WatchEvent) -> String {
     match event {
-        WatchEvent::AgentExited { agent_id, project_path } => {
+        WatchEvent::AgentExited {
+            agent_id,
+            project_path,
+        } => {
             format!("✅ Agent 退出: {} ({})", agent_id, project_path)
         }
-        WatchEvent::ToolUse { agent_id, tool_name, tool_target, .. } => {
+        WatchEvent::ToolUse {
+            agent_id,
+            tool_name,
+            tool_target,
+            ..
+        } => {
             if let Some(target) = tool_target {
                 format!("🔧 {} 执行: {} {}", agent_id, tool_name, target)
             } else {
                 format!("🔧 {} 执行: {}", agent_id, tool_name)
             }
         }
-        WatchEvent::ToolUseBatch { agent_id, tools, .. } => {
+        WatchEvent::ToolUseBatch {
+            agent_id, tools, ..
+        } => {
             format!("🔧 {} 执行: {}", agent_id, tools.join(", "))
         }
-        WatchEvent::Error { agent_id, message, .. } => {
+        WatchEvent::Error {
+            agent_id, message, ..
+        } => {
             let preview = crate::infra::truncate_str(message, 97);
             format!("❌ {} 错误: {}", agent_id, preview)
         }
-        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required } => {
+        WatchEvent::WaitingForInput {
+            agent_id,
+            pattern_type,
+            context,
+            dedup_key,
+            is_decision_required,
+        } => {
             let preview = crate::infra::truncate_str(context, 197);
             let decision_mark = if *is_decision_required { "⚠️" } else { "" };
-            format!("⏸️ {} 等待输入 ({}){} [key:{}]:\n{}", agent_id, pattern_type, decision_mark, &dedup_key[..8.min(dedup_key.len())], preview)
+            format!(
+                "⏸️ {} 等待输入 ({}){} [key:{}]:\n{}",
+                agent_id,
+                pattern_type,
+                decision_mark,
+                &dedup_key[..8.min(dedup_key.len())],
+                preview
+            )
         }
         WatchEvent::AgentResumed { agent_id } => {
             format!("▶️ {} 继续执行", agent_id)
@@ -891,12 +957,14 @@ mod tests {
 
         let critical: Vec<_> = events
             .into_iter()
-            .filter(|e| matches!(
-                e,
-                WatchEvent::AgentExited { .. } |
-                WatchEvent::Error { .. } |
-                WatchEvent::WaitingForInput { .. }
-            ))
+            .filter(|e| {
+                matches!(
+                    e,
+                    WatchEvent::AgentExited { .. }
+                        | WatchEvent::Error { .. }
+                        | WatchEvent::WaitingForInput { .. }
+                )
+            })
             .collect();
 
         assert_eq!(critical.len(), 2);
@@ -937,8 +1005,8 @@ mod tests {
     fn test_stability_state_is_stable() {
         let state = StabilityState::new(12345, 1000);
         assert!(!state.is_stable(1005, 6)); // 5 secs, not stable
-        assert!(state.is_stable(1006, 6));  // 6 secs, stable
-        assert!(state.is_stable(1010, 6));  // 10 secs, stable
+        assert!(state.is_stable(1006, 6)); // 6 secs, stable
+        assert!(state.is_stable(1010, 6)); // 10 secs, stable
     }
 
     // === HookEventTracker tests ===
@@ -1071,7 +1139,9 @@ mod tests {
 
         // Record old hook event (more than 5 minutes ago)
         let now = AgentWatcher::current_timestamp();
-        watcher.hook_tracker.record_hook("test-agent", now.saturating_sub(400)); // 400 seconds ago
+        watcher
+            .hook_tracker
+            .record_hook("test-agent", now.saturating_sub(400)); // 400 seconds ago
 
         // Old hook event - should poll (hooks seem inactive)
         assert!(watcher.should_poll(&agent));

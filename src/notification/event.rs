@@ -49,9 +49,7 @@ pub enum NotificationEventType {
     /// Agent 退出
     AgentExited,
     /// 错误
-    Error {
-        message: String,
-    },
+    Error { message: String },
     /// 停止
     Stop,
     /// 会话开始
@@ -298,7 +296,11 @@ mod tests {
         let event = NotificationEvent::waiting_for_input("cam-456", "ClaudePrompt");
 
         assert_eq!(event.agent_id, "cam-456");
-        if let NotificationEventType::WaitingForInput { pattern_type, is_decision_required } = &event.event_type {
+        if let NotificationEventType::WaitingForInput {
+            pattern_type,
+            is_decision_required,
+        } = &event.event_type
+        {
             assert_eq!(pattern_type, "ClaudePrompt");
             assert!(!is_decision_required);
         } else {
@@ -382,8 +384,7 @@ mod tests {
         assert!(event1.needs_reply());
 
         // PermissionRequest needs reply
-        let event2 =
-            NotificationEvent::permission_request("cam-2", "Bash", serde_json::json!({}));
+        let event2 = NotificationEvent::permission_request("cam-2", "Bash", serde_json::json!({}));
         assert!(event2.needs_reply());
 
         // idle_prompt notification needs reply
@@ -448,10 +449,7 @@ mod tests {
 
         assert_eq!(event.agent_id, "cam-builder");
         assert_eq!(event.project_path, Some("/workspace/test".to_string()));
-        assert_eq!(
-            event.terminal_snapshot,
-            Some("error output".to_string())
-        );
+        assert_eq!(event.terminal_snapshot, Some("error output".to_string()));
     }
 
     #[test]
@@ -485,7 +483,10 @@ mod tests {
         let deserialized: NotificationEvent = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.agent_id, "cam-ser");
-        assert_eq!(deserialized.project_path, Some("/workspace/project".to_string()));
+        assert_eq!(
+            deserialized.project_path,
+            Some("/workspace/project".to_string())
+        );
     }
 
     #[test]

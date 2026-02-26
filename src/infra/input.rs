@@ -93,13 +93,15 @@ impl InputWaitDetector {
                 }
             } else {
                 // 输出有变化，更新记录
-                self.last_outputs.insert(session_name.to_string(), output.to_string());
+                self.last_outputs
+                    .insert(session_name.to_string(), output.to_string());
                 self.last_change_times.insert(session_name.to_string(), now);
                 false
             }
         } else {
             // 首次检测，记录输出
-            self.last_outputs.insert(session_name.to_string(), output.to_string());
+            self.last_outputs
+                .insert(session_name.to_string(), output.to_string());
             self.last_change_times.insert(session_name.to_string(), now);
             false
         };

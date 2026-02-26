@@ -293,8 +293,11 @@ mod tests {
         }
 
         fn send(&self, _message: &NotificationMessage) -> Result<SendResult> {
-            self.send_attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            let remaining = self.failures_remaining.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+            self.send_attempts
+                .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let remaining = self
+                .failures_remaining
+                .fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
             if remaining > 0 {
                 Ok(SendResult::Failed("transient error".to_string()))
             } else {

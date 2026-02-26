@@ -1,8 +1,8 @@
 //! infra 模块测试 - TDD 先写测试
 
-use code_agent_monitor::infra::{TmuxManager, ProcessScanner};
-use code_agent_monitor::infra::jsonl::{JsonlParser, JsonlEvent};
 use code_agent_monitor::infra::input::{InputWaitDetector, InputWaitResult};
+use code_agent_monitor::infra::jsonl::{JsonlEvent, JsonlParser};
+use code_agent_monitor::infra::{ProcessScanner, TmuxManager};
 
 #[test]
 fn test_infra_module_exports_tmux_manager() {

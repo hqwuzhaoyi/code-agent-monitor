@@ -2,21 +2,18 @@
 //!
 //! 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)
 
-use clap::{Parser, Subcommand};
-use tracing::{info, warn, error, debug};
-use tracing_subscriber::{fmt, EnvFilter};
-use code_agent_monitor::{
-    ProcessScanner, SessionManager, McpServer, Watcher, AgentManager, StartAgentRequest,
-    AgentWatcher, WatchEvent, OpenclawNotifier, WatcherDaemon, SendResult, TmuxManager,
-    discover_teams, get_team_members,
-    list_tasks, list_team_names,
-    TeamBridge, InboxMessage, TeamOrchestrator,
-    ConversationStateManager, ReplyResult, BatchFilter, RiskLevel,
-    NotificationEvent, NotificationEventType,
-    LaunchdService,
-    cli::{CodexNotifyArgs, SetupArgs, StartArgs},
-};
 use anyhow::Result;
+use clap::{Parser, Subcommand};
+use code_agent_monitor::{
+    cli::{CodexNotifyArgs, SetupArgs, StartArgs},
+    discover_teams, get_team_members, list_tasks, list_team_names, AgentManager, AgentWatcher,
+    BatchFilter, ConversationStateManager, InboxMessage, LaunchdService, McpServer,
+    NotificationEvent, NotificationEventType, OpenclawNotifier, ProcessScanner, ReplyResult,
+    RiskLevel, SendResult, SessionManager, StartAgentRequest, TeamBridge, TeamOrchestrator,
+    TmuxManager, WatchEvent, Watcher, WatcherDaemon,
+};
+use tracing::{debug, error, info, warn};
+use tracing_subscriber::{fmt, EnvFilter};
 
 #[derive(Parser)]
 #[command(name = "cam")]
@@ -310,8 +307,8 @@ enum ServiceAction {
 
 /// Record hook event timestamp for cross-process coordination with watcher
 fn record_hook_event(agent_id: &str) -> Result<()> {
-    use std::time::{SystemTime, UNIX_EPOCH};
     use std::collections::HashMap;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     let hook_file = dirs::home_dir()
         .unwrap_or_else(|| std::path::PathBuf::from("."))
@@ -356,7 +353,7 @@ async fn main() -> Result<()> {
     // 设置 NO_PROXY 绕过所有代理
     env::set_var("NO_PROXY", "*");
     env::set_var("no_proxy", "*");
-    
+
     // 初始化 tracing 日志系统
     // 通过 RUST_LOG 环境变量控制日志级别，默认为 info
     // 例如: RUST_LOG=debug cam watch-daemon
@@ -379,14 +376,16 @@ async fn main() -> Result<()> {
         Commands::List { json } => {
             let scanner = ProcessScanner::new();
             let agents = scanner.scan_agents()?;
-            
+
             if json {
                 println!("{}", serde_json::to_string_pretty(&agents)?);
             } else {
                 println!("发现 {} 个代理进程:\n", agents.len());
                 for agent in agents {
-                    println!("  PID: {} | 类型: {} | 工作目录: {}", 
-                        agent.pid, agent.agent_type, agent.working_dir);
+                    println!(
+                        "  PID: {} | 类型: {} | 工作目录: {}",
+                        agent.pid, agent.agent_type, agent.working_dir
+                    );
                 }
             }
         }
@@ -410,14 +409,16 @@ async fn main() -> Result<()> {
         Commands::Sessions { json } => {
             let manager = SessionManager::new();
             let sessions = manager.list_sessions()?;
-            
+
             if json {
                 println!("{}", serde_json::to_string_pretty(&sessions)?);
             } else {
                 println!("发现 {} 个会话:\n", sessions.len());
                 for session in sessions {
-                    println!("  ID: {} | 项目: {} | 状态: {}", 
-                        session.id, session.project_path, session.status);
+                    println!(
+                        "  ID: {} | 项目: {} | 状态: {}",
+                        session.id, session.project_path, session.status
+                    );
                 }
             }
         }
@@ -425,7 +426,8 @@ async fn main() -> Result<()> {
             let session_manager = SessionManager::new();
 
             // 获取会话信息以获取 project_path
-            let session = session_manager.get_session(&session_id)?
+            let session = session_manager
+                .get_session(&session_id)?
                 .ok_or_else(|| anyhow::anyhow!("会话 {} 不存在", session_id))?;
 
             let project_path = if session.project_path.is_empty() {
@@ -458,7 +460,10 @@ async fn main() -> Result<()> {
             println!("已在 tmux 中恢复会话");
             println!("agent_id: {}", response.agent_id);
             println!("tmux_session: {}", final_tmux_session);
-            println!("查看输出: /opt/homebrew/bin/tmux attach -t {}", final_tmux_session);
+            println!(
+                "查看输出: /opt/homebrew/bin/tmux attach -t {}",
+                final_tmux_session
+            );
         }
         Commands::Kill { pid } => {
             let scanner = ProcessScanner::new();
@@ -493,7 +498,8 @@ async fn main() -> Result<()> {
 
             let daemon = WatcherDaemon::new();
             let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
-                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                Some(config) => OpenclawNotifier::with_webhook(config)
+                    .unwrap_or_else(|_| OpenclawNotifier::new()),
                 None => OpenclawNotifier::new(),
             };
             let mut watcher = AgentWatcher::new();
@@ -516,7 +522,10 @@ async fn main() -> Result<()> {
                     }
                     Err(e) => {
                         consecutive_errors += 1;
-                        eprintln!("❌ 获取 agent 列表失败 ({}/{}): {}", consecutive_errors, MAX_CONSECUTIVE_ERRORS, e);
+                        eprintln!(
+                            "❌ 获取 agent 列表失败 ({}/{}): {}",
+                            consecutive_errors, MAX_CONSECUTIVE_ERRORS, e
+                        );
                         if consecutive_errors >= MAX_CONSECUTIVE_ERRORS {
                             eprintln!("❌ 连续错误次数过多，watcher 停止");
                             daemon.remove_pid()?;
@@ -560,24 +569,43 @@ async fn main() -> Result<()> {
                 // 只处理关键事件
                 for event in events {
                     match &event {
-                        WatchEvent::AgentExited { agent_id, project_path } => {
+                        WatchEvent::AgentExited {
+                            agent_id,
+                            project_path,
+                        } => {
                             info!(agent_id = %agent_id, "Agent exited, sending notification");
                             let notification_event = NotificationEvent::agent_exited(agent_id)
                                 .with_project_path(project_path.clone());
                             match notifier.send_notification_event(&notification_event) {
-                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
-                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
+                                Ok(result) => {
+                                    info!(agent_id = %agent_id, result = ?result, "Notification result")
+                                }
+                                Err(e) => {
+                                    error!(agent_id = %agent_id, error = %e, "Notification failed")
+                                }
                             }
                         }
-                        WatchEvent::Error { agent_id, message, .. } => {
+                        WatchEvent::Error {
+                            agent_id, message, ..
+                        } => {
                             info!(agent_id = %agent_id, message = %message, "Error detected, sending notification");
                             let notification_event = NotificationEvent::error(agent_id, message);
                             match notifier.send_notification_event(&notification_event) {
-                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
-                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
+                                Ok(result) => {
+                                    info!(agent_id = %agent_id, result = ?result, "Notification result")
+                                }
+                                Err(e) => {
+                                    error!(agent_id = %agent_id, error = %e, "Notification failed")
+                                }
                             }
                         }
-                        WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required } => {
+                        WatchEvent::WaitingForInput {
+                            agent_id,
+                            pattern_type,
+                            context,
+                            dedup_key,
+                            is_decision_required,
+                        } => {
                             info!(
                                 agent_id = %agent_id,
                                 pattern_type = %pattern_type,
@@ -586,27 +614,46 @@ async fn main() -> Result<()> {
                                 "Waiting for input detected, sending notification"
                             );
                             // 从 agent_manager 获取项目路径
-                            let project_path = watcher.agent_manager()
+                            let project_path = watcher
+                                .agent_manager()
                                 .get_agent(agent_id)
                                 .ok()
                                 .flatten()
                                 .map(|a| a.project_path)
                                 .unwrap_or_default();
-                            let notification_event = NotificationEvent::waiting_for_input_with_decision(agent_id, pattern_type, *is_decision_required)
+                            let notification_event =
+                                NotificationEvent::waiting_for_input_with_decision(
+                                    agent_id,
+                                    pattern_type,
+                                    *is_decision_required,
+                                )
                                 .with_project_path(project_path)
                                 .with_terminal_snapshot(context.clone())
                                 .with_dedup_key(dedup_key.clone());
                             match notifier.send_notification_event(&notification_event) {
-                                Ok(result) => info!(agent_id = %agent_id, result = ?result, "Notification result"),
-                                Err(e) => error!(agent_id = %agent_id, error = %e, "Notification failed"),
+                                Ok(result) => {
+                                    info!(agent_id = %agent_id, result = ?result, "Notification result")
+                                }
+                                Err(e) => {
+                                    error!(agent_id = %agent_id, error = %e, "Notification failed")
+                                }
                             }
                         }
-                        WatchEvent::ToolUse { agent_id, tool_name, tool_target, .. } => {
+                        WatchEvent::ToolUse {
+                            agent_id,
+                            tool_name,
+                            tool_target,
+                            ..
+                        } => {
                             debug!(agent_id = %agent_id, tool_name = %tool_name, "Tool use detected");
                             let context = tool_target.as_deref().unwrap_or("");
                             match notifier.send_event(agent_id, "ToolUse", tool_name, context) {
-                                Ok(result) => debug!(agent_id = %agent_id, result = ?result, "Notification result"),
-                                Err(e) => warn!(agent_id = %agent_id, error = %e, "Notification failed"),
+                                Ok(result) => {
+                                    debug!(agent_id = %agent_id, result = ?result, "Notification result")
+                                }
+                                Err(e) => {
+                                    warn!(agent_id = %agent_id, error = %e, "Notification failed")
+                                }
                             }
                         }
                         _ => {} // 忽略其他事件 (ToolUseBatch, AgentResumed)
@@ -616,25 +663,46 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
-        Commands::WatchTrigger { agent_id, force, no_dedup } => {
+        Commands::WatchTrigger {
+            agent_id,
+            force,
+            no_dedup,
+        } => {
             let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
-                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                Some(config) => OpenclawNotifier::with_webhook(config)
+                    .unwrap_or_else(|_| OpenclawNotifier::new()),
                 None => OpenclawNotifier::new(),
             };
             let mut watcher = AgentWatcher::new();
             match watcher.trigger_wait_check(&agent_id, force)? {
-                Some(WatchEvent::WaitingForInput { agent_id, pattern_type, context, dedup_key, is_decision_required }) => {
-                    let project_path = watcher.agent_manager()
+                Some(WatchEvent::WaitingForInput {
+                    agent_id,
+                    pattern_type,
+                    context,
+                    dedup_key,
+                    is_decision_required,
+                }) => {
+                    let project_path = watcher
+                        .agent_manager()
                         .get_agent(&agent_id)
                         .ok()
                         .flatten()
                         .map(|a| a.project_path)
                         .unwrap_or_default();
-                    let event = NotificationEvent::waiting_for_input_with_decision(&agent_id, &pattern_type, is_decision_required)
-                        .with_project_path(project_path)
-                        .with_terminal_snapshot(context)
-                        .with_dedup_key(dedup_key);
-                    let notification_event = if no_dedup { event.with_skip_dedup(true) } else { event };
+                    let event = NotificationEvent::waiting_for_input_with_decision(
+                        &agent_id,
+                        &pattern_type,
+                        is_decision_required,
+                    )
+                    .with_project_path(project_path)
+                    .with_terminal_snapshot(context)
+                    .with_dedup_key(dedup_key);
+                    // --force 或 --no-dedup 都跳过去重，避免手动触发创建 lock 影响 watcher 自动检测
+                    let notification_event = if force || no_dedup {
+                        event.with_skip_dedup(true)
+                    } else {
+                        event
+                    };
                     match notifier.send_notification_event(&notification_event) {
                         Ok(result) => println!("Notification sent: {:?}", result),
                         Err(e) => eprintln!("Notification failed: {}", e),
@@ -646,8 +714,14 @@ async fn main() -> Result<()> {
             }
         }
         #[allow(unused_variables)]
-        Commands::Notify { event, agent_id, dry_run, no_ai, delegation } => {
-            use std::fs::{OpenOptions, create_dir_all};
+        Commands::Notify {
+            event,
+            agent_id,
+            dry_run,
+            no_ai,
+            delegation,
+        } => {
+            use std::fs::{create_dir_all, OpenOptions};
             use std::io::Write;
 
             let log_dir = dirs::home_dir()
@@ -675,11 +749,13 @@ async fn main() -> Result<()> {
 
             // 解析 JSON 获取 session_id 和 cwd
             let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
-            let session_id = json.as_ref()
+            let session_id = json
+                .as_ref()
                 .and_then(|j| j.get("session_id"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
-            let cwd = json.as_ref()
+            let cwd = json
+                .as_ref()
                 .and_then(|j| j.get("cwd"))
                 .and_then(|v| v.as_str())
                 .map(|s| s.to_string());
@@ -691,28 +767,52 @@ async fn main() -> Result<()> {
                 if let (Some(ref sid), Some(ref cwd_path)) = (&session_id, &cwd) {
                     match agent_manager.update_session_id_by_cwd(cwd_path, sid) {
                         Ok(true) => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ✅ Mapped session_id {} to agent by cwd {}", timestamp, sid, cwd_path);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ✅ Mapped session_id {} to agent by cwd {}",
+                                    timestamp, sid, cwd_path
+                                );
                             }
                         }
                         Ok(false) => {
                             // 没有匹配的 CAM agent，注册为外部会话
                             match agent_manager.register_external_session(sid, cwd_path) {
                                 Ok(ext_id) => {
-                                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                        let _ = writeln!(file, "[{}] ✅ Registered external session {} as {}", timestamp, sid, ext_id);
+                                    if let Ok(mut file) =
+                                        OpenOptions::new().create(true).append(true).open(&log_path)
+                                    {
+                                        let _ = writeln!(
+                                            file,
+                                            "[{}] ✅ Registered external session {} as {}",
+                                            timestamp, sid, ext_id
+                                        );
                                     }
                                 }
                                 Err(e) => {
-                                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                        let _ = writeln!(file, "[{}] ❌ Failed to register external session: {}", timestamp, e);
+                                    if let Ok(mut file) =
+                                        OpenOptions::new().create(true).append(true).open(&log_path)
+                                    {
+                                        let _ = writeln!(
+                                            file,
+                                            "[{}] ❌ Failed to register external session: {}",
+                                            timestamp, e
+                                        );
                                     }
                                 }
                             }
                         }
                         Err(e) => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ❌ Failed to map session_id: {}", timestamp, e);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ❌ Failed to map session_id: {}",
+                                    timestamp, e
+                                );
                             }
                         }
                     }
@@ -733,12 +833,14 @@ async fn main() -> Result<()> {
                         // 找不到 agent，自动注册为外部会话（不仅限于 session_start 事件）
                         match agent_manager.register_external_session(sid, cwd_path) {
                             Ok(ext_id) => {
-                                if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                                if let Ok(mut file) =
+                                    OpenOptions::new().create(true).append(true).open(&log_path)
+                                {
                                     let _ = writeln!(file, "[{}] ✅ Auto-registered external session {} as {} (event: {})", timestamp, sid, ext_id, event);
                                 }
                                 ext_id
                             }
-                            Err(_) => sid.clone() // 注册失败，回退到 session_id
+                            Err(_) => sid.clone(), // 注册失败，回退到 session_id
                         }
                     }
                 } else {
@@ -753,8 +855,11 @@ async fn main() -> Result<()> {
 
             // 记录 hook 触发日志
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                let _ = writeln!(file, "[{}] Hook triggered: event={}, agent_id={}, session_id={:?}",
-                    timestamp, event, resolved_agent_id, session_id);
+                let _ = writeln!(
+                    file,
+                    "[{}] Hook triggered: event={}, agent_id={}, session_id={:?}",
+                    timestamp, event, resolved_agent_id, session_id
+                );
             }
 
             if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
@@ -767,7 +872,8 @@ async fn main() -> Result<()> {
                 "Error" | "WaitingForInput" => true,
                 "stop" | "session_end" | "AgentExited" => true,
                 "notification" => {
-                    let notification_type = json.as_ref()
+                    let notification_type = json
+                        .as_ref()
                         .and_then(|j| j.get("notification_type"))
                         .and_then(|v| v.as_str())
                         .unwrap_or("");
@@ -782,7 +888,8 @@ async fn main() -> Result<()> {
             // 优先使用 stdin 中的终端快照（测试命令可能通过管道传入）
             let terminal_snapshot = if needs_snapshot {
                 // 1. 检查 JSON 中的 terminal_snapshot 字段
-                if let Some(snapshot) = json.as_ref()
+                if let Some(snapshot) = json
+                    .as_ref()
                     .and_then(|j| j.get("terminal_snapshot"))
                     .and_then(|v| v.as_str())
                     .filter(|s| !s.is_empty())
@@ -795,7 +902,9 @@ async fn main() -> Result<()> {
                 } else if let Ok(logs) = agent_manager.get_logs(&resolved_agent_id, 50) {
                     // 通过 resolved_agent_id 直接获取
                     Some(logs)
-                } else if let Ok(Some(agent)) = agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or("")) {
+                } else if let Ok(Some(agent)) =
+                    agent_manager.find_agent_by_session_id(session_id.as_deref().unwrap_or(""))
+                {
                     // 尝试通过 session_id 查找 agent
                     agent_manager.get_logs(&agent.agent_id, 50).ok()
                 } else if let Some(ref cwd_path) = cwd {
@@ -815,7 +924,13 @@ async fn main() -> Result<()> {
             // 记录终端快照到日志（用于调试）
             if let Some(ref snapshot) = terminal_snapshot {
                 if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                    let _ = writeln!(file, "[{}] Terminal snapshot ({} chars):\n{}", timestamp, snapshot.len(), snapshot);
+                    let _ = writeln!(
+                        file,
+                        "[{}] Terminal snapshot ({} chars):\n{}",
+                        timestamp,
+                        snapshot.len(),
+                        snapshot
+                    );
                 }
             }
 
@@ -828,29 +943,39 @@ async fn main() -> Result<()> {
                         is_decision_required: false,
                     },
                     "permission_request" => {
-                        let tool_name = json.as_ref()
+                        let tool_name = json
+                            .as_ref()
                             .and_then(|j| j.get("tool_name"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("unknown")
                             .to_string();
-                        let tool_input = json.as_ref()
+                        let tool_input = json
+                            .as_ref()
                             .and_then(|j| j.get("tool_input"))
                             .cloned()
                             .unwrap_or(serde_json::json!({}));
-                        NotificationEventType::PermissionRequest { tool_name, tool_input }
+                        NotificationEventType::PermissionRequest {
+                            tool_name,
+                            tool_input,
+                        }
                     }
                     "notification" => {
-                        let notification_type = json.as_ref()
+                        let notification_type = json
+                            .as_ref()
                             .and_then(|j| j.get("notification_type"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        let message = json.as_ref()
+                        let message = json
+                            .as_ref()
                             .and_then(|j| j.get("message"))
                             .and_then(|v| v.as_str())
                             .unwrap_or("")
                             .to_string();
-                        NotificationEventType::Notification { notification_type, message }
+                        NotificationEventType::Notification {
+                            notification_type,
+                            message,
+                        }
                     }
                     "AgentExited" => NotificationEventType::AgentExited,
                     "Error" => NotificationEventType::Error {
@@ -892,46 +1017,89 @@ async fn main() -> Result<()> {
                     let end_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                     match &result {
                         SendResult::Sent => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ✅ Notification sent: {} {}", end_timestamp, event, resolved_agent_id);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ✅ Notification sent: {} {}",
+                                    end_timestamp, event, resolved_agent_id
+                                );
                             }
                             if dry_run {
-                                eprintln!("[DRY-RUN] 通知预览完成: {} - {}", resolved_agent_id, event);
+                                eprintln!(
+                                    "[DRY-RUN] 通知预览完成: {} - {}",
+                                    resolved_agent_id, event
+                                );
                             } else {
                                 eprintln!("已发送通知: {} - {}", resolved_agent_id, event);
                             }
                         }
                         SendResult::Skipped(reason) => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ⏭️ Notification skipped: {} {} ({})", end_timestamp, event, resolved_agent_id, reason);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ⏭️ Notification skipped: {} {} ({})",
+                                    end_timestamp, event, resolved_agent_id, reason
+                                );
                             }
                             if dry_run {
-                                eprintln!("[DRY-RUN] 通知已跳过: {} - {} ({})", resolved_agent_id, event, reason);
+                                eprintln!(
+                                    "[DRY-RUN] 通知已跳过: {} - {} ({})",
+                                    resolved_agent_id, event, reason
+                                );
                             }
                         }
                         SendResult::Failed(error) => {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ❌ Notification failed: {} {} ({})", end_timestamp, event, resolved_agent_id, error);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ❌ Notification failed: {} {} ({})",
+                                    end_timestamp, event, resolved_agent_id, error
+                                );
                             }
-                            eprintln!("通知发送失败: {} - {} ({})", resolved_agent_id, event, error);
+                            eprintln!(
+                                "通知发送失败: {} - {} ({})",
+                                resolved_agent_id, event, error
+                            );
                         }
                     }
 
                     // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
-                    if (event == "session_end" || event == "stop") && resolved_agent_id.starts_with("ext-") {
+                    if (event == "session_end" || event == "stop")
+                        && resolved_agent_id.starts_with("ext-")
+                    {
                         let cleanup_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                         if let Err(e) = agent_manager.remove_agent(&resolved_agent_id) {
-                            if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                                let _ = writeln!(file, "[{}] ⚠️ Failed to cleanup external session {}: {}", cleanup_timestamp, resolved_agent_id, e);
+                            if let Ok(mut file) =
+                                OpenOptions::new().create(true).append(true).open(&log_path)
+                            {
+                                let _ = writeln!(
+                                    file,
+                                    "[{}] ⚠️ Failed to cleanup external session {}: {}",
+                                    cleanup_timestamp, resolved_agent_id, e
+                                );
                             }
-                        } else if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
-                            let _ = writeln!(file, "[{}] ✅ Cleaned up external session {}", cleanup_timestamp, resolved_agent_id);
+                        } else if let Ok(mut file) =
+                            OpenOptions::new().create(true).append(true).open(&log_path)
+                        {
+                            let _ = writeln!(
+                                file,
+                                "[{}] ✅ Cleaned up external session {}",
+                                cleanup_timestamp, resolved_agent_id
+                            );
                         }
                     }
                 }
                 Err(e) => {
                     let err_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
-                    if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&log_path) {
+                    if let Ok(mut file) =
+                        OpenOptions::new().create(true).append(true).open(&log_path)
+                    {
                         let _ = writeln!(file, "[{}] ❌ Notification failed: {}", err_timestamp, e);
                     }
                     eprintln!("通知发送失败: {}", e);
@@ -961,25 +1129,25 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::TeamMembers { team, json } => {
-            match get_team_members(&team) {
-                Some(members) => {
-                    if json {
-                        println!("{}", serde_json::to_string_pretty(&members)?);
-                    } else {
-                        println!("Team '{}' 的成员 ({}):\n", team, members.len());
-                        for member in members {
-                            println!("  {} | ID: {} | 类型: {}",
-                                member.name, member.agent_id, member.agent_type);
-                        }
+        Commands::TeamMembers { team, json } => match get_team_members(&team) {
+            Some(members) => {
+                if json {
+                    println!("{}", serde_json::to_string_pretty(&members)?);
+                } else {
+                    println!("Team '{}' 的成员 ({}):\n", team, members.len());
+                    for member in members {
+                        println!(
+                            "  {} | ID: {} | 类型: {}",
+                            member.name, member.agent_id, member.agent_type
+                        );
                     }
                 }
-                None => {
-                    eprintln!("未找到 Team: {}", team);
-                    std::process::exit(1);
-                }
             }
-        }
+            None => {
+                eprintln!("未找到 Team: {}", team);
+                std::process::exit(1);
+            }
+        },
         Commands::Tasks { team, json } => {
             match team {
                 Some(team_name) => {
@@ -998,8 +1166,10 @@ async fn main() -> Result<()> {
                                 } else {
                                     format!(" [blocked by: {}]", task.blocked_by.join(", "))
                                 };
-                                println!("  #{} [{}] {} (owner: {}){}",
-                                    task.id, task.status, task.subject, owner_str, blocked_str);
+                                println!(
+                                    "  #{} [{}] {} (owner: {}){}",
+                                    task.id, task.status, task.subject, owner_str, blocked_str
+                                );
                             }
                         }
                     }
@@ -1016,8 +1186,10 @@ async fn main() -> Result<()> {
                                 println!("Team '{}' ({} 任务):", team_name, tasks.len());
                                 for task in tasks {
                                     let owner_str = task.owner.as_deref().unwrap_or("-");
-                                    println!("  #{} [{}] {} (owner: {})",
-                                        task.id, task.status, task.subject, owner_str);
+                                    println!(
+                                        "  #{} [{}] {} (owner: {})",
+                                        task.id, task.status, task.subject, owner_str
+                                    );
                                 }
                                 println!();
                             }
@@ -1026,7 +1198,11 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::TeamCreate { name, description, project } => {
+        Commands::TeamCreate {
+            name,
+            description,
+            project,
+        } => {
             let bridge = TeamBridge::new();
             let desc = description.as_deref().unwrap_or("Created by CAM");
             let proj = project.as_deref().unwrap_or(".");
@@ -1074,9 +1250,15 @@ async fn main() -> Result<()> {
                         println!("  成员: {} 人", status.members.len());
                         for member in &status.members {
                             let active = if member.is_active { "活跃" } else { "空闲" };
-                            println!("    - {} ({}) [未读: {}]", member.name, active, member.unread_count);
+                            println!(
+                                "    - {} ({}) [未读: {}]",
+                                member.name, active, member.unread_count
+                            );
                         }
-                        println!("  任务: {} 待处理, {} 已完成", status.pending_tasks, status.completed_tasks);
+                        println!(
+                            "  任务: {} 待处理, {} 已完成",
+                            status.pending_tasks, status.completed_tasks
+                        );
                         println!("  未读消息: {}", status.unread_messages);
                     }
                 }
@@ -1086,7 +1268,12 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Inbox { team, member, unread, json } => {
+        Commands::Inbox {
+            team,
+            member,
+            unread,
+            json,
+        } => {
             let bridge = TeamBridge::new();
 
             // 如果指定了成员，只读取该成员的 inbox
@@ -1103,12 +1290,23 @@ async fn main() -> Result<()> {
                             println!("{}", serde_json::to_string_pretty(&filtered)?);
                         } else {
                             if filtered.is_empty() {
-                                println!("{}@{} 没有{}消息", member_name, team, if unread { "未读" } else { "" });
+                                println!(
+                                    "{}@{} 没有{}消息",
+                                    member_name,
+                                    team,
+                                    if unread { "未读" } else { "" }
+                                );
                             } else {
                                 println!("{}@{} 的消息 ({}):\n", member_name, team, filtered.len());
                                 for msg in filtered {
                                     let read_mark = if msg.read { "✓" } else { "●" };
-                                    println!("{} [{}] {}: {}", read_mark, msg.timestamp.format("%H:%M"), msg.from, msg.text);
+                                    println!(
+                                        "{} [{}] {}: {}",
+                                        read_mark,
+                                        msg.timestamp.format("%H:%M"),
+                                        msg.from,
+                                        msg.text
+                                    );
                                 }
                             }
                         }
@@ -1131,10 +1329,16 @@ async fn main() -> Result<()> {
                                 };
 
                                 if !filtered.is_empty() {
-                                    println!("{}@{} ({} 条):", member_status.name, team, filtered.len());
+                                    println!(
+                                        "{}@{} ({} 条):",
+                                        member_status.name,
+                                        team,
+                                        filtered.len()
+                                    );
                                     for msg in filtered.iter().take(3) {
                                         let read_mark = if msg.read { "✓" } else { "●" };
-                                        let text_preview = code_agent_monitor::truncate_str(&msg.text, 50);
+                                        let text_preview =
+                                            code_agent_monitor::truncate_str(&msg.text, 50);
                                         println!("  {} {}: {}", read_mark, msg.from, text_preview);
                                     }
                                     if filtered.len() > 3 {
@@ -1152,7 +1356,12 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::InboxSend { team, member, message, from } => {
+        Commands::InboxSend {
+            team,
+            member,
+            message,
+            from,
+        } => {
             let bridge = TeamBridge::new();
 
             let msg = InboxMessage {
@@ -1180,7 +1389,8 @@ async fn main() -> Result<()> {
 
             let bridge = TeamBridge::new();
             let notifier = match code_agent_monitor::notification::load_webhook_config_from_file() {
-                Some(config) => OpenclawNotifier::with_webhook(config).unwrap_or_else(|_| OpenclawNotifier::new()),
+                Some(config) => OpenclawNotifier::with_webhook(config)
+                    .unwrap_or_else(|_| OpenclawNotifier::new()),
                 None => OpenclawNotifier::new(),
             };
 
@@ -1193,31 +1403,38 @@ async fn main() -> Result<()> {
             println!("开始监控 Team '{}' (间隔: {}秒)", team, interval);
             println!("按 Ctrl+C 停止\n");
 
-            let mut last_message_counts: std::collections::HashMap<String, usize> = std::collections::HashMap::new();
+            let mut last_message_counts: std::collections::HashMap<String, usize> =
+                std::collections::HashMap::new();
 
             loop {
                 if let Ok(status) = bridge.get_team_status(&team) {
                     for member in &status.members {
                         if let Ok(messages) = bridge.read_inbox(&team, &member.name) {
-                            let last_count = last_message_counts.get(&member.name).copied().unwrap_or(0);
+                            let last_count =
+                                last_message_counts.get(&member.name).copied().unwrap_or(0);
 
                             if messages.len() > last_count {
                                 // 有新消息
                                 for msg in messages.iter().skip(last_count) {
-                                    println!("[{}] {}@{}: {}",
+                                    println!(
+                                        "[{}] {}@{}: {}",
                                         chrono::Local::now().format("%H:%M:%S"),
-                                        msg.from, member.name,
+                                        msg.from,
+                                        member.name,
                                         code_agent_monitor::truncate_str(&msg.text, 80)
                                     );
 
                                     // 检查是否需要通知
                                     let text_lower = msg.text.to_lowercase();
-                                    if text_lower.contains("error") || text_lower.contains("错误") || text_lower.contains("permission") {
+                                    if text_lower.contains("error")
+                                        || text_lower.contains("错误")
+                                        || text_lower.contains("permission")
+                                    {
                                         let _ = notifier.send_event(
                                             &format!("{}@{}", member.name, team),
                                             "inbox_message",
                                             &msg.from,
-                                            &msg.text
+                                            &msg.text,
                                         );
                                     }
                                 }
@@ -1231,7 +1448,13 @@ async fn main() -> Result<()> {
                 sleep(Duration::from_secs(interval)).await;
             }
         }
-        Commands::TeamSpawn { team, name, agent_type, prompt, json } => {
+        Commands::TeamSpawn {
+            team,
+            name,
+            agent_type,
+            prompt,
+            json,
+        } => {
             let orchestrator = TeamOrchestrator::new();
 
             match orchestrator.spawn_agent(&team, &name, &agent_type, prompt.as_deref()) {
@@ -1243,7 +1466,10 @@ async fn main() -> Result<()> {
                         println!("  成员名称: {}", result.member_name);
                         println!("  agent_id: {}", result.agent_id);
                         println!("  tmux_session: {}", result.tmux_session);
-                        println!("\n查看输出: /opt/homebrew/bin/tmux attach -t {}", result.tmux_session);
+                        println!(
+                            "\n查看输出: /opt/homebrew/bin/tmux attach -t {}",
+                            result.tmux_session
+                        );
                     }
                 }
                 Err(e) => {
@@ -1261,8 +1487,14 @@ async fn main() -> Result<()> {
                         println!("{}", serde_json::to_string_pretty(&progress)?);
                     } else {
                         println!("Team: {}", progress.team_name);
-                        println!("  成员: {} 总计, {} 活跃", progress.total_members, progress.active_members);
-                        println!("  任务: {} 待处理, {} 已完成", progress.pending_tasks, progress.completed_tasks);
+                        println!(
+                            "  成员: {} 总计, {} 活跃",
+                            progress.total_members, progress.active_members
+                        );
+                        println!(
+                            "  任务: {} 待处理, {} 已完成",
+                            progress.pending_tasks, progress.completed_tasks
+                        );
                         if !progress.waiting_for_input.is_empty() {
                             println!("  等待输入: {}", progress.waiting_for_input.join(", "));
                         }
@@ -1301,7 +1533,11 @@ async fn main() -> Result<()> {
                             println!("待处理的确认请求 ({}):\n", pending.len());
                             for (i, conf) in pending.iter().enumerate() {
                                 println!("  {}. [{}] {}", i + 1, conf.agent_id, conf.context);
-                                println!("     ID: {} | 创建时间: {}", conf.id, conf.created_at.format("%H:%M:%S"));
+                                println!(
+                                    "     ID: {} | 创建时间: {}",
+                                    conf.id,
+                                    conf.created_at.format("%H:%M:%S")
+                                );
                             }
                         }
                     }
@@ -1312,7 +1548,13 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Reply { reply, target, all, agent, risk } => {
+        Commands::Reply {
+            reply,
+            target,
+            all,
+            agent,
+            risk,
+        } => {
             let state_manager = ConversationStateManager::new();
 
             // Determine batch filter
@@ -1371,27 +1613,25 @@ async fn main() -> Result<()> {
             } else {
                 // Single reply mode (existing logic)
                 match state_manager.handle_reply(&reply, target.as_deref()) {
-                    Ok(result) => {
-                        match result {
-                            ReplyResult::Sent { agent_id, reply } => {
-                                println!("已发送回复 '{}' 到 {}", reply, agent_id);
-                            }
-                            ReplyResult::NeedSelection { options } => {
-                                println!("有多个待处理的确认，请指定目标：\n");
-                                for (i, opt) in options.iter().enumerate() {
-                                    println!("  {}. [{}] {}", i + 1, opt.agent_id, opt.context);
-                                }
-                                println!("\n使用 --target <agent_id> 指定目标，或使用 --all 批量处理");
-                            }
-                            ReplyResult::NoPending => {
-                                println!("没有待处理的确认请求");
-                            }
-                            ReplyResult::InvalidSelection(msg) => {
-                                eprintln!("无效的选择: {}", msg);
-                                std::process::exit(1);
-                            }
+                    Ok(result) => match result {
+                        ReplyResult::Sent { agent_id, reply } => {
+                            println!("已发送回复 '{}' 到 {}", reply, agent_id);
                         }
-                    }
+                        ReplyResult::NeedSelection { options } => {
+                            println!("有多个待处理的确认，请指定目标：\n");
+                            for (i, opt) in options.iter().enumerate() {
+                                println!("  {}. [{}] {}", i + 1, opt.agent_id, opt.context);
+                            }
+                            println!("\n使用 --target <agent_id> 指定目标，或使用 --all 批量处理");
+                        }
+                        ReplyResult::NoPending => {
+                            println!("没有待处理的确认请求");
+                        }
+                        ReplyResult::InvalidSelection(msg) => {
+                            eprintln!("无效的选择: {}", msg);
+                            std::process::exit(1);
+                        }
+                    },
                     Err(e) => {
                         eprintln!("发送回复失败: {}", e);
                         std::process::exit(1);
@@ -1399,8 +1639,11 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Tui { refresh_interval, no_notifications: _ } => {
-            use code_agent_monitor::tui::{App, init_terminal, restore_terminal, run};
+        Commands::Tui {
+            refresh_interval,
+            no_notifications: _,
+        } => {
+            use code_agent_monitor::tui::{init_terminal, restore_terminal, run, App};
 
             let mut terminal = init_terminal()?;
             let mut app = App::new();
@@ -1439,50 +1682,44 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                ServiceAction::Uninstall => {
-                    match service.uninstall() {
-                        Ok(_) => {
-                            println!("✅ CAM watcher 服务已卸载");
-                        }
-                        Err(e) => {
-                            eprintln!("❌ 卸载失败: {}", e);
-                            std::process::exit(1);
-                        }
+                ServiceAction::Uninstall => match service.uninstall() {
+                    Ok(_) => {
+                        println!("✅ CAM watcher 服务已卸载");
                     }
-                }
-                ServiceAction::Restart => {
-                    match service.restart() {
-                        Ok(_) => {
-                            println!("✅ CAM watcher 服务已重启");
-                        }
-                        Err(e) => {
-                            eprintln!("❌ 重启失败: {}", e);
-                            std::process::exit(1);
-                        }
+                    Err(e) => {
+                        eprintln!("❌ 卸载失败: {}", e);
+                        std::process::exit(1);
                     }
-                }
-                ServiceAction::Status => {
-                    match service.status() {
-                        Ok(status) => {
-                            if !status.installed {
-                                println!("⚪ 服务未安装");
-                                println!("   运行 'cam service install' 安装服务");
-                            } else if status.running {
-                                println!("🟢 服务运行中");
-                                if let Some(pid) = status.pid {
-                                    println!("   PID: {}", pid);
-                                }
-                            } else {
-                                println!("🔴 服务已安装但未运行");
-                                println!("   运行 'cam service restart' 启动服务");
+                },
+                ServiceAction::Restart => match service.restart() {
+                    Ok(_) => {
+                        println!("✅ CAM watcher 服务已重启");
+                    }
+                    Err(e) => {
+                        eprintln!("❌ 重启失败: {}", e);
+                        std::process::exit(1);
+                    }
+                },
+                ServiceAction::Status => match service.status() {
+                    Ok(status) => {
+                        if !status.installed {
+                            println!("⚪ 服务未安装");
+                            println!("   运行 'cam service install' 安装服务");
+                        } else if status.running {
+                            println!("🟢 服务运行中");
+                            if let Some(pid) = status.pid {
+                                println!("   PID: {}", pid);
                             }
-                        }
-                        Err(e) => {
-                            eprintln!("❌ 获取状态失败: {}", e);
-                            std::process::exit(1);
+                        } else {
+                            println!("🔴 服务已安装但未运行");
+                            println!("   运行 'cam service restart' 启动服务");
                         }
                     }
-                }
+                    Err(e) => {
+                        eprintln!("❌ 获取状态失败: {}", e);
+                        std::process::exit(1);
+                    }
+                },
                 ServiceAction::Logs { lines, follow } => {
                     let (stdout_log, stderr_log) = service.log_paths();
 

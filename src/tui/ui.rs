@@ -1,10 +1,10 @@
 //! TUI 渲染模块
 
+use crate::tui::{App, View};
 use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
-use crate::tui::{App, View};
 
 /// 渲染主界面
 pub fn render(app: &App, frame: &mut Frame) {
@@ -28,16 +28,20 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // 状态栏
-            Constraint::Min(10),    // 主区域
-            Constraint::Length(5),  // 通知
-            Constraint::Length(1),  // 底部栏（过滤输入或快捷键）
+            Constraint::Length(1), // 状态栏
+            Constraint::Min(10),   // 主区域
+            Constraint::Length(5), // 通知
+            Constraint::Length(1), // 底部栏（过滤输入或快捷键）
         ])
         .split(area);
 
     // 状态栏
     let status = if is_filtering {
-        format!(" CAM TUI │ Showing {} of {}", filtered_count, app.agents.len())
+        format!(
+            " CAM TUI │ Showing {} of {}",
+            filtered_count,
+            app.agents.len()
+        )
     } else {
         format!(" CAM TUI │ Agents: {}", app.agents.len())
     };
@@ -54,8 +58,8 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
     let main_area = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
-            Constraint::Percentage(30),  // Agent 列表
-            Constraint::Percentage(70),  // 终端预览
+            Constraint::Percentage(30), // Agent 列表
+            Constraint::Percentage(70), // 终端预览
         ])
         .split(vertical[1]);
 
@@ -75,8 +79,11 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
             .style(Style::default().bg(Color::Yellow).fg(Color::Black));
         frame.render_widget(filter_bar, vertical[3]);
     } else if is_filtering {
-        let filter_bar = Paragraph::new(format!(" Filter: {} │ [Esc] clear │ [/] edit ", filter_text))
-            .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
+        let filter_bar = Paragraph::new(format!(
+            " Filter: {} │ [Esc] clear │ [/] edit ",
+            filter_text
+        ))
+        .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
         frame.render_widget(filter_bar, vertical[3]);
     } else {
         let help = " [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
@@ -86,20 +93,28 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
 }
 
 /// 渲染 Agent 列表（使用预先过滤的结果）
-fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, filtered: &[&crate::tui::AgentItem]) {
+fn render_agent_list_with_filtered(
+    app: &App,
+    frame: &mut Frame,
+    area: Rect,
+    filtered: &[&crate::tui::AgentItem],
+) {
     let items: Vec<ListItem> = filtered
         .iter()
         .enumerate()
         .map(|(i, agent)| {
             let icon = agent.state.icon();
-            let selected = if i == app.selected_index { "→ " } else { "  " };
+            let selected = if i == app.selected_index {
+                "→ "
+            } else {
+                "  "
+            };
             let duration = chrono::Local::now()
                 .signed_duration_since(agent.started_at)
                 .num_minutes();
             let text = format!(
                 "{}{} {}\n   {} | {}\n   [{:?}] {}m",
-                selected, icon, agent.id, agent.agent_type, agent.project,
-                agent.state, duration
+                selected, icon, agent.id, agent.agent_type, agent.project, agent.state, duration
             );
             ListItem::new(text)
         })
@@ -119,18 +134,22 @@ fn render_agent_list_with_filtered(app: &App, frame: &mut Frame, area: Rect, fil
         Style::default()
     };
 
-    let list = List::new(items)
-        .block(Block::default()
+    let list = List::new(items).block(
+        Block::default()
             .borders(Borders::ALL)
             .title(title)
-            .border_style(border_style));
+            .border_style(border_style),
+    );
     frame.render_widget(list, area);
 }
 
 /// 渲染终端预览
 fn render_terminal_preview(app: &App, frame: &mut Frame, area: Rect) {
-    let preview = Paragraph::new(app.terminal_preview.as_str())
-        .block(Block::default().borders(Borders::ALL).title(" Terminal Preview "));
+    let preview = Paragraph::new(app.terminal_preview.as_str()).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Terminal Preview "),
+    );
     frame.render_widget(preview, area);
 }
 
@@ -160,8 +179,11 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL).title(" Notifications "));
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .title(" Notifications "),
+    );
     frame.render_widget(list, area);
 }
 
@@ -172,9 +194,9 @@ fn render_logs(app: &App, frame: &mut Frame) {
     let vertical = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1),  // 状态栏
-            Constraint::Min(5),     // 日志内容
-            Constraint::Length(1),  // 快捷键
+            Constraint::Length(1), // 状态栏
+            Constraint::Min(5),    // 日志内容
+            Constraint::Length(1), // 快捷键
         ])
         .split(area);
 
@@ -184,8 +206,8 @@ fn render_logs(app: &App, frame: &mut Frame) {
         app.logs_state.filter,
         app.logs_state.lines.len()
     );
-    let status_bar = Paragraph::new(status)
-        .style(Style::default().bg(Color::Magenta).fg(Color::White));
+    let status_bar =
+        Paragraph::new(status).style(Style::default().bg(Color::Magenta).fg(Color::White));
     frame.render_widget(status_bar, vertical[0]);
 
     // 日志内容
@@ -208,8 +230,7 @@ fn render_logs(app: &App, frame: &mut Frame) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(Block::default().borders(Borders::ALL));
+    let list = List::new(items).block(Block::default().borders(Borders::ALL));
     frame.render_widget(list, vertical[1]);
 
     // 快捷键

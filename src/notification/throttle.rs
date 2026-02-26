@@ -13,15 +13,9 @@ pub enum ThrottledEvent {
         target: Option<String>,
     },
     /// 错误
-    Error {
-        agent_id: String,
-        message: String,
-    },
+    Error { agent_id: String, message: String },
     /// 等待输入
-    WaitingForInput {
-        agent_id: String,
-        context: String,
-    },
+    WaitingForInput { agent_id: String, context: String },
 }
 
 /// 合并后的通知
@@ -88,7 +82,11 @@ impl NotifyThrottle {
     /// 推送事件（带时间戳，用于测试）
     pub fn push_with_time(&mut self, event: ThrottledEvent, time: Instant) {
         match event {
-            ThrottledEvent::ToolUse { agent_id, tool, target } => {
+            ThrottledEvent::ToolUse {
+                agent_id,
+                tool,
+                target,
+            } => {
                 self.pending_tools
                     .entry(agent_id)
                     .or_default()
@@ -98,7 +96,10 @@ impl NotifyThrottle {
                 let key = format!("{}:{}", agent_id, message);
                 self.recent_errors.insert(key, time);
             }
-            ThrottledEvent::WaitingForInput { agent_id, context: _ } => {
+            ThrottledEvent::WaitingForInput {
+                agent_id,
+                context: _,
+            } => {
                 self.recent_input_waits.insert(agent_id, time);
             }
         }
@@ -118,7 +119,8 @@ impl NotifyThrottle {
                     if now.duration_since(first.2) >= self.tool_merge_window {
                         // 合并工具调用
                         let tools_list = self.pending_tools.remove(&agent_id).unwrap();
-                        let formatted: Vec<String> = tools_list.iter()
+                        let formatted: Vec<String> = tools_list
+                            .iter()
                             .map(|(tool, target, _)| {
                                 if let Some(t) = target {
                                     format!("{} {}", tool, t)
@@ -169,7 +171,8 @@ impl NotifyThrottle {
 
     /// 记录等待输入通知（用于防抖）
     pub fn record_input_wait(&mut self, agent_id: &str) {
-        self.recent_input_waits.insert(agent_id.to_string(), Instant::now());
+        self.recent_input_waits
+            .insert(agent_id.to_string(), Instant::now());
     }
 
     /// 清理过期的记录
@@ -177,14 +180,12 @@ impl NotifyThrottle {
         let now = Instant::now();
 
         // 清理过期的错误记录
-        self.recent_errors.retain(|_, time| {
-            now.duration_since(*time) < self.error_dedupe_window
-        });
+        self.recent_errors
+            .retain(|_, time| now.duration_since(*time) < self.error_dedupe_window);
 
         // 清理过期的等待输入记录
-        self.recent_input_waits.retain(|_, time| {
-            now.duration_since(*time) < self.input_wait_debounce
-        });
+        self.recent_input_waits
+            .retain(|_, time| now.duration_since(*time) < self.input_wait_debounce);
     }
 
     /// 清除指定 agent 的所有状态
@@ -194,7 +195,8 @@ impl NotifyThrottle {
 
         // 清除该 agent 的错误记录
         let prefix = format!("{}:", agent_id);
-        self.recent_errors.retain(|key, _| !key.starts_with(&prefix));
+        self.recent_errors
+            .retain(|key, _| !key.starts_with(&prefix));
     }
 }
 

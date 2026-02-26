@@ -10,10 +10,7 @@ use crate::infra::input::InputWaitDetector;
 use crate::infra::jsonl::{format_tool_use, JsonlEvent, JsonlParser};
 
 /// Handle agent/start request
-pub fn handle_agent_start(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_agent_start(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let request = StartAgentRequest {
@@ -37,10 +34,7 @@ pub fn handle_agent_start(
 }
 
 /// Handle agent/send request
-pub fn handle_agent_send(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_agent_send(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let agent_id = params["agent_id"]
@@ -55,7 +49,10 @@ pub fn handle_agent_send(
     agent_manager.send_input(agent_id, input)?;
 
     Ok(serde_json::json!({
-        "success": true
+        "success": true,
+        "agent_id": agent_id,
+        "input_sent": input,
+        "message": format!("Input '{}' sent to agent {}. The agent is now processing.", input, agent_id)
     }))
 }
 
@@ -82,10 +79,7 @@ pub fn handle_agent_list(agent_manager: &AgentManager) -> Result<Value> {
 }
 
 /// Handle agent/logs request
-pub fn handle_agent_logs(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_agent_logs(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let agent_id = params["agent_id"]
@@ -101,10 +95,7 @@ pub fn handle_agent_logs(
 }
 
 /// Handle agent/stop request
-pub fn handle_agent_stop(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_agent_stop(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let agent_id = params["agent_id"]
@@ -119,10 +110,7 @@ pub fn handle_agent_stop(
 }
 
 /// Handle agent/status request - returns structured agent status
-pub fn handle_agent_status(
-    agent_manager: &AgentManager,
-    params: Option<Value>,
-) -> Result<Value> {
+pub fn handle_agent_status(agent_manager: &AgentManager, params: Option<Value>) -> Result<Value> {
     let params = params.ok_or_else(|| anyhow::anyhow!("Missing params"))?;
 
     let agent_id = params["agent_id"]

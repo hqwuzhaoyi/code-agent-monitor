@@ -20,8 +20,8 @@
 use chrono::Utc;
 use serde_json;
 
-use super::urgency::Urgency;
 use super::summarizer::NotificationSummarizer;
+use super::urgency::Urgency;
 
 /// Notification message constants (Chinese)
 mod msg {
@@ -81,7 +81,8 @@ impl PayloadBuilder {
         let json: Option<serde_json::Value> = serde_json::from_str(raw_context).ok();
 
         // 提取项目路径
-        let project = json.as_ref()
+        let project = json
+            .as_ref()
             .and_then(|j| j.get("cwd"))
             .and_then(|v| v.as_str())
             .unwrap_or(pattern_or_path);
@@ -94,11 +95,13 @@ impl PayloadBuilder {
 
         // 对于权限请求，添加风险评估
         let risk_level = if event_type == "permission_request" {
-            let tool_name = json.as_ref()
+            let tool_name = json
+                .as_ref()
                 .and_then(|j| j.get("tool_name"))
                 .and_then(|v| v.as_str())
                 .unwrap_or("unknown");
-            let tool_input = json.as_ref()
+            let tool_input = json
+                .as_ref()
                 .and_then(|j| j.get("tool_input"))
                 .cloned()
                 .unwrap_or(serde_json::json!({}));
@@ -163,11 +166,13 @@ impl PayloadBuilder {
     ) -> serde_json::Value {
         match event_type {
             "permission_request" => {
-                let tool_name = json.as_ref()
+                let tool_name = json
+                    .as_ref()
                     .and_then(|j| j.get("tool_name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
-                let tool_input = json.as_ref()
+                let tool_input = json
+                    .as_ref()
                     .and_then(|j| j.get("tool_input"))
                     .cloned()
                     .unwrap_or(serde_json::Value::Null);
@@ -178,11 +183,13 @@ impl PayloadBuilder {
                 })
             }
             "notification" => {
-                let message = json.as_ref()
+                let message = json
+                    .as_ref()
                     .and_then(|j| j.get("message"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
-                let notification_type = json.as_ref()
+                let notification_type = json
+                    .as_ref()
                     .and_then(|j| j.get("notification_type"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
@@ -231,21 +238,23 @@ impl PayloadBuilder {
     ) -> String {
         match event_type {
             "permission_request" => {
-                let tool_name = json.as_ref()
+                let tool_name = json
+                    .as_ref()
                     .and_then(|j| j.get("tool_name"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("unknown");
                 format!("{} {} 工具", msg::REQUEST_EXECUTE_TOOL, tool_name)
             }
             "notification" => {
-                let notification_type = json.as_ref()
+                let notification_type = json
+                    .as_ref()
                     .and_then(|j| j.get("notification_type"))
                     .and_then(|v| v.as_str())
                     .unwrap_or("");
                 match notification_type {
                     "idle_prompt" => msg::WAITING_USER_INPUT.to_string(),
                     "permission_prompt" => msg::NEED_PERMISSION_CONFIRM.to_string(),
-                    _ => msg::NOTIFICATION.to_string()
+                    _ => msg::NOTIFICATION.to_string(),
                 }
             }
             "WaitingForInput" => format!("{}: {}", msg::WAITING_INPUT, pattern_or_path),
@@ -254,7 +263,7 @@ impl PayloadBuilder {
             "ToolUse" => format!("{}: {}", msg::EXECUTE_TOOL, pattern_or_path),
             "stop" | "session_end" => msg::SESSION_ENDED.to_string(),
             "session_start" => msg::SESSION_STARTED.to_string(),
-            _ => event_type.to_string()
+            _ => event_type.to_string(),
         }
     }
 }
@@ -274,7 +283,8 @@ mod tests {
         let builder = PayloadBuilder::new();
 
         let context = r#"{"tool_name": "Bash", "tool_input": {"command": "rm -rf /tmp/test"}, "cwd": "/workspace"}"#;
-        let payload = builder.create_payload("cam-123", "permission_request", "", context, Urgency::High);
+        let payload =
+            builder.create_payload("cam-123", "permission_request", "", context, Urgency::High);
 
         assert_eq!(payload["type"], "cam_notification");
         assert_eq!(payload["version"], "1.0");
@@ -283,7 +293,10 @@ mod tests {
         assert_eq!(payload["agent_id"], "cam-123");
         assert_eq!(payload["project"], "/workspace");
         assert_eq!(payload["event"]["tool_name"], "Bash");
-        assert!(payload["event"]["tool_input"]["command"].as_str().unwrap().contains("rm -rf"));
+        assert!(payload["event"]["tool_input"]["command"]
+            .as_str()
+            .unwrap()
+            .contains("rm -rf"));
         assert!(payload["summary"].as_str().unwrap().contains("Bash"));
         assert!(payload["timestamp"].as_str().is_some());
     }
@@ -292,7 +305,13 @@ mod tests {
     fn test_create_payload_error() {
         let builder = PayloadBuilder::new();
 
-        let payload = builder.create_payload("cam-456", "Error", "", "API rate limit exceeded", Urgency::High);
+        let payload = builder.create_payload(
+            "cam-456",
+            "Error",
+            "",
+            "API rate limit exceeded",
+            Urgency::High,
+        );
 
         assert_eq!(payload["type"], "cam_notification");
         assert_eq!(payload["urgency"], "HIGH");
@@ -305,20 +324,30 @@ mod tests {
     fn test_create_payload_waiting_for_input() {
         let builder = PayloadBuilder::new();
 
-        let payload = builder.create_payload("cam-789", "WaitingForInput", "Confirmation", "Continue? [Y/n]", Urgency::High);
+        let payload = builder.create_payload(
+            "cam-789",
+            "WaitingForInput",
+            "Confirmation",
+            "Continue? [Y/n]",
+            Urgency::High,
+        );
 
         assert_eq!(payload["urgency"], "HIGH");
         assert_eq!(payload["event_type"], "WaitingForInput");
         assert_eq!(payload["event"]["pattern_type"], "Confirmation");
         assert_eq!(payload["event"]["prompt"], "Continue? [Y/n]");
-        assert!(payload["summary"].as_str().unwrap().contains("Confirmation"));
+        assert!(payload["summary"]
+            .as_str()
+            .unwrap()
+            .contains("Confirmation"));
     }
 
     #[test]
     fn test_create_payload_agent_exited() {
         let builder = PayloadBuilder::new();
 
-        let payload = builder.create_payload("cam-abc", "AgentExited", "/myproject", "", Urgency::Medium);
+        let payload =
+            builder.create_payload("cam-abc", "AgentExited", "/myproject", "", Urgency::Medium);
 
         assert_eq!(payload["urgency"], "MEDIUM");
         assert_eq!(payload["event_type"], "AgentExited");
@@ -331,7 +360,8 @@ mod tests {
         let builder = PayloadBuilder::new();
 
         let context = r#"{"notification_type": "idle_prompt", "message": "Task completed"}"#;
-        let payload = builder.create_payload("cam-def", "notification", "", context, Urgency::Medium);
+        let payload =
+            builder.create_payload("cam-def", "notification", "", context, Urgency::Medium);
 
         assert_eq!(payload["urgency"], "MEDIUM");
         assert_eq!(payload["event"]["notification_type"], "idle_prompt");
@@ -350,11 +380,15 @@ $ cargo build
    Compiling myapp v0.1.0
     Finished release target"#;
 
-        let payload = builder.create_payload("cam-123", "AgentExited", "", context, Urgency::Medium);
+        let payload =
+            builder.create_payload("cam-123", "AgentExited", "", context, Urgency::Medium);
 
         assert_eq!(payload["urgency"], "MEDIUM");
         assert!(payload["terminal_snapshot"].as_str().is_some());
-        assert!(payload["terminal_snapshot"].as_str().unwrap().contains("cargo build"));
+        assert!(payload["terminal_snapshot"]
+            .as_str()
+            .unwrap()
+            .contains("cargo build"));
     }
 
     #[test]
@@ -362,15 +396,18 @@ $ cargo build
         let builder = PayloadBuilder::new();
 
         // 创建超过 15 行的终端输出
-        let mut long_output = String::from(r#"{"cwd": "/tmp"}
+        let mut long_output = String::from(
+            r#"{"cwd": "/tmp"}
 
 --- 终端快照 ---
-"#);
+"#,
+        );
         for i in 1..=20 {
             long_output.push_str(&format!("line {}\n", i));
         }
 
-        let payload = builder.create_payload("cam-123", "AgentExited", "", &long_output, Urgency::Medium);
+        let payload =
+            builder.create_payload("cam-123", "AgentExited", "", &long_output, Urgency::Medium);
 
         let snapshot = payload["terminal_snapshot"].as_str().unwrap();
         // 应该只包含最后 15 行
@@ -384,17 +421,25 @@ $ cargo build
         let builder = PayloadBuilder::new();
 
         // permission_request
-        let json: Option<serde_json::Value> = serde_json::from_str(r#"{"tool_name": "Write"}"#).ok();
-        assert!(builder.generate_summary("permission_request", &json, "").contains("Write"));
+        let json: Option<serde_json::Value> =
+            serde_json::from_str(r#"{"tool_name": "Write"}"#).ok();
+        assert!(builder
+            .generate_summary("permission_request", &json, "")
+            .contains("Write"));
 
         // Error
         assert_eq!(builder.generate_summary("Error", &None, ""), "发生错误");
 
         // AgentExited
-        assert_eq!(builder.generate_summary("AgentExited", &None, ""), "Agent 已退出");
+        assert_eq!(
+            builder.generate_summary("AgentExited", &None, ""),
+            "Agent 已退出"
+        );
 
         // WaitingForInput
-        assert!(builder.generate_summary("WaitingForInput", &None, "Confirmation").contains("Confirmation"));
+        assert!(builder
+            .generate_summary("WaitingForInput", &None, "Confirmation")
+            .contains("Confirmation"));
     }
 
     #[test]
@@ -418,9 +463,8 @@ terminal content"#;
     #[test]
     fn test_build_event_object_permission_request() {
         let builder = PayloadBuilder::new();
-        let json: Option<serde_json::Value> = serde_json::from_str(
-            r#"{"tool_name": "Bash", "tool_input": {"command": "ls"}}"#
-        ).ok();
+        let json: Option<serde_json::Value> =
+            serde_json::from_str(r#"{"tool_name": "Bash", "tool_input": {"command": "ls"}}"#).ok();
 
         let event = builder.build_event_object("permission_request", "", &json, "");
 
@@ -431,9 +475,9 @@ terminal content"#;
     #[test]
     fn test_build_event_object_notification() {
         let builder = PayloadBuilder::new();
-        let json: Option<serde_json::Value> = serde_json::from_str(
-            r#"{"notification_type": "idle_prompt", "message": "waiting"}"#
-        ).ok();
+        let json: Option<serde_json::Value> =
+            serde_json::from_str(r#"{"notification_type": "idle_prompt", "message": "waiting"}"#)
+                .ok();
 
         let event = builder.build_event_object("notification", "", &json, "");
 

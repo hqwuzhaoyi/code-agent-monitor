@@ -27,7 +27,10 @@ impl LaunchdService {
         let plist_path = home.join("Library/LaunchAgents").join(Self::PLIST_NAME);
         let log_dir = home.join(".config/code-agent-monitor/logs");
 
-        Ok(Self { plist_path, log_dir })
+        Ok(Self {
+            plist_path,
+            log_dir,
+        })
     }
 
     /// Get the CAM binary path, preferring plugin location
@@ -92,19 +95,16 @@ impl LaunchdService {
     /// Install the launchd service
     pub fn install(&self) -> Result<()> {
         // Create log directory
-        std::fs::create_dir_all(&self.log_dir)
-            .context("Failed to create log directory")?;
+        std::fs::create_dir_all(&self.log_dir).context("Failed to create log directory")?;
 
         // Create LaunchAgents directory if needed
         if let Some(parent) = self.plist_path.parent() {
-            std::fs::create_dir_all(parent)
-                .context("Failed to create LaunchAgents directory")?;
+            std::fs::create_dir_all(parent).context("Failed to create LaunchAgents directory")?;
         }
 
         // Generate and write plist
         let plist_content = self.generate_plist()?;
-        std::fs::write(&self.plist_path, &plist_content)
-            .context("Failed to write plist file")?;
+        std::fs::write(&self.plist_path, &plist_content).context("Failed to write plist file")?;
 
         // Load the service, cleanup on failure
         if let Err(e) = self.load() {
@@ -126,8 +126,7 @@ impl LaunchdService {
 
         // Remove plist file
         if self.plist_path.exists() {
-            std::fs::remove_file(&self.plist_path)
-                .context("Failed to remove plist file")?;
+            std::fs::remove_file(&self.plist_path).context("Failed to remove plist file")?;
         }
 
         Ok(())

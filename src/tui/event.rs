@@ -1,8 +1,8 @@
 //! 事件处理模块
 
+use anyhow::Result;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use std::time::Duration;
-use anyhow::Result;
 
 /// TUI 事件
 #[derive(Debug)]
@@ -108,8 +108,8 @@ fn handle_logs_key(app: &mut crate::tui::App, key: KeyEvent) {
 
 /// 处理鼠标事件（带节流）
 pub fn handle_mouse(app: &mut crate::tui::App, mouse: MouseEvent) -> bool {
-    use std::time::Duration;
     use crate::tui::app::SCROLL_THROTTLE_MS;
+    use std::time::Duration;
 
     // 节流：忽略过于频繁的滚动事件
     if app.last_scroll_time.elapsed() < Duration::from_millis(SCROLL_THROTTLE_MS) {

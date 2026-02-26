@@ -1,9 +1,9 @@
 //! 通知系统构建器 - 自动检测并配置渠道
 
 use super::channel::NotificationMessage;
-use super::dispatcher::NotificationDispatcher;
 use super::channels::dashboard::{DashboardChannel, DashboardConfig};
 use super::channels::local_file::LocalFileChannel;
+use super::dispatcher::NotificationDispatcher;
 use super::urgency::Urgency;
 use anyhow::Result;
 use std::sync::Arc;

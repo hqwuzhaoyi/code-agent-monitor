@@ -13,9 +13,17 @@ pub enum NotifyEvent {
     /// 代理启动
     AgentStarted(AgentInfo),
     /// 代理退出
-    AgentExited { pid: u32, agent_type: String, working_dir: String },
+    AgentExited {
+        pid: u32,
+        agent_type: String,
+        working_dir: String,
+    },
     /// 代理状态变化
-    AgentStatusChanged { pid: u32, old_status: String, new_status: String },
+    AgentStatusChanged {
+        pid: u32,
+        old_status: String,
+        new_status: String,
+    },
 }
 
 /// 通知器
@@ -27,25 +35,37 @@ pub struct Notifier {
 
 impl Notifier {
     pub fn new(use_openclaw: bool) -> Self {
-        Self {
-            use_openclaw,
-        }
+        Self { use_openclaw }
     }
 
     /// 发送通知
     pub fn notify(&self, event: &NotifyEvent) -> Result<()> {
         let message = match event {
             NotifyEvent::AgentStarted(agent) => {
-                format!("🚀 代理启动: {} (PID: {}) 在 {}",
-                    agent.agent_type, agent.pid, agent.working_dir)
+                format!(
+                    "🚀 代理启动: {} (PID: {}) 在 {}",
+                    agent.agent_type, agent.pid, agent.working_dir
+                )
             }
-            NotifyEvent::AgentExited { pid, agent_type, working_dir } => {
-                format!("✅ 代理退出: {} (PID: {}) 在 {}",
-                    agent_type, pid, working_dir)
+            NotifyEvent::AgentExited {
+                pid,
+                agent_type,
+                working_dir,
+            } => {
+                format!(
+                    "✅ 代理退出: {} (PID: {}) 在 {}",
+                    agent_type, pid, working_dir
+                )
             }
-            NotifyEvent::AgentStatusChanged { pid, old_status, new_status } => {
-                format!("📊 代理状态变化: PID {} 从 {} 变为 {}",
-                    pid, old_status, new_status)
+            NotifyEvent::AgentStatusChanged {
+                pid,
+                old_status,
+                new_status,
+            } => {
+                format!(
+                    "📊 代理状态变化: PID {} 从 {} 变为 {}",
+                    pid, old_status, new_status
+                )
             }
         };
 
@@ -95,18 +115,17 @@ impl Watcher {
 
         loop {
             sleep(Duration::from_secs(self.interval_secs)).await;
-            
+
             let scanner = ProcessScanner::new();
             let current_agents = scanner.scan_agents()?;
-            let current_map: HashMap<u32, AgentInfo> = current_agents
-                .into_iter()
-                .map(|a| (a.pid, a))
-                .collect();
+            let current_map: HashMap<u32, AgentInfo> =
+                current_agents.into_iter().map(|a| (a.pid, a)).collect();
 
             // 检测新启动的代理
             for (pid, agent) in &current_map {
                 if !self.last_agents.contains_key(pid) {
-                    self.notifier.notify(&NotifyEvent::AgentStarted(agent.clone()))?;
+                    self.notifier
+                        .notify(&NotifyEvent::AgentStarted(agent.clone()))?;
                 }
             }
 
@@ -121,12 +140,15 @@ impl Watcher {
 
                     // 尝试获取该项目最新会话的最后一条消息
                     let manager = SessionManager::new();
-                    if let Ok(Some(session)) = manager.get_latest_session_by_project(&agent.working_dir) {
+                    if let Ok(Some(session)) =
+                        manager.get_latest_session_by_project(&agent.working_dir)
+                    {
                         if let Ok(messages) = manager.get_session_logs(&session.id, 1) {
                             if let Some(last) = messages.last() {
                                 let preview = if last.content.len() > 500 {
                                     // 安全截断 UTF-8 字符串，避免在多字节字符中间截断
-                                    let truncated: String = last.content.chars().take(500).collect();
+                                    let truncated: String =
+                                        last.content.chars().take(500).collect();
                                     format!("{}...", truncated)
                                 } else {
                                     last.content.clone()

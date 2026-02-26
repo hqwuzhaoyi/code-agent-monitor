@@ -44,12 +44,25 @@ mod unit {
         // HIGH risk commands
         let high_risk = vec!["rm -rf", "sudo", "dd if="];
         for cmd in high_risk {
-            assert!(is_high_risk_bash(cmd), "Command {} should be HIGH risk", cmd);
+            assert!(
+                is_high_risk_bash(cmd),
+                "Command {} should be HIGH risk",
+                cmd
+            );
         }
     }
 
     fn is_low_risk_bash(cmd: &str) -> bool {
-        let low_risk_patterns = ["ls", "cat", "echo", "pwd", "git status", "git log", "head", "tail"];
+        let low_risk_patterns = [
+            "ls",
+            "cat",
+            "echo",
+            "pwd",
+            "git status",
+            "git log",
+            "head",
+            "tail",
+        ];
         low_risk_patterns.iter().any(|p| cmd.starts_with(*p))
     }
 
@@ -116,7 +129,11 @@ mod e2e {
         assert!(!should_auto_approve, "MEDIUM risk should NOT auto-approve");
 
         // 5. Callback to CAM
-        let callback_action = if should_notify { "notify_user" } else { "silent" };
+        let callback_action = if should_notify {
+            "notify_user"
+        } else {
+            "silent"
+        };
         assert_eq!(callback_action, "notify_user");
     }
 }
