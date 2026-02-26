@@ -369,13 +369,31 @@ mod tests {
         let json = payload.to_json();
         assert_eq!(json["source"], "cam");
         // 验证 camelCase 序列化
-        assert!(json.get("eventType").is_some(), "should use camelCase: eventType");
-        assert!(json.get("agentId").is_some(), "should use camelCase: agentId");
-        assert!(json.get("projectPath").is_some(), "should use camelCase: projectPath");
-        assert!(json.get("eventData").is_some(), "should use camelCase: eventData");
+        assert!(
+            json.get("eventType").is_some(),
+            "should use camelCase: eventType"
+        );
+        assert!(
+            json.get("agentId").is_some(),
+            "should use camelCase: agentId"
+        );
+        assert!(
+            json.get("projectPath").is_some(),
+            "should use camelCase: projectPath"
+        );
+        assert!(
+            json.get("eventData").is_some(),
+            "should use camelCase: eventData"
+        );
         // 验证不存在 snake_case
-        assert!(json.get("event_type").is_none(), "should NOT use snake_case: event_type");
-        assert!(json.get("agent_id").is_none(), "should NOT use snake_case: agent_id");
+        assert!(
+            json.get("event_type").is_none(),
+            "should NOT use snake_case: event_type"
+        );
+        assert!(
+            json.get("agent_id").is_none(),
+            "should NOT use snake_case: agent_id"
+        );
     }
 
     #[test]

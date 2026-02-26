@@ -89,7 +89,8 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
         .style(Style::default().bg(Color::DarkGray).fg(Color::Cyan));
         frame.render_widget(filter_bar, vertical[3]);
     } else {
-        let help = " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
+        let help =
+            " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit ";
         let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
         frame.render_widget(help_bar, vertical[3]);
     }

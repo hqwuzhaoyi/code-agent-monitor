@@ -16,8 +16,8 @@ use chrono::{DateTime, Local, TimeZone};
 use crate::notification::NotificationStore;
 use crate::tui::logs::LogsState;
 use crate::tui::search::SearchInput;
-use crate::tui::state::{AgentItem, NotificationItem, View};
 use crate::tui::state::Focus;
+use crate::tui::state::{AgentItem, NotificationItem, View};
 use crate::tui::terminal_stream::TerminalStream;
 use crate::{AgentManager, TmuxManager};
 

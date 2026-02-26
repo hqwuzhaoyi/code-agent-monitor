@@ -516,43 +516,44 @@ impl OpenclawNotifier {
         if let Some(ref client) = self.webhook_client {
             // 从 payload 中提取消息内容，优先使用格式化消息
             // NOTE: SystemEventPayload 使用 camelCase (eventType)，旧版 PayloadBuilder 使用 snake_case (event_type)
-            let message = if payload.get("eventType").is_some() || payload.get("event_type").is_some() {
-                // 这是 SystemEventPayload 格式，使用格式化消息
-                use crate::notification::system_event::SystemEventPayload;
-                if let Ok(sep) = serde_json::from_value::<SystemEventPayload>(payload.clone()) {
-                    let mut msg = sep.to_telegram_message();
+            let message =
+                if payload.get("eventType").is_some() || payload.get("event_type").is_some() {
+                    // 这是 SystemEventPayload 格式，使用格式化消息
+                    use crate::notification::system_event::SystemEventPayload;
+                    if let Ok(sep) = serde_json::from_value::<SystemEventPayload>(payload.clone()) {
+                        let mut msg = sep.to_telegram_message();
 
-                    // For reply-required events, include raw JSON so hooks/skills (and humans) have full context.
-                    if matches!(
-                        sep.event_type.as_str(),
-                        "permission_request" | "waiting_for_input"
-                    ) {
-                        let raw = serde_json::to_string_pretty(payload).unwrap_or_default();
-                        let max_chars = 3500usize;
-                        let raw_trunc: String = raw.chars().take(max_chars).collect();
-                        msg.push_str("\n\n---\nraw_event_json:\n```json\n");
-                        msg.push_str(&raw_trunc);
-                        if raw.len() > max_chars {
-                            msg.push_str("\n... (truncated)");
+                        // For reply-required events, include raw JSON so hooks/skills (and humans) have full context.
+                        if matches!(
+                            sep.event_type.as_str(),
+                            "permission_request" | "waiting_for_input"
+                        ) {
+                            let raw = serde_json::to_string_pretty(payload).unwrap_or_default();
+                            let max_chars = 3500usize;
+                            let raw_trunc: String = raw.chars().take(max_chars).collect();
+                            msg.push_str("\n\n---\nraw_event_json:\n```json\n");
+                            msg.push_str(&raw_trunc);
+                            if raw.len() > max_chars {
+                                msg.push_str("\n... (truncated)");
+                            }
+                            msg.push_str("\n```\n");
                         }
-                        msg.push_str("\n```\n");
-                    }
 
-                    msg
+                        msg
+                    } else {
+                        payload
+                            .get("message")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("Agent notification")
+                            .to_string()
+                    }
                 } else {
                     payload
                         .get("message")
                         .and_then(|m| m.as_str())
                         .unwrap_or("Agent notification")
                         .to_string()
-                }
-            } else {
-                payload
-                    .get("message")
-                    .and_then(|m| m.as_str())
-                    .unwrap_or("Agent notification")
-                    .to_string()
-            };
+                };
 
             // 支持 camelCase (agentId) 和 snake_case (agent_id)
             let agent_id = payload

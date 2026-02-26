@@ -223,7 +223,9 @@ mod tests {
             event: "permission_request".to_string(),
             summary: "请求执行 Bash 工具".to_string(),
             project: Some("/workspace/myproject".to_string()),
-            event_detail: Some(serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "ls"}})),
+            event_detail: Some(
+                serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "ls"}}),
+            ),
             terminal_snapshot: Some("$ ls\nfile1 file2".to_string()),
             risk_level: Some("LOW".to_string()),
         };
