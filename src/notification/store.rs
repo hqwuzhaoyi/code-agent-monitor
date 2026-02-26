@@ -23,6 +23,18 @@ pub struct NotificationRecord {
     pub event: String,
     /// 简短摘要
     pub summary: String,
+    /// 项目路径
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<String>,
+    /// 事件详情（结构化 JSON）
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event_detail: Option<serde_json::Value>,
+    /// 终端快照
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal_snapshot: Option<String>,
+    /// 风险等级
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub risk_level: Option<String>,
 }
 
 /// 通知存储
@@ -164,6 +176,10 @@ mod tests {
             urgency: Urgency::High,
             event: "test".to_string(),
             summary: summary.to_string(),
+            project: None,
+            event_detail: None,
+            terminal_snapshot: None,
+            risk_level: None,
         }
     }
 
@@ -184,5 +200,38 @@ mod tests {
         let records = NotificationStore::read_recent(10);
         // 可能返回空或已有数据，取决于测试环境
         assert!(records.len() <= 10);
+    }
+
+    #[test]
+    fn test_notification_record_backward_compat() {
+        // 旧格式（无新字段）应能正常反序列化
+        let old_json = r#"{"ts":"2026-02-24T08:20:52Z","agent_id":"test","urgency":"High","event":"WaitingForInput","summary":"Waiting"}"#;
+        let record: NotificationRecord = serde_json::from_str(old_json).unwrap();
+        assert_eq!(record.agent_id, "test");
+        assert!(record.project.is_none());
+        assert!(record.event_detail.is_none());
+        assert!(record.terminal_snapshot.is_none());
+        assert!(record.risk_level.is_none());
+    }
+
+    #[test]
+    fn test_notification_record_with_new_fields() {
+        let record = NotificationRecord {
+            ts: Utc::now(),
+            agent_id: "cam-123".to_string(),
+            urgency: Urgency::High,
+            event: "permission_request".to_string(),
+            summary: "请求执行 Bash 工具".to_string(),
+            project: Some("/workspace/myproject".to_string()),
+            event_detail: Some(serde_json::json!({"tool_name": "Bash", "tool_input": {"command": "ls"}})),
+            terminal_snapshot: Some("$ ls\nfile1 file2".to_string()),
+            risk_level: Some("LOW".to_string()),
+        };
+        let json = serde_json::to_string(&record).unwrap();
+        let parsed: NotificationRecord = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.project, Some("/workspace/myproject".to_string()));
+        assert_eq!(parsed.risk_level, Some("LOW".to_string()));
+        assert!(parsed.event_detail.is_some());
+        assert!(parsed.terminal_snapshot.is_some());
     }
 }

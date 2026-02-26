@@ -33,16 +33,7 @@ impl NotificationChannel for LocalFileChannel {
     }
 
     fn send(&self, message: &NotificationMessage) -> Result<SendResult> {
-        let record = NotificationRecord {
-            ts: Utc::now(),
-            agent_id: message
-                .agent_id
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string()),
-            urgency: message.urgency,
-            event: message.metadata.event_type.clone(),
-            summary: truncate_summary(&message.content, 100),
-        };
+        let record = build_record(message);
 
         match NotificationStore::append(&record) {
             Ok(()) => {
@@ -71,6 +62,45 @@ impl NotificationChannel for LocalFileChannel {
     }
 }
 
+/// 从 NotificationMessage 构建 NotificationRecord
+fn build_record(message: &NotificationMessage) -> NotificationRecord {
+    let (project, event_detail, terminal_snapshot, risk_level) =
+        if let Some(ref payload) = message.payload {
+            (
+                payload
+                    .get("project")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                payload.get("event").cloned(),
+                payload
+                    .get("terminal_snapshot")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+                payload
+                    .get("risk_level")
+                    .and_then(|v| v.as_str())
+                    .map(String::from),
+            )
+        } else {
+            (message.metadata.project.clone(), None, None, None)
+        };
+
+    NotificationRecord {
+        ts: Utc::now(),
+        agent_id: message
+            .agent_id
+            .clone()
+            .unwrap_or_else(|| "unknown".to_string()),
+        urgency: message.urgency,
+        event: message.metadata.event_type.clone(),
+        summary: truncate_summary(&message.content, 100),
+        project,
+        event_detail,
+        terminal_snapshot,
+        risk_level,
+    }
+}
+
 /// 截断摘要到指定长度
 fn truncate_summary(s: &str, max_len: usize) -> String {
     if s.len() <= max_len {
@@ -96,5 +126,40 @@ mod tests {
     fn test_truncate_summary() {
         assert_eq!(truncate_summary("short", 10), "short");
         assert_eq!(truncate_summary("this is a long message", 10), "this is...");
+    }
+
+    #[test]
+    fn test_build_record_extracts_payload_fields() {
+        let payload = serde_json::json!({
+            "type": "cam_notification",
+            "project": "/workspace/myproject",
+            "event": {"tool_name": "Bash", "tool_input": {"command": "ls"}},
+            "terminal_snapshot": "$ ls\nfile1",
+            "risk_level": "LOW"
+        });
+        let message = NotificationMessage::new("test content", Urgency::High)
+            .with_agent_id("cam-123")
+            .with_payload(payload)
+            .with_metadata(crate::notification::channel::MessageMetadata {
+                event_type: "permission_request".to_string(),
+                project: Some("/workspace/myproject".to_string()),
+                timestamp: None,
+            });
+
+        let record = build_record(&message);
+        assert_eq!(record.project, Some("/workspace/myproject".to_string()));
+        assert_eq!(record.risk_level, Some("LOW".to_string()));
+        assert!(record.event_detail.is_some());
+        assert!(record.terminal_snapshot.is_some());
+    }
+
+    #[test]
+    fn test_build_record_without_payload() {
+        let message = NotificationMessage::new("test", Urgency::Low);
+        let record = build_record(&message);
+        assert!(record.project.is_none());
+        assert!(record.event_detail.is_none());
+        assert!(record.terminal_snapshot.is_none());
+        assert!(record.risk_level.is_none());
     }
 }

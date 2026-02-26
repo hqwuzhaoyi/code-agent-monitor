@@ -439,6 +439,10 @@ impl OpenclawNotifier {
             urgency,
             event: event_type_str.to_string(),
             summary,
+            project: None,
+            event_detail: None,
+            terminal_snapshot: None,
+            risk_level: None,
         };
         if let Err(e) = NotificationStore::append(&record) {
             warn!(error = %e, "Failed to write notification to local file");
