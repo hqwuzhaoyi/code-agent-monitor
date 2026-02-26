@@ -10,8 +10,8 @@ use ratatui::{
 const NOTIF_HEIGHT_UNFOCUSED: u16 = 5;
 /// Notification panel height when focused
 const NOTIF_HEIGHT_FOCUSED: u16 = 12;
-/// Number of visible notification items when unfocused
-const NOTIF_VISIBLE_UNFOCUSED: usize = 5;
+/// Number of visible notification items when unfocused (height - 2 border)
+const NOTIF_VISIBLE_UNFOCUSED: usize = 3;
 /// Number of visible notification items when focused
 const NOTIF_VISIBLE_FOCUSED: usize = 10;
 /// Max notifications to load from store
@@ -109,7 +109,7 @@ fn render_dashboard(app: &App, frame: &mut Frame) {
                 " [Tab] 切换焦点  [j/k] 移动  [Enter] tmux  [x] close  [/] filter  [l] logs  [q] quit "
             }
             crate::tui::Focus::Notifications => {
-                " [Tab] 切换焦点  [j/k] 移动  [Enter] 跳转 agent  [Esc] 返回  [l] logs  [q] quit "
+                " [Tab] 切换焦点  [j/k] 移动  [Esc] 返回  [l] logs  [q] quit "
             }
         };
         let help_bar = Paragraph::new(help).style(Style::default().bg(Color::DarkGray));
@@ -196,6 +196,8 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
         rev_selected - visible_count + 1
     };
 
+    let today = chrono::Local::now().date_naive();
+
     let items: Vec<ListItem> = app
         .notifications
         .iter()
@@ -216,7 +218,6 @@ fn render_notifications(app: &App, frame: &mut Frame, area: Rect) {
             let selected_marker = if is_selected { "→ " } else { "  " };
 
             let time_str = {
-                let today = chrono::Local::now().date_naive();
                 if n.timestamp.date_naive() == today {
                     n.timestamp.format("%H:%M").to_string()
                 } else {

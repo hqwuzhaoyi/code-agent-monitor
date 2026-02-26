@@ -264,7 +264,6 @@ mod tests {
 
     #[test]
     fn test_notification_navigation() {
-        use crate::tui::Focus;
         let mut app = App::new();
         app.notifications = vec![
             crate::tui::NotificationItem {

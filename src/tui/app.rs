@@ -454,7 +454,6 @@ pub fn run(terminal: &mut Tui, app: &mut App, refresh_interval_ms: u64) -> AppRe
                         }
                     }
                     let prev_selected = app.selected_index;
-                    let prev_notification = app.notification_selected;
                     handle_key(app, key);
                     // Agent 焦点下选择变化时刷新终端预览
                     if app.focus == Focus::AgentList && prev_selected != app.selected_index {
