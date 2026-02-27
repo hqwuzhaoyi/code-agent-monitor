@@ -126,7 +126,7 @@ fn generate_hook_config(tool: &str) -> Result<String> {
             let mut hooks = serde_json::Map::new();
             for (event_name, event_arg) in &events {
                 let command = format!(
-                    "{} notify --event {} --agent-id ${{SESSION_ID:-unknown}}",
+                    "\"{}\" notify --event {} --agent-id ${{SESSION_ID:-unknown}}",
                     cam_path, event_arg
                 );
                 let hook_entry = serde_json::json!([
@@ -147,24 +147,60 @@ fn generate_hook_config(tool: &str) -> Result<String> {
     }
 }
 
+/// 检查 TOML 内容是否在顶层（任何 [section] 之前）已有 notify 配置
+fn has_toplevel_notify(content: &str) -> bool {
+    for line in content.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') && !trimmed.starts_with("[[") {
+            // 遇到 section header，后面的都不是顶层了
+            return false;
+        }
+        if trimmed.starts_with("notify = [") || trimmed.starts_with("notify=[") {
+            return true;
+        }
+    }
+    false
+}
+
 /// 应用 hook 配置
 fn apply_hook_config(tool: &str, config_path: &Path, new_config: &str) -> Result<()> {
     match tool {
         "codex" => {
-            // 追加到 TOML
+            // 写入 TOML（必须放在顶层，不能在任何 [section] 下面）
             let mut content = if config_path.exists() {
                 fs::read_to_string(config_path)?
             } else {
                 String::new()
             };
-            if !content.contains("notify") {
-                if !content.is_empty() && !content.ends_with('\n') {
+            if has_toplevel_notify(&content) {
+                println!("⚠️  notify already configured at top level, skipping");
+            } else {
+                // 移除嵌套在 section 内的错误 notify 行
+                if content.contains("notify = [") {
+                    println!("⚠️  Found notify nested inside a [section], moving to top level");
+                    let lines: Vec<&str> = content.lines().collect();
+                    let filtered: Vec<&str> = lines
+                        .into_iter()
+                        .filter(|line| !line.trim_start().starts_with("notify = ["))
+                        .collect();
+                    content = filtered.join("\n");
+                    if !content.ends_with('\n') {
+                        content.push('\n');
+                    }
+                }
+                // 插入到顶层（第一个 [section] 之前）
+                let insert_line = format!("{}\n", new_config);
+                if content.starts_with('[') {
+                    content.insert_str(0, &insert_line);
+                } else if let Some(pos) = content.find("\n[") {
+                    content.insert_str(pos + 1, &insert_line);
+                } else {
+                    if !content.is_empty() && !content.ends_with('\n') {
+                        content.push('\n');
+                    }
+                    content.push_str(new_config);
                     content.push('\n');
                 }
-                content.push_str(new_config);
-                content.push('\n');
-            } else {
-                println!("⚠️  notify already configured, skipping");
             }
             fs::write(config_path, content)?;
         }
@@ -202,6 +238,12 @@ fn merge_claude_config(existing: &str, new_config: &str) -> Result<String> {
         .ok_or_else(|| anyhow::anyhow!("Invalid existing config"))?
         .entry("hooks")
         .or_insert_with(|| serde_json::json!({}));
+
+    // 如果 hooks 不是对象（null、数组等），替换为空对象
+    if !hooks.is_object() {
+        println!("⚠️  Existing 'hooks' value is not an object, replacing");
+        *hooks = serde_json::json!({});
+    }
 
     // 合并新的 hooks
     if let (Some(hooks_obj), Some(new_hooks)) = (
@@ -325,5 +367,156 @@ mod tests {
         assert_eq!(stop_hooks.as_str().unwrap(), "existing");
         // 但新事件应被添加
         assert!(json["hooks"].get("Notification").is_some());
+    }
+
+    #[test]
+    fn test_apply_codex_config_before_sections() {
+        // notify 必须放在 [section] 之前，否则会被嵌套到 section 内部
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // 模拟用户已有带 section 的配置
+        let existing = r#"[notice.model_migrations]
+"gpt-5.2" = "gpt-5.2-codex"
+"#;
+        fs::write(&config_path, existing).unwrap();
+
+        let new_config = r#"notify = ["/path/to/cam", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        // notify 必须出现在 [notice.model_migrations] 之前
+        let notify_pos = result.find("notify = [").unwrap();
+        let section_pos = result.find("[notice.model_migrations]").unwrap();
+        assert!(
+            notify_pos < section_pos,
+            "notify must be before [section], got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_apply_codex_config_file_starts_with_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let existing = r#"[model]
+name = "gpt-5.2"
+"#;
+        fs::write(&config_path, existing).unwrap();
+
+        let new_config = r#"notify = ["/path/to/cam", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        assert!(
+            result.starts_with("notify"),
+            "notify must be at file start, got:\n{}",
+            result
+        );
+        // [model] section 应保留
+        assert!(result.contains("[model]"));
+        assert!(result.contains("name = \"gpt-5.2\""));
+    }
+
+    #[test]
+    fn test_apply_codex_config_no_sections() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let existing = "model = \"gpt-5.2\"\n";
+        fs::write(&config_path, existing).unwrap();
+
+        let new_config = r#"notify = ["/path/to/cam", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        assert!(result.contains("notify"));
+        assert!(result.contains("model = \"gpt-5.2\""));
+    }
+
+    #[test]
+    fn test_apply_codex_config_empty_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let new_config = r#"notify = ["/path/to/cam", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        assert!(result.contains("notify"));
+    }
+
+    #[test]
+    fn test_apply_codex_config_skip_existing_notify() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        // notify 已在顶层，不应被覆盖
+        let existing = r#"notify = ["/old/path", "codex-notify"]
+[model]
+name = "gpt-5.2"
+"#;
+        fs::write(&config_path, existing).unwrap();
+
+        let new_config = r#"notify = ["/new/path", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        // 应保留旧的 notify，不覆盖
+        assert!(result.contains("/old/path"));
+        assert!(!result.contains("/new/path"));
+    }
+
+    #[test]
+    fn test_apply_codex_config_moves_nested_notify_to_toplevel() {
+        // 模拟用户实际遇到的 bug：notify 被嵌套在 [notice.model_migrations] 下
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join("config.toml");
+
+        let existing = r#"model = "gpt-5.2"
+
+[notice.model_migrations]
+"gpt-5.2" = "gpt-5.2-codex"
+notify = ["cam", "codex-notify"]
+"#;
+        fs::write(&config_path, existing).unwrap();
+
+        let new_config = r#"notify = ["/path/to/cam", "codex-notify"]"#;
+        apply_hook_config("codex", &config_path, new_config).unwrap();
+
+        let result = fs::read_to_string(&config_path).unwrap();
+        // 新的 notify 必须在 [section] 之前
+        let notify_pos = result.find("notify = [").unwrap();
+        let section_pos = result.find("[notice.model_migrations]").unwrap();
+        assert!(
+            notify_pos < section_pos,
+            "notify must be before [section], got:\n{}",
+            result
+        );
+        // 旧的嵌套 notify 应被移除（只出现一次）
+        assert_eq!(
+            result.matches("notify = [").count(),
+            1,
+            "should have exactly one notify line, got:\n{}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_has_toplevel_notify() {
+        // 顶层 notify
+        assert!(has_toplevel_notify("notify = [\"/path\"]\n[section]\nfoo=1"));
+        assert!(has_toplevel_notify("model = \"x\"\nnotify = [\"/path\"]\n[section]"));
+
+        // section 内的 notify 不算顶层
+        assert!(!has_toplevel_notify("[section]\nnotify = [\"/path\"]"));
+        assert!(!has_toplevel_notify("model = \"x\"\n[section]\nnotify = [\"/path\"]"));
+
+        // 空文件
+        assert!(!has_toplevel_notify(""));
+
+        // 无 notify
+        assert!(!has_toplevel_notify("model = \"x\"\n[section]\nfoo = 1"));
     }
 }
