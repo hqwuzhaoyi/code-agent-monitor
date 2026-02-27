@@ -41,6 +41,9 @@ pub struct ExtractedMessage {
     pub context_complete: bool,
     /// 消息类型
     pub message_type: MessageType,
+    /// 是否是决策类问题（方案选择、架构设计等）
+    #[serde(default, alias = "is_decision")]
+    pub is_decision_required: bool,
 }
 
 /// 消息类型
@@ -292,6 +295,7 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
   "fingerprint": string,       // 问题的语义指纹，用于去重
   "context_complete": boolean, // 只要能看到完整的问题和选项就是 true
   "message_type": "choice" | "confirmation" | "open_ended" | "idle",
+  "is_decision": boolean,      // 是否需要关键决策（方案选择、架构设计等）
   "agent_status": "completed" | "idle" | "waiting",
   "last_action": string | null
 }}
@@ -467,6 +471,7 @@ mod tests {
                     fingerprint: "test-question".into(),
                     context_complete: true,
                     message_type: MessageType::OpenEnded,
+                    is_decision_required: false,
                 }),
             ],
             call_count: Default::default(),
@@ -488,6 +493,87 @@ mod tests {
 2. **端到端测试**
    - 使用 `cam watch-trigger` 触发检测
    - 验证通知发送到 webhook
+
+## Decision Detection Pipeline
+
+`is_decision_required` 字段贯穿整个通知管道，从 AI 提取到最终 Webhook 发送。以下是完整的数据流：
+
+### 管道流程图
+
+```
+Terminal Snapshot
+    ↓
+HaikuExtractor.extract() → ExtractedMessage.is_decision_required
+    ↓
+ReactExtractor.extract_message() → Option<ExtractedMessage>
+    ↓
+AgentWatcher (poll_once / trigger_wait_check / check_waiting_with_react)
+    ↓
+WatchEvent::WaitingForInput { is_decision_required }
+    ↓
+NotificationEventType::WaitingForInput { is_decision_required }
+    ↓
+SystemEventPayload::from_event() → EventData + risk_level
+    ↓
+Webhook JSON: { "eventData": { "isDecisionRequired": true }, "riskLevel": "HIGH" }
+```
+
+### String-to-Bool 强制转换
+
+AI 模型（Haiku）返回的 JSON 中，`is_decision` 字段可能是布尔值 `true` 或字符串 `"true"`。解析器同时处理两种情况：
+
+```rust
+// src/agent_mod/extractor/mod.rs
+let is_decision_required = parsed.get("is_decision")
+    .and_then(|v| v.as_bool()
+        .or_else(|| v.as_str().map(|s| s.eq_ignore_ascii_case("true"))))
+    .unwrap_or(false);
+```
+
+这确保了无论 AI 返回 `"is_decision": true` 还是 `"is_decision": "true"`，都能正确解析为 `bool`。
+
+### Serde 别名兼容性
+
+`ExtractedMessage` 结构体中的 `is_decision_required` 字段使用 serde 别名，兼容旧版 AI 返回的 `is_decision` 字段名：
+
+```rust
+// src/agent_mod/extractor/traits.rs
+#[serde(default, alias = "is_decision")]
+pub is_decision_required: bool,
+```
+
+- `default` — 字段缺失时默认为 `false`
+- `alias = "is_decision"` — 同时接受 `is_decision` 和 `is_decision_required` 两种字段名
+
+### 风险等级映射
+
+| is_decision_required | risk_level | 行为 |
+|---------------------|------------|------|
+| true | HIGH | 立即通知，需要人工决策 |
+| false | MEDIUM | 常规通知 |
+
+风险等级在 `SystemEventPayload::from_event()` 中计算（`src/notification/system_event.rs`）：
+
+```rust
+NotificationEventType::WaitingForInput { is_decision_required, .. } => {
+    if *is_decision_required {
+        "HIGH".to_string()
+    } else {
+        "MEDIUM".to_string()
+    }
+}
+```
+
+### 相关文件
+
+| 文件 | 职责 |
+|------|------|
+| `src/agent_mod/extractor/traits.rs` | `ExtractedMessage.is_decision_required` 定义 |
+| `src/agent_mod/extractor/mod.rs` | AI JSON 解析 + string-to-bool 转换 |
+| `src/agent_mod/watcher.rs` | `poll_once` / `trigger_wait_check` / `check_waiting_with_react` |
+| `src/notification/event.rs` | `NotificationEventType::WaitingForInput` 枚举 |
+| `src/notification/system_event.rs` | `EventData::WaitingForInput` + 风险等级映射 |
+| `src/notification/openclaw.rs` | AI 提取结果升级 payload |
 
 ## 后续优化方向
 

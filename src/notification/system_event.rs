@@ -207,6 +207,22 @@ impl SystemEventPayload {
         serde_json::to_value(self).unwrap_or_default()
     }
 
+    /// 升级 is_decision_required 标志（AI 提取器检测到需要用户决策）
+    ///
+    /// 当 AI 提取器判断需要用户决策时，升级 event_data 和 risk_level
+    pub fn set_decision_required(&mut self, value: bool) {
+        if value {
+            if let EventData::WaitingForInput {
+                ref mut is_decision_required,
+                ..
+            } = self.event_data
+            {
+                *is_decision_required = true;
+            }
+            self.context.risk_level = "HIGH".to_string();
+        }
+    }
+
     /// 设置 AI 提取的消息和指纹
     ///
     /// 在发送通知前调用，避免在 from_event 中重复调用 AI
@@ -394,6 +410,135 @@ mod tests {
             json.get("agent_id").is_none(),
             "should NOT use snake_case: agent_id"
         );
+    }
+
+    #[test]
+    fn test_decision_required_risk_level_high() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-decision-1",
+            "Choice",
+            true,
+        );
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::High);
+
+        assert_eq!(payload.context.risk_level, "HIGH");
+    }
+
+    #[test]
+    fn test_decision_not_required_risk_level_medium() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-decision-2",
+            "Confirmation",
+            false,
+        );
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::Medium);
+
+        assert_eq!(payload.context.risk_level, "MEDIUM");
+    }
+
+    #[test]
+    fn test_decision_required_in_event_data_json() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-json-1",
+            "Choice",
+            true,
+        );
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::High);
+        let json = serde_json::to_string(&payload).unwrap();
+
+        assert!(
+            json.contains("\"isDecisionRequired\":true"),
+            "JSON should contain isDecisionRequired:true, got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_decision_not_required_in_event_data_json() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-json-2",
+            "Confirmation",
+            false,
+        );
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::Medium);
+        let json = serde_json::to_string(&payload).unwrap();
+
+        assert!(
+            json.contains("\"isDecisionRequired\":false"),
+            "JSON should contain isDecisionRequired:false, got: {}",
+            json
+        );
+    }
+
+    #[test]
+    fn test_set_decision_required_upgrades_payload() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-upgrade",
+            "Confirmation",
+            false,
+        );
+
+        let mut payload = SystemEventPayload::from_event(&event, Urgency::Medium);
+
+        // Initially MEDIUM risk
+        assert_eq!(payload.context.risk_level, "MEDIUM");
+        if let EventData::WaitingForInput {
+            is_decision_required,
+            ..
+        } = &payload.event_data
+        {
+            assert!(!is_decision_required);
+        } else {
+            panic!("Expected WaitingForInput event data");
+        }
+
+        // Upgrade via set_decision_required
+        payload.set_decision_required(true);
+
+        // Now should be HIGH risk
+        assert_eq!(payload.context.risk_level, "HIGH");
+        if let EventData::WaitingForInput {
+            is_decision_required,
+            ..
+        } = &payload.event_data
+        {
+            assert!(is_decision_required);
+        } else {
+            panic!("Expected WaitingForInput event data after upgrade");
+        }
+    }
+
+    #[test]
+    fn test_telegram_message_decision_high_urgency() {
+        let event = NotificationEvent::waiting_for_input_with_decision(
+            "cam-tg-1",
+            "Choice",
+            true,
+        );
+
+        let payload = SystemEventPayload::from_event(&event, Urgency::High);
+        let msg = payload.to_telegram_message();
+
+        // HIGH urgency should use warning emoji
+        assert!(
+            msg.contains("⚠️"),
+            "HIGH urgency telegram message should contain ⚠️ emoji, got: {}",
+            msg
+        );
+        // Risk level should show HIGH with red circle
+        assert!(
+            msg.contains("🔴") && msg.contains("HIGH"),
+            "Decision-required message should show HIGH risk with 🔴, got: {}",
+            msg
+        );
+        // Should contain agent_id
+        assert!(msg.contains("cam-tg-1"));
+        // Should contain action hint for waiting_for_input
+        assert!(msg.contains("回复你的选择或输入内容"));
     }
 
     #[test]

@@ -683,3 +683,78 @@ fn test_is_decision_alias_compat() {
     assert!(msg.is_decision_required);
     assert_eq!(msg.content, "Choose tech stack");
 }
+
+// ============================================================================
+// is_decision_required 全链路测试
+// ============================================================================
+
+#[test]
+fn test_is_decision_required_full_pipeline_flow() {
+    use code_agent_monitor::notification::event::{NotificationEvent, NotificationEventType};
+    use code_agent_monitor::notification::system_event::{EventData, SystemEventPayload};
+    use code_agent_monitor::notification::urgency::Urgency;
+    use code_agent_monitor::WatchEvent;
+
+    // Step 1: Create a WatchEvent::WaitingForInput with is_decision_required: true
+    let watch_event = WatchEvent::WaitingForInput {
+        agent_id: "cam-pipeline-test".to_string(),
+        pattern_type: "Choice".to_string(),
+        context: "Which database? 1) PostgreSQL 2) MySQL".to_string(),
+        dedup_key: "db-choice-fingerprint".to_string(),
+        is_decision_required: true,
+    };
+
+    // Step 2: Create a NotificationEvent from the WatchEvent fields
+    let is_decision_required = match &watch_event {
+        WatchEvent::WaitingForInput {
+            is_decision_required,
+            ..
+        } => *is_decision_required,
+        _ => panic!("Expected WaitingForInput"),
+    };
+    assert!(is_decision_required, "WatchEvent should have is_decision_required: true");
+
+    let notification_event = NotificationEvent::waiting_for_input_with_decision(
+        "cam-pipeline-test",
+        "Choice",
+        is_decision_required,
+    );
+
+    // Verify NotificationEventType preserves the flag
+    if let NotificationEventType::WaitingForInput {
+        is_decision_required,
+        ..
+    } = &notification_event.event_type
+    {
+        assert!(is_decision_required, "NotificationEvent should preserve is_decision_required: true");
+    } else {
+        panic!("Expected WaitingForInput event type");
+    }
+
+    // Step 3: Convert to SystemEventPayload
+    let payload = SystemEventPayload::from_event(&notification_event, Urgency::High);
+
+    // Verify EventData preserves the flag
+    if let EventData::WaitingForInput {
+        is_decision_required,
+        ..
+    } = &payload.event_data
+    {
+        assert!(is_decision_required, "SystemEventPayload should preserve is_decision_required: true");
+    } else {
+        panic!("Expected WaitingForInput event data");
+    }
+
+    // Verify risk_level is HIGH
+    assert_eq!(
+        payload.context.risk_level, "HIGH",
+        "is_decision_required: true should result in HIGH risk_level"
+    );
+
+    // Verify JSON serialization uses camelCase
+    let json = serde_json::to_string(&payload).unwrap();
+    assert!(
+        json.contains("\"isDecisionRequired\":true"),
+        "JSON should contain isDecisionRequired:true"
+    );
+}

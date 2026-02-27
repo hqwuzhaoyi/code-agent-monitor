@@ -673,6 +673,20 @@ impl AgentWatcher {
             (context, "ManualTrigger".to_string(), false)
         };
 
+        // Enhance is_decision_required using ReactExtractor for better AI-based detection
+        let is_decision_required = if wait_result.is_waiting {
+            if let Some(ref react_extractor) = self.react_extractor {
+                match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
+                    Ok(Some(message)) => message.is_decision_required,
+                    _ => is_decision_required,
+                }
+            } else {
+                is_decision_required
+            }
+        } else {
+            is_decision_required
+        };
+
         let dedup_key = generate_dedup_key(&context);
 
         Ok(Some(WatchEvent::WaitingForInput {

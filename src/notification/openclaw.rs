@@ -358,7 +358,7 @@ impl OpenclawNotifier {
                         | NotificationEventType::PermissionRequest { .. }
                 ) {
                     match extract_message_from_snapshot(snapshot) {
-                        Some((message, fingerprint, _is_decision_required)) => {
+                        Some((message, fingerprint, is_decision_required)) => {
                             // 检查是否是错误消息，如果是则升级为 Error 事件
                             if message.starts_with("ERROR: ") {
                                 let error_msg = message.strip_prefix("ERROR: ").unwrap_or(&message).to_string();
@@ -381,9 +381,15 @@ impl OpenclawNotifier {
                             debug!(
                                 agent_id = %agent_id,
                                 fingerprint = %fingerprint,
+                                is_decision_required = %is_decision_required,
                                 "ReAct extracted formatted message"
                             );
                             payload.set_extracted_message(message, fingerprint);
+                            // Upgrade decision_required if AI extractor detected it
+                            // (initial event from InputWaitDetector may have false)
+                            if is_decision_required {
+                                payload.set_decision_required(true);
+                            }
                         }
                         None => {
                             debug!(
