@@ -55,10 +55,18 @@ cp target/release/cam /usr/local/bin/
 cam --help
 ```
 
-如果你使用 OpenClaw，还需要安装插件：
+如果你使用 OpenClaw，还需要安装插件和 Skills：
 
 ```bash
+# 安装 CAM 插件
 openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
+
+# 安装 Skills
+mkdir -p ~/.openclaw/skills
+for skill in cam agent-teams cam-notify; do
+  cp -r skills/$skill ~/.openclaw/skills/
+done
+
 openclaw gateway restart
 ```
 

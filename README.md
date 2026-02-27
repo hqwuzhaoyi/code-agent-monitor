@@ -48,6 +48,21 @@ Add the binary to your PATH:
 cp target/release/cam /usr/local/bin/
 ```
 
+If you use OpenClaw, install the plugin and skills:
+
+```bash
+# Install CAM plugin
+openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
+
+# Install skills
+mkdir -p ~/.openclaw/skills
+for skill in cam agent-teams cam-notify; do
+  cp -r skills/$skill ~/.openclaw/skills/
+done
+
+openclaw gateway restart
+```
+
 Verify the installation:
 
 ```bash
