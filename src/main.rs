@@ -278,6 +278,15 @@ enum Commands {
         #[arg(long)]
         force: bool,
     },
+    /// 发送 agent 状态汇总消息到 OpenClaw
+    Summary {
+        /// 打印消息但不发送（调试用）
+        #[arg(long)]
+        dry_run: bool,
+        /// 无论是否有需关注内容都发送
+        #[arg(long)]
+        always: bool,
+    },
     /// 卸载 watcher 服务（cam service uninstall 的快捷方式）
     Uninstall,
 }
@@ -1791,6 +1800,19 @@ async fn main() -> Result<()> {
                     eprintln!("❌ 安装失败: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+        Commands::Summary { dry_run, always } => {
+            let result = tokio::task::spawn_blocking(move || {
+                let args = code_agent_monitor::cli::SummaryArgs { dry_run, always };
+                code_agent_monitor::cli::run_summary(&args)
+            })
+            .await
+            .expect("spawn_blocking failed");
+
+            if let Err(e) = result {
+                eprintln!("Error: {}", e);
+                std::process::exit(1);
             }
         }
         Commands::Uninstall => {
