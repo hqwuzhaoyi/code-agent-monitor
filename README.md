@@ -98,7 +98,7 @@ cam service logs -f               # Follow logs
 
 ### TUI Dashboard
 
-The TUI provides a real-time dashboard for monitoring all running agents with lazygit-style filtering.
+The TUI provides a real-time dashboard for monitoring all running agents with lazygit-style filtering and a four-panel focus model.
 
 ```bash
 # Launch TUI
@@ -107,21 +107,41 @@ cam tui
 
 Features:
 - Real-time agent list with status indicators (Running/Idle/Error)
-- Live terminal preview of selected agent's tmux session
+- Live terminal preview of selected agent's tmux session (scrollable)
+- Notification panel with urgency-based color coding (HIGH=Red, MEDIUM=Yellow, LOW=Gray)
+- Notification detail view showing project, risk level, event detail, and terminal snapshot
+- Smart date display: `HH:MM` for today, `MM-DD HH:MM` for older notifications
+- Context-sensitive help bar showing relevant shortcuts per focus area
+- Focus-aware mouse scroll (scrolls the focused panel)
+- Notification selection stability across data refreshes
 - Lazygit-style instant filtering (type to filter as you type)
 - Log viewer with level filtering (Error/Warn/Info/Debug)
-- Notifications panel with urgency-based color coding (HIGH=Red, MEDIUM=Yellow, LOW=Gray)
 - Local notification storage with automatic rolling cleanup (keeps last 100 entries)
+
+Layout:
+```
+┌─────────────────────┬──────────────────────┐
+│   Agent List        │  Terminal Preview     │
+│   (AgentList focus) │  (Preview focus)      │
+├─────────────────────┼──────────────────────┤
+│   Notifications     │  Notification Detail  │
+│   (Notifications)   │  (Detail focus)       │
+├─────────────────────┴──────────────────────┤
+│   Help Bar (context-sensitive shortcuts)    │
+└─────────────────────────────────────────────┘
+```
 
 Key bindings:
 | Key | Action |
 |-----|--------|
-| `j/k` or `↑/↓` | Navigate agents |
+| `Tab` | Switch focus between Agent List and Notifications |
+| `j/k` or `↑/↓` | Navigate items in focused panel |
+| `Enter` | Attach to selected agent's tmux session (Agent List focus) |
+| `x` / `d` | Close selected agent (Agent List focus) |
 | `/` | Enter filter mode (type to filter by ID or project) |
-| `Enter` | Attach to selected agent's tmux session |
 | `l` | Switch to logs view |
 | `f` | Toggle log level filter (in logs view) |
-| `Esc` | Clear filter / Return to dashboard |
+| `Esc` | Clear filter / Return to Agent List focus |
 | `q` | Quit |
 
 ### Notification Commands
@@ -403,12 +423,12 @@ src/
 │   ├── task_list.rs     # Task management
 │   └── inbox_watcher.rs # Inbox monitoring
 ├── tui/                 # TUI Dashboard
-│   ├── app.rs           # Application state and main loop
-│   ├── event.rs         # Event handling (keyboard, tick)
-│   ├── ui.rs            # UI rendering (dashboard, logs)
+│   ├── app.rs           # Application state, main loop, scroll/focus management
+│   ├── event.rs         # Event handling (keyboard, mouse with focus-aware dispatch)
+│   ├── ui.rs            # UI rendering (dashboard, notifications, detail view)
 │   ├── logs.rs          # Log viewer with level filtering
 │   ├── search.rs        # Lazygit-style search input
-│   ├── state.rs         # Agent/notification state types
+│   ├── state.rs         # Agent/notification state types, Focus enum (4-panel)
 │   └── terminal_stream.rs # Real-time tmux capture
 ├── ai/                  # AI integration
 │   ├── client.rs        # Anthropic API client
