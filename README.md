@@ -54,7 +54,25 @@ Verify the installation:
 cam --help
 ```
 
-### Step 2: Configure Webhook
+### Step 2: Bootstrap Configuration (Recommended)
+
+Run the interactive setup wizard — it auto-detects your OpenClaw config and installed agent tools:
+
+```bash
+cam bootstrap
+```
+
+This configures webhook, AI monitoring, and agent hooks in one step. If you have OpenClaw installed, it will automatically detect your gateway URL, hook token, and API providers.
+
+For fully automated setup (no prompts, uses all detected defaults):
+
+```bash
+cam bootstrap --auto
+```
+
+If you prefer to configure each piece manually, follow Steps 2a and 2b below. Otherwise, skip to Step 3.
+
+### Step 2a: Configure Webhook (Manual)
 
 CAM sends notifications to OpenClaw Gateway via webhook. Create the config directory and file:
 
@@ -85,7 +103,7 @@ Replace `your-token` with your OpenClaw hook token, and `sk-ant-...` with your A
 >   ```
 > - `anthropic_api_key`: Your Anthropic API key for Claude Haiku — powers AI-driven terminal analysis and smart notification extraction. Strongly recommended; without it, notifications will lack AI analysis capabilities
 
-### Step 3: Set Up Claude Code Hooks
+### Step 2b: Set Up Agent Hooks (Manual)
 
 This tells Claude Code to notify CAM on events like permission requests and idle prompts:
 
@@ -106,7 +124,7 @@ cam setup codex      # Codex CLI
 cam setup opencode   # OpenCode
 ```
 
-### Step 4: Install the Watcher Service
+### Step 3: Install the Watcher Service
 
 The watcher runs in the background, continuously monitoring your agents' terminal sessions:
 
@@ -126,7 +144,7 @@ You should see the service reported as active. If you ever need to restart it:
 cam service restart
 ```
 
-### Step 5: Start Your First Agent
+### Step 4: Start Your First Agent
 
 Everything is set up! Open your OpenClaw conversation and start an agent using natural language:
 
@@ -156,7 +174,7 @@ More natural language examples:
 
 > You can also use the CLI directly: `cam start "Implement a TODO app"`
 
-### Step 6: Open the TUI Dashboard
+### Step 5: Open the TUI Dashboard
 
 ```bash
 cam tui
@@ -164,7 +182,7 @@ cam tui
 
 You'll see a four-panel dashboard showing your running agents, a live terminal preview, and notification history. Use `Tab` to switch between panels and `j`/`k` to navigate.
 
-### Step 7: Receive Notifications
+### Step 6: Receive Notifications
 
 When your agent hits a permission request, encounters an error, or asks a question, CAM detects it and sends a notification through OpenClaw. You'll receive a message on your phone with the context of what the agent needs.
 

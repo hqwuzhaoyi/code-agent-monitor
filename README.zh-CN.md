@@ -62,7 +62,25 @@ openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
 openclaw gateway restart
 ```
 
-### 第二步：配置 CAM
+### 第二步：配置 CAM（推荐使用 Bootstrap）
+
+运行交互式配置向导，自动检测 OpenClaw 配置和已安装的 Agent 工具：
+
+```bash
+cam bootstrap
+```
+
+这一步会自动完成 webhook、AI 监控、agent hooks 的配置。如果你安装了 OpenClaw，它会自动检测 gateway URL、hook token 和 API provider。
+
+全自动模式（不提示，使用所有检测到的默认值）：
+
+```bash
+cam bootstrap --auto
+```
+
+如果你更喜欢手动配置，请按照下面的步骤 2a 和 2b 操作，否则直接跳到第三步。
+
+### 步骤 2a：配置 Webhook（手动）
 
 CAM 通过 Webhook 将通知发送到 OpenClaw Gateway，并使用 AI 分析终端内容。创建配置文件：
 
@@ -99,7 +117,7 @@ API Key 也可以通过以下方式提供（按优先级）：
 3. `~/.anthropic/api_key`
 4. `~/.openclaw/openclaw.json`
 
-### 第三步：配置 Claude Code Hooks
+### 步骤 2b：配置 Agent Hooks（手动）
 
 让 Claude Code 在需要输入时自动通知 CAM：
 
@@ -122,7 +140,7 @@ cam setup opencode   # 配置 OpenCode
 cam setup --dry-run claude
 ```
 
-### 第四步：安装 Watcher 服务
+### 第三步：安装 Watcher 服务
 
 Watcher 是后台守护进程，持续监控所有 Agent 的终端状态。安装为系统服务后会开机自启：
 
@@ -140,7 +158,7 @@ cam service status
 cam install --force
 ```
 
-### 第五步：通过 OpenClaw 启动你的第一个 Agent
+### 第四步：通过 OpenClaw 启动你的第一个 Agent
 
 一切就绪！现在打开 OpenClaw 对话，用自然语言启动一个 Agent：
 
@@ -170,7 +188,7 @@ OpenClaw: 好，启动中...
 
 > 你也可以用 CLI 直接启动：`cam start "实现一个 TODO 应用"`
 
-### 第六步：通过 TUI 监控
+### 第五步：通过 TUI 监控
 
 打开 TUI 仪表盘，实时查看所有 Agent 状态：
 
@@ -180,7 +198,7 @@ cam tui
 
 TUI 是四面板布局，你可以看到 Agent 列表、终端实时预览、通知历史。用 `Tab` 切换面板，`j/k` 导航，`Enter` 连接到 Agent 的 tmux 会话。
 
-### 第七步：在 OpenClaw 中接收通知并回复
+### 第六步：在 OpenClaw 中接收通知并回复
 
 当 Agent 需要你的输入时（比如请求执行 `rm -rf` 的权限），CAM 会通过 Webhook 发送通知到 OpenClaw Gateway，你会在 OpenClaw 对话中收到消息。
 

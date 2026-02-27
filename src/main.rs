@@ -5,7 +5,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use code_agent_monitor::{
-    cli::{CodexNotifyArgs, SetupArgs, StartArgs},
+    cli::{BootstrapArgs, CodexNotifyArgs, SetupArgs, StartArgs},
     discover_teams, get_team_members, list_tasks, list_team_names, AgentManager, AgentWatcher,
     BatchFilter, ConversationStateManager, InboxMessage, LaunchdService, McpServer,
     NotificationEvent, NotificationEventType, OpenclawNotifier, ProcessScanner, ReplyResult,
@@ -124,6 +124,8 @@ enum Commands {
     CodexNotify(CodexNotifyArgs),
     /// 配置 CAM hooks
     Setup(SetupArgs),
+    /// 交互式引导完成所有配置（webhook、AI 监控、hooks）
+    Bootstrap(BootstrapArgs),
     /// 列出所有 Claude Code Agent Teams
     Teams {
         /// 输出 JSON 格式
@@ -1112,6 +1114,9 @@ async fn main() -> Result<()> {
         }
         Commands::Setup(args) => {
             code_agent_monitor::cli::handle_setup(args)?;
+        }
+        Commands::Bootstrap(args) => {
+            code_agent_monitor::cli::handle_bootstrap(args)?;
         }
         Commands::Teams { json } => {
             let teams = discover_teams();
