@@ -182,7 +182,7 @@ impl AgentWatcher {
     /// Terminal stability threshold (seconds)
     const STABILITY_THRESHOLD_SECS: u64 = 6;
     /// Hook quiet period - skip AI check if hook event within this window (seconds)
-    const HOOK_QUIET_PERIOD_SECS: u64 = 10;
+    const HOOK_QUIET_PERIOD_SECS: u64 = 30;
     /// Hook inactive threshold - consider hooks inactive if no event for this duration (seconds)
     const HOOK_INACTIVE_THRESHOLD_SECS: u64 = 300; // 5 minutes
 

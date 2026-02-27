@@ -5,7 +5,7 @@
 /// 状态检测系统提示词
 pub const STATUS_DETECTION_SYSTEM: &str = r#"你是终端状态分析专家。分析 AI 编码助手的终端输出，判断其当前状态。
 
-输出要求：只返回一个词：PROCESSING、WAITING 或 DECISION。不要输出任何其他内容。"#;
+输出要求：只返回一个词：PROCESSING、WAITING、DECISION 或 ERROR。不要输出任何其他内容。"#;
 
 /// 状态检测用户提示词模板
 pub fn status_detection_prompt(terminal_content: &str) -> String {
@@ -43,11 +43,20 @@ AI 需要用户做出影响后续方向的重要决策。
 - 没有 PROCESSING 的任何指示器
 - 问题涉及：技术方案选择、架构设计、实现策略、功能取舍
 
+### ERROR（发生错误）
+终端显示明确的错误信息，Agent 可能卡住或失败。
+
+必须满足以下任一条件：
+- 终端显示 "Error editing file"、"Error writing file"、"Error reading file"
+- 终端显示 "⎿  Error" 格式的错误输出
+- 终端显示错误后 Agent 继续尝试但反复失败（重复出现相同错误）
+
 ## 判断流程
 
 1. 首先检查终端最后是否有 PROCESSING 指示器 → 如果有，返回 PROCESSING
-2. 然后检查是否有问题等待回答 → 如果没有问题，返回 PROCESSING
-3. 最后判断问题类型 → 重要决策返回 DECISION，其他返回 WAITING
+2. 检查终端是否显示明确的错误信息 → 如果有，返回 ERROR
+3. 然后检查是否有问题等待回答 → 如果没有问题，返回 PROCESSING
+4. 最后判断问题类型 → 重要决策返回 DECISION，其他返回 WAITING
 
 回答："#
     )
@@ -75,12 +84,16 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
 2. 检查问题之后是否有新的 ⏺ 开头的 Agent 回复
 3. 如果没有新的 ⏺ 回复 → has_question = true
 4. "[用户正在输入...]" 表示用户还没提交回答，忽略它
+5. 检查终端是否显示明确的错误信息（如 "Error editing file"、"⎿  Error"）
+6. 如果检测到错误，设置 has_error = true 并提取错误信息到 error_message
 </rules>
 
 <output_format>
 返回 JSON：
 {{
   "has_question": boolean,
+  "has_error": boolean,
+  "error_message": string | null,
   "message": string,           // 问题内容，格式化后
   "fingerprint": string,       // 问题的语义指纹，用于去重
   "context_complete": boolean, // 只要能看到完整的问题和选项就是 true
@@ -118,6 +131,7 @@ mod tests {
         assert!(prompt.contains("PROCESSING"));
         assert!(prompt.contains("WAITING"));
         assert!(prompt.contains("DECISION"));
+        assert!(prompt.contains("ERROR"));
     }
 
     #[test]
@@ -125,6 +139,8 @@ mod tests {
         let prompt = message_extraction_prompt("terminal output");
         assert!(prompt.contains("terminal output"));
         assert!(prompt.contains("has_question"));
+        assert!(prompt.contains("has_error"));
+        assert!(prompt.contains("error_message"));
         assert!(prompt.contains("fingerprint"));
         assert!(prompt.contains("context_complete"));
     }

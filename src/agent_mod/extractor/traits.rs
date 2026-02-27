@@ -45,6 +45,8 @@ pub enum ExtractionResult {
     Processing,
     /// 提取失败
     Failed(String),
+    /// 检测到终端错误
+    Error(String),
 }
 
 /// 迭代策略配置

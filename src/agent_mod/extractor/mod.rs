@@ -13,6 +13,7 @@ use crate::agent::manager::AgentStatus;
 use crate::ai::client::AnthropicClient;
 use crate::ai::extractor::is_agent_processing;
 use crate::infra::tmux::TmuxManager;
+use crate::notification::dedup_key::generate_dedup_key;
 
 pub use prompts::{message_extraction_prompt, MESSAGE_EXTRACTION_SYSTEM};
 pub use traits::{
@@ -77,6 +78,15 @@ pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String,
             ExtractionResult::Processing => {
                 debug!("Agent is processing");
                 return None;
+            }
+            ExtractionResult::Error(error_msg) => {
+                let fingerprint = format!("error-{}", generate_dedup_key(&error_msg));
+                info!(
+                    error = %error_msg,
+                    fingerprint = %fingerprint,
+                    "Terminal error detected"
+                );
+                return Some((format!("ERROR: {}", error_msg), fingerprint));
             }
             ExtractionResult::Failed(reason) => {
                 warn!(reason = %reason, "Extraction failed");
@@ -192,6 +202,21 @@ impl MessageExtractor for HaikuExtractor {
         if !context_complete {
             debug!(lines = lines, "AI indicates context is incomplete");
             return ExtractionResult::NeedMoreContext;
+        }
+
+        // 检查是否检测到错误
+        let has_error = parsed
+            .get("has_error")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+
+        if has_error {
+            let error_message = parsed
+                .get("error_message")
+                .and_then(|v| v.as_str())
+                .unwrap_or("Unknown error")
+                .to_string();
+            return ExtractionResult::Error(error_message);
         }
 
         let has_question = parsed
@@ -356,6 +381,21 @@ impl ReactExtractor {
                 ExtractionResult::Processing => {
                     debug!(session_id = %session_id, "Agent is processing");
                     return Ok(None);
+                }
+                ExtractionResult::Error(error_msg) => {
+                    let fingerprint = format!("error-{}", generate_dedup_key(&error_msg));
+                    info!(
+                        session_id = %session_id,
+                        error = %error_msg,
+                        fingerprint = %fingerprint,
+                        "Terminal error detected"
+                    );
+                    return Ok(Some(ExtractedMessage {
+                        content: format!("ERROR: {}", error_msg),
+                        fingerprint,
+                        context_complete: true,
+                        message_type: MessageType::OpenEnded,
+                    }));
                 }
                 ExtractionResult::Failed(reason) => {
                     warn!(
@@ -651,6 +691,34 @@ mod tests {
             assert_eq!(msg, "error message");
         } else {
             panic!("Expected Failed variant");
+        }
+    }
+
+    #[test]
+    fn test_extraction_result_error_clone() {
+        let result = ExtractionResult::Error("Error editing file".into());
+        let cloned = result.clone();
+        if let ExtractionResult::Error(msg) = cloned {
+            assert_eq!(msg, "Error editing file");
+        } else {
+            panic!("Expected Error variant");
+        }
+    }
+
+    #[test]
+    fn test_react_handles_error_result() {
+        let extractor = MockExtractor::new(vec![
+            ExtractionResult::Error("Error editing file: permission denied".into()),
+        ]);
+
+        let react = ReactExtractor::new(Box::new(extractor));
+
+        // 验证 Error 变体能正确创建
+        let result = react.extractor.extract("test snapshot", 80);
+        if let ExtractionResult::Error(msg) = result {
+            assert!(msg.contains("Error editing file"));
+        } else {
+            panic!("Expected Error variant from mock extractor");
         }
     }
 

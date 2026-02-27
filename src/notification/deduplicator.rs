@@ -40,6 +40,9 @@ struct NotificationLock {
     content_fingerprint: u64,
     /// 是否已发送提醒
     reminder_sent: bool,
+    /// 最后一次实际发送通知的时间（用于 burst 保护）
+    #[serde(default)]
+    last_sent_at: u64,
 }
 
 /// 持久化状态
@@ -62,6 +65,8 @@ pub struct NotificationDeduplicator {
 impl NotificationDeduplicator {
     /// 锁定时长：30 分钟
     const LOCK_DURATION_SECS: u64 = 1800;
+    /// Burst 保护窗口：同一 agent 15 秒内只发一条
+    const BURST_WINDOW_SECS: u64 = 15;
     /// 提醒延迟：锁定结束后 30 分钟
     const REMINDER_DELAY_SECS: u64 = 1800;
     /// 最大通知时限：2 小时后停止发送
@@ -242,6 +247,14 @@ impl NotificationDeduplicator {
         // 清理其他过期记录
         self.cleanup_expired(now);
 
+        // Burst protection: suppress if same agent sent within short window
+        if let Some(lock) = self.locks.get(agent_id) {
+            let since_last_sent = now.saturating_sub(lock.last_sent_at);
+            if since_last_sent < Self::BURST_WINDOW_SECS && lock.last_sent_at > 0 {
+                return NotifyAction::Suppressed("burst protection (same agent within 15s)".into());
+            }
+        }
+
         if let Some(lock) = self.locks.get_mut(agent_id) {
             let elapsed = now.saturating_sub(lock.locked_at);
 
@@ -252,6 +265,7 @@ impl NotificationDeduplicator {
                     lock.locked_at = now;
                     lock.content_fingerprint = fingerprint;
                     lock.reminder_sent = false;
+                    lock.last_sent_at = now;
                     self.save_state();
                     return NotifyAction::Send;
                 }
@@ -263,6 +277,7 @@ impl NotificationDeduplicator {
             if elapsed >= Self::LOCK_DURATION_SECS + Self::REMINDER_DELAY_SECS {
                 if fingerprint == lock.content_fingerprint && !lock.reminder_sent {
                     lock.reminder_sent = true;
+                    lock.last_sent_at = now;
                     self.save_state();
                     return NotifyAction::SendReminder;
                 }
@@ -271,6 +286,7 @@ impl NotificationDeduplicator {
                     lock.locked_at = now;
                     lock.content_fingerprint = fingerprint;
                     lock.reminder_sent = false;
+                    lock.last_sent_at = now;
                     self.save_state();
                     return NotifyAction::Send;
                 }
@@ -286,6 +302,7 @@ impl NotificationDeduplicator {
             lock.locked_at = now;
             lock.content_fingerprint = fingerprint;
             lock.reminder_sent = false;
+            lock.last_sent_at = now;
             self.save_state();
             return NotifyAction::Send;
         }
@@ -298,6 +315,7 @@ impl NotificationDeduplicator {
                 locked_at: now,
                 content_fingerprint: fingerprint,
                 reminder_sent: false,
+                last_sent_at: now,
             },
         );
         self.save_state();
@@ -330,6 +348,7 @@ mod tests {
             locked_at: 1700000100,
             content_fingerprint: 12345678901234567890,
             reminder_sent: false,
+            last_sent_at: 1700000100,
         };
 
         let json = serde_json::to_string(&lock).unwrap();
@@ -398,6 +417,7 @@ mod tests {
                 locked_at: 1000,
                 content_fingerprint: 12345,
                 reminder_sent: false,
+                last_sent_at: 1000,
             },
         );
         let state = DedupState { locks };
@@ -443,6 +463,11 @@ mod tests {
         let action1 = dedup.should_send("agent-1", "Question A?");
         assert_eq!(action1, NotifyAction::Send);
 
+        // Simulate time passing beyond burst window
+        if let Some(lock) = dedup.locks.get_mut("agent-1") {
+            lock.last_sent_at -= 16;
+        }
+
         // 内容变化，应该发送
         let action2 = dedup.should_send("agent-1", "Question B?");
         assert_eq!(action2, NotifyAction::Send);
@@ -463,6 +488,7 @@ mod tests {
         if let Some(lock) = dedup.locks.get_mut(agent_id) {
             lock.locked_at -= 3600; // 1 小时前
             lock.first_notified_at -= 3600;
+            lock.last_sent_at -= 3600;
         }
 
         // 应该发送提醒
@@ -573,6 +599,7 @@ mod tests {
                 locked_at: NotificationDeduplicator::current_timestamp(),
                 content_fingerprint: NotificationDeduplicator::content_fingerprint("Question?"),
                 reminder_sent: false,
+                last_sent_at: NotificationDeduplicator::current_timestamp(),
             },
         );
         let state1 = DedupState { locks: locks1 };
@@ -676,6 +703,12 @@ mod tests {
             let mut dedup1 = NotificationDeduplicator::new_with_state_path(state_path.clone());
             let action = dedup1.should_send("agent-1", "Question A?");
             assert_eq!(action, NotifyAction::Send);
+
+            // Simulate time passing beyond burst window
+            if let Some(lock) = dedup1.locks.get_mut("agent-1") {
+                lock.last_sent_at -= 16;
+            }
+            dedup1.save_state();
         }
 
         // === Process 2: Different content should send and reset lock ===
@@ -757,5 +790,58 @@ mod tests {
             let action = dedup.should_send("agent-1", "Question?");
             assert_eq!(action, NotifyAction::Send, "Should send after lock cleared");
         }
+    }
+
+    // ==================== Burst protection tests ====================
+
+    #[test]
+    fn test_burst_protection_suppresses_within_window() {
+        let mut dedup = NotificationDeduplicator::new_without_persistence();
+
+        // First notification - should send
+        let action1 = dedup.should_send("agent-1", "Question A?");
+        assert_eq!(action1, NotifyAction::Send);
+
+        // Immediate second notification with different content - burst protected
+        let action2 = dedup.should_send("agent-1", "Question B?");
+        assert!(
+            matches!(action2, NotifyAction::Suppressed(ref reason) if reason.contains("burst")),
+            "Should be suppressed by burst protection, got: {:?}",
+            action2
+        );
+
+        // Simulate time passing beyond burst window (15s)
+        if let Some(lock) = dedup.locks.get_mut("agent-1") {
+            lock.last_sent_at -= 16;
+        }
+
+        // Now different content should send
+        let action3 = dedup.should_send("agent-1", "Question B?");
+        assert_eq!(action3, NotifyAction::Send);
+    }
+
+    #[test]
+    fn test_burst_protection_different_agents_independent() {
+        let mut dedup = NotificationDeduplicator::new_without_persistence();
+
+        // agent-1 sends
+        let action1 = dedup.should_send("agent-1", "Question for agent 1?");
+        assert_eq!(action1, NotifyAction::Send);
+
+        // agent-2 sends immediately after - should NOT be burst-blocked
+        let action2 = dedup.should_send("agent-2", "Question for agent 2?");
+        assert_eq!(
+            action2,
+            NotifyAction::Send,
+            "Different agents should not be affected by each other's burst protection"
+        );
+
+        // agent-1 again immediately - should be burst-blocked
+        let action3 = dedup.should_send("agent-1", "Another question?");
+        assert!(
+            matches!(action3, NotifyAction::Suppressed(ref reason) if reason.contains("burst")),
+            "Same agent within burst window should be suppressed, got: {:?}",
+            action3
+        );
     }
 }

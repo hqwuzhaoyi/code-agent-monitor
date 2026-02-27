@@ -359,6 +359,25 @@ impl OpenclawNotifier {
                 ) {
                     match extract_message_from_snapshot(snapshot) {
                         Some((message, fingerprint)) => {
+                            // 检查是否是错误消息，如果是则升级为 Error 事件
+                            if message.starts_with("ERROR: ") {
+                                let error_msg = message.strip_prefix("ERROR: ").unwrap_or(&message).to_string();
+                                info!(
+                                    agent_id = %agent_id,
+                                    error = %error_msg,
+                                    "AI extractor detected terminal error, upgrading to Error event"
+                                );
+                                let error_event = NotificationEvent::new(
+                                    agent_id.clone(),
+                                    NotificationEventType::Error { message: error_msg },
+                                )
+                                .with_terminal_snapshot(snapshot.clone())
+                                .with_skip_dedup(event.skip_dedup);
+                                if let Some(ref project) = event.project_path {
+                                    return self.send_system_event_only(&error_event.with_project_path(project));
+                                }
+                                return self.send_system_event_only(&error_event);
+                            }
                             debug!(
                                 agent_id = %agent_id,
                                 fingerprint = %fingerprint,
