@@ -142,6 +142,25 @@ deploy, push --force, production, release
 - MEDIUM: 写入操作但影响范围有限、项目内文件 → 自动批准并通知
 - HIGH: 删除、覆盖、不可逆、影响生产、敏感路径 → 人工确认
 
+### 自动批准后的通知规则
+
+自动批准操作后，根据风险等级决定是否通知用户：
+
+| 风险等级 | 通知行为 |
+|----------|----------|
+| LOW | **完全静默** - 不发送任何消息 |
+| MEDIUM | **简短通知** - 发一条简短消息 |
+| HIGH | 不会自动批准，必须人工确认 |
+
+**MEDIUM 风险自动批准通知格式**：
+```
+✅ 已自动批准: {command} (MEDIUM)
+
+[{agent_id}]
+```
+
+**LOW 风险**：直接执行 `cam_agent_send(agent_id, "y")`，不向用户发送任何消息。
+
 ## AgentExited 处理
 
 区分正常退出和异常退出：
@@ -548,15 +567,39 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 **处理流程**:
 1. 检查白名单 → `cargo test` 在白名单中
 2. 检查参数安全 → 无敏感路径
-3. 自动批准
+3. 自动批准，执行 `cam_agent_send("cam-auto001", "y")`
+4. **不通知用户**（LOW 风险静默）
 
-**执行**: `cam_agent_send("cam-auto001", "y")`
+### 场景 5b: 自动批准 - MEDIUM 风险命令
 
-**可选通知**:
+**收到的 Payload**:
+```json
+{
+  "agent_id": "cam-med001",
+  "event_type": "permission_request",
+  "urgency": "HIGH",
+  "event_data": {
+    "tool_name": "Bash",
+    "tool_input": {"command": "npm install express"}
+  },
+  "context": {
+    "risk_level": "MEDIUM"
+  }
+}
 ```
-✅ 已自动批准: cargo test
 
-[cam-auto001]
+**处理流程**:
+1. 检查白名单 → `npm install` 不在白名单
+2. 检查黑名单 → 不在黑名单
+3. LLM 判断 → MEDIUM 风险，自动批准
+4. 执行 `cam_agent_send("cam-med001", "y")`
+5. 发送简短通知
+
+**通知**:
+```
+✅ 已自动批准: npm install express (MEDIUM)
+
+[cam-med001]
 ```
 
 ### 场景 6: Agent 异常退出
