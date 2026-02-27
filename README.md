@@ -1,532 +1,332 @@
 # Code Agent Monitor (CAM)
 
-[English](README.md) | [中文](README.zh-CN.md)
+[中文](README.zh-CN.md)
 
-Monitor and manage AI coding agent processes (Claude Code, OpenCode, Codex).
+Monitor and manage AI coding agents remotely through OpenClaw.
+
+AI coding agents frequently need human input — permission confirmations, decisions, error handling. Without CAM, you have to sit at your computer watching a terminal. With CAM, you handle all of that from your phone through OpenClaw conversations.
+
+```
+Agent needs input → CAM detects → OpenClaw notifies you → You reply → Agent continues
+```
 
 ## Features
 
-- **TUI Dashboard** - Terminal UI for monitoring agents with real-time status, filtering, and tmux integration
-- **Process Monitoring** - Scan all running AI coding agents in the system
-- **Multi-Agent Adapter** - Unified abstraction layer supporting Claude Code, Codex CLI, OpenCode with automatic detection
-- **Session Management** - List and resume Claude Code historical sessions
-- **Agent Lifecycle** - Start, stop, and send input to agents
-- **Smart Notifications** - Route notifications based on urgency (HIGH/MEDIUM/LOW)
-- **Terminal Snapshots** - Include recent terminal output in notifications for remote context
-- **MCP Server** - Provide MCP protocol interface for other tools
-- **OpenClaw Integration** - Manage agents via natural language
-- **Agent Teams** - Multi-agent collaboration with remote management and quick replies
-- **Risk Assessment** - Automatically evaluate permission request risk levels
-- **Service Management** - Install watcher as launchd system service (macOS) with auto-start on boot
+- **Remote monitoring** — Get notified on your phone via OpenClaw when agents need input
+- **TUI dashboard** — Four-panel terminal UI: agent list, terminal preview, notifications, details
+- **Multi-agent support** — Works with Claude Code, Codex, and OpenCode
+- **AI-powered extraction** — Uses AI to understand what agents are asking
+- **Risk assessment** — Classifies permission requests as Low/Medium/High risk
+- **Agent Teams** — Orchestrate multiple agents working on the same project
+- **Smart deduplication** — 120-second window with 80% similarity matching prevents notification spam
+- **Always-on service** — Runs as a launchd service on macOS for background monitoring
 
-## Installation
+## Getting Started
+
+This guide takes you from zero to a working setup in about 10 minutes.
 
 ### Prerequisites
 
-- Rust 1.70+
-- tmux
-- Claude Code CLI (optional, for agent management)
+Before you begin, make sure you have:
 
-### Build from Source
+- **Rust toolchain** — Install from [rustup.rs](https://rustup.rs) if you don't have it
+- **tmux** — `brew install tmux` on macOS
+- **OpenClaw** — Installed and configured with a messaging channel (this is how you receive notifications)
+- **An Anthropic API key** (recommended) — CAM uses Claude Haiku for AI-powered terminal analysis
+
+### Step 1: Install CAM
 
 ```bash
-# Clone the repository
-git clone https://github.com/hqwuzhaoyi/code-agent-monitor.git
+git clone https://github.com/anthropics/code-agent-monitor.git
 cd code-agent-monitor
-
-# Build release binary
 cargo build --release
+```
 
-# Binary location
-./target/release/cam
+Add the binary to your PATH:
 
-# Optional: Install to PATH
+```bash
 cp target/release/cam /usr/local/bin/
 ```
 
-### OpenClaw Plugin Installation
+Verify the installation:
 
 ```bash
-# Install as OpenClaw plugin
-openclaw plugins install --link /path/to/code-agent-monitor/plugins/cam
-openclaw gateway restart
+cam --help
 ```
 
-## Usage
+### Step 2: Configure Webhook
 
-### Basic Commands
+CAM sends notifications to OpenClaw Gateway via webhook. Create the config directory and file:
 
 ```bash
-# List all agent processes
-cam list
-
-# List historical sessions
-cam sessions
-
-# Resume a session to tmux
-cam resume <session_id>
-
-# View session logs
-cam logs <session_id> --limit 10
-
-# Kill a process
-cam kill <pid>
-
-# Start MCP server
-cam serve
-
-# Start background watcher daemon
-cam watch-daemon -i 3
-
-# Manually trigger watcher detection and send notification
-cam watch-trigger --agent-id <agent_id> [--force] [--no-dedup]
-
-# Launch TUI dashboard
-cam tui
-
-# Install watcher as system service (macOS)
-cam install                       # Install service
-cam install --force               # Force reinstall
-cam uninstall                     # Uninstall service
-
-# Service management
-cam service status                # View service status
-cam service restart               # Restart service
-cam service logs                  # View service logs
-cam service logs -f               # Follow logs
+mkdir -p ~/.config/code-agent-monitor
 ```
 
-### TUI Dashboard
-
-The TUI provides a real-time dashboard for monitoring all running agents with lazygit-style filtering and a four-panel focus model.
-
-```bash
-# Launch TUI
-cam tui
-```
-
-Features:
-- Real-time agent list with status indicators (Running/Idle/Error)
-- Live terminal preview of selected agent's tmux session (scrollable)
-- Notification panel with urgency-based color coding (HIGH=Red, MEDIUM=Yellow, LOW=Gray)
-- Notification detail view showing project, risk level, event detail, and terminal snapshot
-- Smart date display: `HH:MM` for today, `MM-DD HH:MM` for older notifications
-- Context-sensitive help bar showing relevant shortcuts per focus area
-- Focus-aware mouse scroll (scrolls the focused panel)
-- Notification selection stability across data refreshes
-- Lazygit-style instant filtering (type to filter as you type)
-- Log viewer with level filtering (Error/Warn/Info/Debug)
-- Local notification storage with automatic rolling cleanup (keeps last 100 entries)
-
-Layout:
-```
-┌─────────────────────┬──────────────────────┐
-│   Agent List        │  Terminal Preview     │
-│   (AgentList focus) │  (Preview focus)      │
-├─────────────────────┼──────────────────────┤
-│   Notifications     │  Notification Detail  │
-│   (Notifications)   │  (Detail focus)       │
-├─────────────────────┴──────────────────────┤
-│   Help Bar (context-sensitive shortcuts)    │
-└─────────────────────────────────────────────┘
-```
-
-Key bindings:
-| Key | Action |
-|-----|--------|
-| `Tab` | Switch focus between Agent List and Notifications |
-| `j/k` or `↑/↓` | Navigate items in focused panel |
-| `Enter` | Attach to selected agent's tmux session (Agent List focus) |
-| `x` / `d` | Close selected agent (Agent List focus) |
-| `/` | Enter filter mode (type to filter by ID or project) |
-| `l` | Switch to logs view |
-| `f` | Toggle log level filter (in logs view) |
-| `Esc` | Clear filter / Return to Agent List focus |
-| `q` | Quit |
-
-### Notification Commands
-
-```bash
-# Send notification event
-cam notify --event stop --agent-id cam-xxx
-
-# Preview notification (dry-run)
-echo '{"cwd": "/tmp"}' | cam notify --event stop --agent-id cam-xxx --dry-run
-```
-
-### Team Commands
-
-```bash
-# Create a team
-cam team-create my-project --description "My project"
-
-# Spawn an agent in team
-cam team-spawn my-project developer --prompt "Analyze project structure"
-
-# View team progress
-cam team-progress my-project
-
-# Shutdown team
-cam team-shutdown my-project
-```
-
-### Quick Reply Commands
-
-```bash
-# View pending confirmations
-cam pending-confirmations
-
-# Reply to single pending confirmation
-cam reply y [--target <agent_id>]
-
-# Batch reply (Agent Swarm scenarios)
-cam reply y --all                 # Approve all pending
-cam reply y --agent "cam-*"       # Approve matching agents
-cam reply y --risk low            # Approve all LOW risk requests
-
-# Setup hooks for different CLI tools
-cam setup claude                  # Configure Claude Code hooks
-cam setup codex                   # Configure Codex CLI notify
-cam setup --dry-run claude        # Preview changes without applying
-```
-
-### Multi-Agent CLI Support
-
-CAM supports multiple AI coding CLI tools through a unified adapter layer:
-
-| CLI Tool | Detection Strategy | Hook Events |
-|----------|-------------------|-------------|
-| Claude Code | HookOnly | session_start, stop, notification, PreToolUse, PostToolUse |
-| Codex CLI | HookWithPolling | agent-turn-complete |
-| OpenCode | HookOnly | session.created, session.idle, permission.asked, tool.execute.* |
-| Others | PollingOnly | (terminal state detection via AI) |
-
-```bash
-# Setup hooks automatically
-cam setup claude                  # Configure Claude Code hooks
-cam setup codex                   # Configure Codex notify
-cam setup opencode                # Configure OpenCode plugin
-
-# Handle Codex CLI events
-cam codex-notify '{"type":"agent-turn-complete","thread-id":"xxx"}'
-```
-
-## Configuration
-
-### Webhook Configuration (Required for Notifications)
-
-CAM sends notifications via Webhook to OpenClaw Gateway. Configure in `~/.config/code-agent-monitor/config.json`:
+Create `~/.config/code-agent-monitor/config.json`:
 
 ```json
 {
   "webhook": {
     "gateway_url": "http://localhost:18789",
-    "hook_token": "your-webhook-token",
+    "hook_token": "your-token",
     "timeout_secs": 30
-  }
+  },
+  "anthropic_api_key": "sk-ant-..."
 }
 ```
 
-### Haiku API Configuration
+Replace `your-token` with your OpenClaw hook token, and `sk-ant-...` with your Anthropic API key (recommended for AI-powered monitoring).
 
-CAM uses Claude Haiku 4.5 for terminal state detection and question extraction. API configuration is read in the following priority:
+> **Where do I get these values?**
+> - `gateway_url`: The address of your OpenClaw Gateway (default is `http://localhost:18789`)
+> - `hook_token`: The `hooks.token` value from your OpenClaw config (`~/.openclaw/openclaw.json`). You can find it with:
+>   ```bash
+>   cat ~/.openclaw/openclaw.json | python3 -c "import sys,json; print(json.load(sys.stdin)['hooks']['token'])"
+>   ```
+> - `anthropic_api_key`: Your Anthropic API key for Claude Haiku — powers AI-driven terminal analysis and smart notification extraction. Strongly recommended; without it, notifications will lack AI analysis capabilities
 
-1. `~/.config/code-agent-monitor/config.json` (recommended)
-2. Environment variables `ANTHROPIC_API_KEY` / `ANTHROPIC_BASE_URL`
-3. `~/.anthropic/api_key`
-4. `~/.openclaw/openclaw.json`
+### Step 3: Set Up Claude Code Hooks
 
-**Configuration example** (`~/.config/code-agent-monitor/config.json`):
-
-```json
-{
-  "anthropic_api_key": "sk-xxx",
-  "anthropic_base_url": "http://localhost:23000/"
-}
-```
-
-### Claude Code Hooks Configuration
-
-To enable automatic notifications when Claude Code is idle:
-
-**Automatic configuration (recommended)**:
+This tells Claude Code to notify CAM on events like permission requests and idle prompts:
 
 ```bash
-# Get CAM plugin path
-CAM_BIN=$(openclaw plugins list --json | jq -r '.[] | select(.name == "cam") | .path')/bin/cam
-
-# Add hooks to Claude Code config
-cat ~/.claude/settings.json | jq --arg cam "$CAM_BIN" '.hooks = {
-  "Notification": [{
-    "matcher": "idle_prompt",
-    "hooks": [{
-      "type": "command",
-      "command": ($cam + " notify --event idle_prompt --agent-id $SESSION_ID")
-    }]
-  }]
-}' > ~/.claude/settings.json.tmp && mv ~/.claude/settings.json.tmp ~/.claude/settings.json
+cam setup claude
 ```
 
-**Manual configuration**:
-
-Add to `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "Notification": [
-      {
-        "matcher": "idle_prompt",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "<CAM_PLUGIN_PATH>/bin/cam notify --event idle_prompt --agent-id $SESSION_ID"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-## Debugging
-
-### View Logs
+You can preview what changes will be made before applying:
 
 ```bash
-# View hook logs
-tail -f ~/.config/code-agent-monitor/hook.log
-
-# View watcher logs
-tail -f ~/.config/code-agent-monitor/watcher.log
-
-# Check watcher status
-cat ~/.config/code-agent-monitor/watcher.pid
+cam setup --dry-run claude
 ```
 
-### Dry-Run Testing
+For other agents:
 
 ```bash
-# Preview HIGH urgency notification
-echo '{"cwd": "/workspace"}' | cam notify --event permission_request --agent-id cam-test --dry-run
-
-# Preview MEDIUM urgency notification
-echo '{"cwd": "/workspace"}' | cam notify --event stop --agent-id cam-test --dry-run
+cam setup codex      # Codex CLI
+cam setup opencode   # OpenCode
 ```
 
-### Verify Channel Detection
+### Step 4: Install the Watcher Service
+
+The watcher runs in the background, continuously monitoring your agents' terminal sessions:
 
 ```bash
-# Check OpenClaw channel configuration
-cat ~/.openclaw/openclaw.json | jq '.channels'
-
-# Test channel detection
-echo '{}' | cam notify --event stop --agent-id test --dry-run 2>&1 | grep "channel="
+cam install
 ```
 
-### Common Issues
-
-| Issue | Solution |
-|-------|----------|
-| Notifications not sending | Check `~/.config/code-agent-monitor/hook.log` for records |
-| Send failures | Check stderr output, may be network or API rate limiting |
-| Wrong routing | Use `--dry-run` to verify urgency classification |
-| Channel detection failed | Check `~/.openclaw/openclaw.json` configuration |
-| New format not applied | Restart watcher daemon |
-
-### Restart Watcher
-
-After code changes, restart the watcher:
+Verify it's running:
 
 ```bash
-# If running as service (recommended)
+cam service status
+```
+
+You should see the service reported as active. If you ever need to restart it:
+
+```bash
 cam service restart
-
-# If running manually
-kill $(cat ~/.config/code-agent-monitor/watcher.pid) 2>/dev/null
-# Watcher will auto-start on next agent launch
 ```
 
-## Architecture
+### Step 5: Start Your First Agent
 
-CAM uses a layered architecture with clear separation of concerns:
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                        CLI / MCP                            │
-│                   (User interaction layer)                  │
-├─────────────────────────────────────────────────────────────┤
-│     agent_mod    │   session_mod   │    team    │    ai     │
-│   (Agent mgmt)   │   (Session mgmt) │  (Teams)  │  (AI API) │
-├─────────────────────────────────────────────────────────────┤
-│                      notification                           │
-│                 (Multi-channel notifications)               │
-├─────────────────────────────────────────────────────────────┤
-│                        infra                                │
-│              (tmux, process scanning, jsonl)                │
-└─────────────────────────────────────────────────────────────┘
-```
-
-### OpenClaw Plugin Integration
+Everything is set up! Open your OpenClaw conversation and start an agent using natural language:
 
 ```
-OpenClaw Gateway → CAM Plugin (TypeScript) → cam serve (MCP) → Rust Backend
-                        ↓
-                  spawn + stdin/stdout
-                        ↓
-                  JSON-RPC 2.0 Protocol
+You: Start a Claude in ~/workspace/myapp
+OpenClaw: Starting...
+          ✅ Started Claude @ ~/workspace/myapp (cam-1706789012)
 ```
 
-The plugin calls `cam serve` as a subprocess, communicating via JSON-RPC over stdin/stdout.
-
-### Module Structure
+You can also give the agent a task right away:
 
 ```
-src/
-├── main.rs              # CLI entry point
-├── lib.rs               # Library exports
-├── infra/               # Infrastructure layer
-│   ├── tmux.rs          # tmux session management
-│   ├── process.rs       # Process scanning
-│   ├── jsonl.rs         # JSONL log parsing
-│   └── input.rs         # Input wait detection
-├── agent_mod/           # Agent lifecycle management
-│   ├── manager.rs       # Start/stop/list agents
-│   ├── watcher.rs       # State monitoring
-│   ├── daemon.rs        # Background watcher daemon
-│   └── adapter/         # Multi-CLI adapter layer
-│       ├── mod.rs       # AgentAdapter trait
-│       ├── types.rs     # HookEvent, DetectionStrategy
-│       ├── claude.rs    # Claude Code adapter
-│       ├── codex.rs     # Codex CLI adapter
-│       ├── opencode.rs  # OpenCode adapter
-│       ├── generic.rs   # Generic fallback adapter
-│       └── config_manager.rs  # Config backup/restore
-├── session_mod/         # Session management
-│   ├── manager.rs       # Claude Code session listing
-│   └── state.rs         # Conversation state, quick replies
-├── mcp_mod/             # MCP Server
-│   ├── server.rs        # JSON-RPC request handling
-│   ├── types.rs         # Protocol types
-│   └── tools/           # MCP tool implementations
-├── notification/        # Notification system
-│   ├── channel.rs       # NotificationChannel trait
-│   ├── dispatcher.rs    # Multi-channel dispatcher
-│   ├── urgency.rs       # Urgency classification
-│   ├── formatter.rs     # AI-powered message formatting
-│   ├── deduplicator.rs  # 120s deduplication window
-│   └── channels/        # Telegram, WhatsApp, Dashboard, etc.
-├── team/                # Agent Teams
-│   ├── discovery.rs     # Team config discovery
-│   ├── bridge.rs        # File system bridge
-│   ├── orchestrator.rs  # Agent orchestration
-│   ├── task_list.rs     # Task management
-│   └── inbox_watcher.rs # Inbox monitoring
-├── tui/                 # TUI Dashboard
-│   ├── app.rs           # Application state, main loop, scroll/focus management
-│   ├── event.rs         # Event handling (keyboard, mouse with focus-aware dispatch)
-│   ├── ui.rs            # UI rendering (dashboard, notifications, detail view)
-│   ├── logs.rs          # Log viewer with level filtering
-│   ├── search.rs        # Lazygit-style search input
-│   ├── state.rs         # Agent/notification state types, Focus enum (4-panel)
-│   └── terminal_stream.rs # Real-time tmux capture
-├── ai/                  # AI integration
-│   ├── client.rs        # Anthropic API client
-│   └── extractor.rs     # Terminal content extraction
-└── anthropic.rs         # Haiku API convenience wrapper
+You: Start Claude in ~/workspace/myapp, implement a TODO app
 ```
 
-### Architecture Documentation
+More natural language examples:
 
-For detailed architecture documentation, see:
+| What you say | What happens |
+|-------------|-------------|
+| "Start a Claude in /path/to/project" | Launches a Claude Code agent |
+| "Start Codex on my-project" | Launches a Codex agent |
+| "What's running?" / "Status" | Lists running agents |
+| "Continue" / "y" / "go ahead" | Sends confirmation to agent |
+| "Show output" / "How's it going?" | Shows agent logs |
+| "Stop it" / "Cancel" | Stops the agent |
+| "Resume the last one" | Resumes a previous session |
 
-- [Core Modules](docs/architecture/core-modules.md) - Module responsibilities and dependencies
-- [Plugin Integration](docs/architecture/plugin-integration.md) - OpenClaw plugin architecture
-- [Notification System](docs/architecture/notification-system.md) - Multi-channel notification routing
-- [Agent Teams](docs/architecture/agent-teams.md) - Multi-agent collaboration system
+> You can also use the CLI directly: `cam start "Implement a TODO app"`
 
-### Notification Routing
+### Step 6: Open the TUI Dashboard
 
-All notifications are sent via Webhook to OpenClaw Gateway (`POST /hooks/agent`), which triggers an OpenClaw conversation. Users can reply directly in the conversation, and the CAM skill will process the reply via `cam reply`.
+```bash
+cam tui
+```
+
+You'll see a four-panel dashboard showing your running agents, a live terminal preview, and notification history. Use `Tab` to switch between panels and `j`/`k` to navigate.
+
+### Step 7: Receive Notifications
+
+When your agent hits a permission request, encounters an error, or asks a question, CAM detects it and sends a notification through OpenClaw. You'll receive a message on your phone with the context of what the agent needs.
+
+Reply directly in the OpenClaw conversation:
+- Type `y` to approve a permission request
+- Type `n` to reject
+- Type any text to answer an open-ended question
+
+That's it. Your agent continues working, and you didn't have to touch your computer.
+
+## TUI Dashboard
+
+The TUI provides a real-time view of all your running agents.
+
+```
+┌─────────────────────┬──────────────────────────┐
+│   Agent List        │  Terminal Preview         │
+│                     │  (live tmux capture)      │
+├─────────────────────┼──────────────────────────┤
+│   Notifications     │  Notification Detail      │
+│                     │  (project, risk, context) │
+├─────────────────────┴──────────────────────────┤
+│   Help Bar (context-sensitive shortcuts)        │
+└─────────────────────────────────────────────────┘
+```
+
+- **Agent List** (left) — All running agents with status indicators (Running/Idle/Error)
+- **Terminal Preview** (top-right) — Live scrollable capture of the selected agent's tmux session
+- **Notifications** (bottom-left) — History with urgency color coding (red/yellow/gray)
+- **Detail View** (bottom-right) — Full notification context: project, risk level, terminal snapshot
+
+Key bindings:
+
+| Key | Action |
+|-----|--------|
+| `Tab` | Switch focus between panels |
+| `j` / `k` | Navigate items in focused panel |
+| `Enter` | Attach to selected agent's tmux session |
+| `x` / `d` | Close selected agent |
+| `/` | Filter by agent ID or project name |
+| `l` | Switch to logs view |
+| `Esc` | Clear filter / return to agent list |
+| `q` | Quit |
+
+## CLI Reference
+
+### Agent Management
+
+| Command | Description |
+|---------|-------------|
+| `cam start [prompt]` | Start a new agent (optionally with an initial prompt) |
+| `cam list` | List all running agents |
+| `cam kill <pid>` | Kill an agent process |
+| `cam resume <session_id>` | Attach to an agent's tmux session |
+| `cam sessions` | List historical sessions |
+| `cam logs <session_id>` | View session logs |
+
+### Monitoring
+
+| Command | Description |
+|---------|-------------|
+| `cam tui` | Launch the TUI dashboard |
+| `cam watch-daemon` | Start the background watcher manually |
+| `cam setup <agent>` | Configure hooks for an agent CLI |
+
+### Notifications
+
+| Command | Description |
+|---------|-------------|
+| `cam notify --event <event>` | Send a notification event |
+| `cam watch-trigger --agent-id <id>` | Manually trigger detection (debugging) |
+| `cam pending-confirmations` | View pending permission requests |
+| `cam reply <response>` | Reply to a pending request |
+| `cam reply y --all` | Approve all pending requests |
+| `cam reply y --risk low` | Approve all low-risk requests |
+
+### Service Management
+
+| Command | Description |
+|---------|-------------|
+| `cam install` | Install watcher as a launchd service |
+| `cam uninstall` | Remove the launchd service |
+| `cam service status` | Check service status |
+| `cam service restart` | Restart the service |
+| `cam service logs [-f]` | View (or follow) service logs |
+
+### Teams
+
+| Command | Description |
+|---------|-------------|
+| `cam team-create <name>` | Create a new agent team |
+| `cam team-spawn <team> <name>` | Add an agent to a team |
+| `cam team-progress <team>` | View team task progress |
+| `cam team-shutdown <team>` | Shut down all agents in a team |
+
+## Notification System
+
+CAM classifies events by urgency and only notifies you when it matters:
 
 | Urgency | Events | Behavior |
 |---------|--------|----------|
-| HIGH | permission_request, Error, WaitingForInput | Send immediately, requires user response |
-| MEDIUM | AgentExited, idle_prompt | Send notification, may need user action |
-| LOW | session_start, stop, ToolUse | Silent (no notification sent) |
+| HIGH | Permission requests, errors, waiting for input | Sent immediately — requires your response |
+| MEDIUM | Agent exited, idle prompt | Sent as notification — may need action |
+| LOW | Session start/stop, tool use | Silent — logged locally only |
 
-#### Auto-Approve (OpenClaw Skill)
+Notifications are powered by AI analysis, which reads terminal snapshots to extract the actual question or context the agent is presenting. A 120-second deduplication window with 80% similarity matching prevents repeated notifications for the same event.
 
-OpenClaw can automatically approve low-risk operations using a three-layer decision model:
+For permission requests, CAM assesses risk level (Low/Medium/High) based on the command being executed. OpenClaw can auto-approve low-risk commands like `ls`, `cat`, and `git status`, while flagging destructive commands like `rm` or `sudo` for manual review.
 
-1. **Whitelist** - Safe commands auto-approved: `ls`, `cat`, `git status`, `cargo test`, `npm test`
-2. **Blacklist** - Always require human confirmation: `rm`, `sudo`, commands with `&&`, `|`, `>`
-3. **LLM Judgment** - AI analyzes risk for commands not in either list
+## Configuration
 
-**Parameter Safety Check**: Even whitelisted commands require confirmation if arguments contain sensitive paths (`/etc/`, `~/.ssh/`, `.env`).
+All configuration lives in `~/.config/code-agent-monitor/`:
 
-See [Auto-Approve Design](docs/plans/2026-02-24-auto-approve-design.md) for details.
+| File | Purpose |
+|------|---------|
+| `config.json` | Webhook URL, API keys, and AI monitoring configuration |
+| `agents.json` | Currently running agent records |
+| `notifications.jsonl` | Local notification history (used by TUI) |
+| `dedup_state.json` | Notification deduplication state |
+| `hook.log` | Webhook delivery log |
 
-Reply flow:
+The Anthropic API key (for AI monitoring) can also be provided via:
+1. `ANTHROPIC_API_KEY` environment variable
+2. `~/.anthropic/api_key` file
+3. `~/.openclaw/openclaw.json`
+
+## Architecture
+
 ```
-CAM → POST /hooks/agent → Gateway → OpenClaw conversation
-                                        ↓
-                              User replies "y"
-                                        ↓
-                              CAM skill → cam reply → tmux send-keys
+Claude Code Hooks ──→ CAM ──→ Webhook ──→ OpenClaw Gateway ──→ Your Phone
+Terminal Watcher  ──↗        ↙
+                    CAM TUI
 ```
 
-### Data Storage
+CAM sits between your AI coding agents and OpenClaw. It monitors agents through two channels:
 
-| Path | Description |
-|------|-------------|
-| `~/.config/code-agent-monitor/agents.json` | Running agent records |
-| `~/.config/code-agent-monitor/watcher.pid` | Watcher process PID |
-| `~/.config/code-agent-monitor/hook.log` | Hook logs |
-| `~/.config/code-agent-monitor/conversation_state.json` | Conversation state |
-| `~/.config/code-agent-monitor/config.json` | Webhook and Haiku API configuration |
-| `~/.config/code-agent-monitor/backups/` | Config file backups (created by `cam setup`) |
-| `~/.config/code-agent-monitor/notifications.jsonl` | Local notification records for TUI |
-| `~/Library/LaunchAgents/com.cam.watcher.plist` | launchd service config (macOS) |
-| `~/.claude/teams/` | Agent Teams |
-| `~/.claude/tasks/` | Task lists |
+1. **Hook events** — Claude Code/Codex/OpenCode send events directly to CAM via configured hooks
+2. **Terminal watcher** — A background service polls tmux sessions and uses AI to detect when agents are waiting for input
+
+Both channels feed into the notification system, which deduplicates, classifies urgency, and forwards to OpenClaw Gateway.
+
+For detailed architecture docs, see [docs/architecture/](docs/architecture/).
 
 ## Development
 
-### Build
-
 ```bash
-# Debug build
-cargo build
-
-# Release build
+# Build
 cargo build --release
-```
 
-### Run Tests
-
-```bash
-# Run all tests
+# Run tests
 cargo test
 
-# Run tests sequentially (avoid tmux conflicts)
+# Run tests sequentially (avoids tmux conflicts)
 cargo test -- --test-threads=1
 
-# Run specific module tests
-cargo test --lib notification
-cargo test --lib team
-```
-
-### Update Plugin Binary
-
-```bash
+# Update the plugin binary after changes
 cargo build --release
 cp target/release/cam plugins/cam/bin/cam
-openclaw gateway restart
-
-# Restart service to load new binary
 cam service restart
 ```
+
+See [docs/development.md](docs/development.md) for project structure and contribution guidelines.
 
 ## License
 
