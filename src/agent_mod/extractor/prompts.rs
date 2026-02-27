@@ -131,6 +131,18 @@ context_complete = false 的条件：问题或选项被截断，无法完整显�
     )
 }
 
+/// 进展总结提示词 - 用于 `cam summary` 命令
+///
+/// 给 Haiku 一个终端快照，生成 20 字以内的中文进展描述。
+pub fn progress_summary_prompt(terminal_content: &str) -> String {
+    format!(
+        r#"你是工程进度助理。根据以下终端快照，用一句中文（20字以内）描述这个 AI coding agent 最近完成了什么工作。只说结果，不说过程。如果看不出进展，回复"正在处理中"。
+
+终端快照：
+{terminal_content}"#
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +166,13 @@ mod tests {
         assert!(prompt.contains("error_message"));
         assert!(prompt.contains("fingerprint"));
         assert!(prompt.contains("context_complete"));
+    }
+
+    #[test]
+    fn test_progress_summary_prompt_contains_snapshot() {
+        let prompt = progress_summary_prompt("cargo build output here");
+        assert!(prompt.contains("cargo build output here"));
+        assert!(prompt.contains("20字以内"));
+        assert!(prompt.contains("正在处理中"));
     }
 }
