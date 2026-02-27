@@ -16,6 +16,10 @@ cam start --cwd /path/to/project  # 指定工作目录
 cam start "实现 TODO 应用"         # 带初始 prompt
 cam start --resume <session_id>   # 恢复会话
 
+# 初始化配置
+cam bootstrap                     # 交互式配置向导
+cam bootstrap --auto              # 自动检测，跳过提示
+
 # Agent 管理
 cam list                          # 列出所有代理进程
 cam sessions                      # 列出历史会话
@@ -156,7 +160,7 @@ CAM → POST /hooks/agent → Gateway → OpenClaw 对话
 | 问题 | 优先级 | 状态 |
 |------|--------|------|
 | 事件名称大小写不一致 | P1 | 待修复 |
-| Skill 文档字段与实际输出不匹配 | P3 | 待修复 |
+| ~~Skill 文档字段与实际输出不匹配~~ | ~~P3~~ | 已修复 |
 
 详见 [E2E 测试报告](findings/e2e-test-report.md)。
 
@@ -286,6 +290,22 @@ CAM 使用 Claude Haiku 4.5 进行终端状态判断和问题提取。API 配置
 ```
 
 **模型**: `claude-haiku-4-5-20251001`
+
+### API 变更时同步 Skills 和 Plugin
+
+修改 MCP Server 工具（`src/mcp_mod/server.rs`）或 CLI 命令时，**必须同步更新**：
+
+1. **OpenClaw Plugin** (`plugins/cam/src/index.ts`) — 工具包装层，所有工具使用 `cam_` 前缀
+2. **Skills 文档** — 根据变更影响范围更新对应 skill：
+   - `skills/cam/SKILL.md` — Agent 管理、会话管理、进程管理工具
+   - `skills/agent-teams/SKILL.md` — Team 编排、任务管理、Inbox 工具
+   - `skills/cam-notify/SKILL.md` — 通知处理、自动审批、回复路由
+
+**检查清单**：
+- [ ] 新增/删除 MCP 工具 → Plugin 添加/移除对应 `cam_` 包装
+- [ ] 工具参数变更 → Plugin 参数 + Skill 文档工具表同步更新
+- [ ] 新增 CLI 命令 → 评估是否需要 MCP 工具 + Skill 覆盖
+- [ ] 通知事件类型变更 → cam-notify SKILL.md 更新
 
 ### tmux send-keys 必须使用 -l 标志
 
