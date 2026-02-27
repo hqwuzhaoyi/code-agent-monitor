@@ -356,7 +356,7 @@ impl AgentWatcher {
                         pattern_type: format!("{:?}", message.message_type),
                         context: message.content,
                         dedup_key: message.fingerprint,
-                        is_decision_required: matches!(message.message_type, MessageType::Choice),
+                        is_decision_required: message.is_decision_required,
                     }),
                     _ => None,
                 }

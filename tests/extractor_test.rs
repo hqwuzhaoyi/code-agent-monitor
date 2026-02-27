@@ -63,7 +63,7 @@ fn test_react_expands_context_until_success() {
             fingerprint: "test-question".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
-            is_decision: false,
+            is_decision_required: false,
         }),
     ]);
 
@@ -82,14 +82,14 @@ fn test_react_stops_on_first_success() {
             fingerprint: "first".into(),
             context_complete: true,
             message_type: MessageType::Confirmation,
-            is_decision: false,
+            is_decision_required: false,
         }),
         ExtractionResult::Success(ExtractedMessage {
             content: "Should not reach".into(),
             fingerprint: "second".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
-            is_decision: false,
+            is_decision_required: false,
         }),
     ]);
 
@@ -118,7 +118,7 @@ fn test_react_continues_on_failure() {
             fingerprint: "success".into(),
             context_complete: true,
             message_type: MessageType::Choice,
-            is_decision: false,
+            is_decision_required: false,
         }),
     ]);
 
@@ -225,7 +225,7 @@ fn test_extracted_message_clone() {
         fingerprint: "test-question".to_string(),
         context_complete: true,
         message_type: MessageType::OpenEnded,
-        is_decision: false,
+        is_decision_required: false,
     };
     let cloned = msg.clone();
     assert_eq!(cloned.content, msg.content);
@@ -240,7 +240,7 @@ fn test_extracted_message_serialization() {
         fingerprint: "choose-option".to_string(),
         context_complete: true,
         message_type: MessageType::Choice,
-        is_decision: false,
+        is_decision_required: false,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("Choose an option"));
@@ -259,7 +259,7 @@ fn test_extraction_result_success() {
         fingerprint: "test".into(),
         context_complete: true,
         message_type: MessageType::OpenEnded,
-        is_decision: false,
+        is_decision_required: false,
     });
     assert!(matches!(result, ExtractionResult::Success(_)));
 }
@@ -510,6 +510,8 @@ fn test_extracted_message_deserialization() {
     let msg: ExtractedMessage = serde_json::from_str(json).unwrap();
     assert_eq!(msg.content, "Test question?");
     assert_eq!(msg.fingerprint, "test-question");
+    // 缺少 is_decision_required 字段时应默认为 false
+    assert!(!msg.is_decision_required);
     assert!(msg.context_complete);
     assert_eq!(msg.message_type, MessageType::OpenEnded);
 }
@@ -604,4 +606,80 @@ fn test_context_sizes_end_large() {
     let config = IterationConfig::default();
     // 最后一个上下文大小应该足够大（>= 500 行）
     assert!(*config.context_sizes.last().unwrap() >= 500);
+}
+
+// ============================================================================
+// is_decision_required 测试
+// ============================================================================
+
+#[test]
+fn test_is_decision_required_true_parsing() {
+    // 验证 is_decision_required: true 的 Choice 消息正确传递
+    let extractor = MockExtractor::new(vec![ExtractionResult::Success(ExtractedMessage {
+        content: "Which approach do you prefer?".into(),
+        fingerprint: "approach-choice".into(),
+        context_complete: true,
+        message_type: MessageType::Choice,
+        is_decision_required: true,
+    })]);
+
+    let result = extractor.extract("test snapshot", 80);
+    if let ExtractionResult::Success(msg) = result {
+        assert!(msg.is_decision_required);
+        assert_eq!(msg.message_type, MessageType::Choice);
+    } else {
+        panic!("Expected Success variant");
+    }
+}
+
+#[test]
+fn test_is_decision_required_true_with_confirmation() {
+    // 核心场景：确认题但实际是决策（如"要不要用微服务架构？"）
+    let msg = ExtractedMessage {
+        content: "Do you want to use microservices architecture?".into(),
+        fingerprint: "microservices-arch-decision".into(),
+        context_complete: true,
+        message_type: MessageType::Confirmation,
+        is_decision_required: true,
+    };
+
+    assert!(msg.is_decision_required);
+    assert_eq!(msg.message_type, MessageType::Confirmation);
+}
+
+#[test]
+fn test_is_decision_required_serde_roundtrip() {
+    // 序列化/反序列化 is_decision_required: true
+    let msg = ExtractedMessage {
+        content: "Pick a framework".into(),
+        fingerprint: "framework-pick".into(),
+        context_complete: true,
+        message_type: MessageType::Choice,
+        is_decision_required: true,
+    };
+
+    let json = serde_json::to_string(&msg).unwrap();
+    assert!(json.contains("is_decision_required"));
+    assert!(json.contains("true"));
+
+    let deserialized: ExtractedMessage = serde_json::from_str(&json).unwrap();
+    assert!(deserialized.is_decision_required);
+    assert_eq!(deserialized.message_type, MessageType::Choice);
+    assert_eq!(deserialized.content, "Pick a framework");
+}
+
+#[test]
+fn test_is_decision_alias_compat() {
+    // 旧名 "is_decision" 通过 alias 仍然有效
+    let json = r#"{
+        "content": "Choose tech stack",
+        "fingerprint": "tech-stack",
+        "context_complete": true,
+        "message_type": "choice",
+        "is_decision": true
+    }"#;
+
+    let msg: ExtractedMessage = serde_json::from_str(json).unwrap();
+    assert!(msg.is_decision_required);
+    assert_eq!(msg.content, "Choose tech stack");
 }

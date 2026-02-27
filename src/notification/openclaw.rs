@@ -358,7 +358,7 @@ impl OpenclawNotifier {
                         | NotificationEventType::PermissionRequest { .. }
                 ) {
                     match extract_message_from_snapshot(snapshot) {
-                        Some((message, fingerprint)) => {
+                        Some((message, fingerprint, _is_decision_required)) => {
                             // 检查是否是错误消息，如果是则升级为 Error 事件
                             if message.starts_with("ERROR: ") {
                                 let error_msg = message.strip_prefix("ERROR: ").unwrap_or(&message).to_string();

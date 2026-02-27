@@ -94,7 +94,7 @@ impl AgentAdapter for ClaudeAdapter {
                 match notification_type {
                     "idle_prompt" => Some(HookEvent::WaitingForInput {
                         context: "idle".into(),
-                        is_decision: false,
+                        is_decision_required: false,
                         cwd,
                     }),
                     _ => None,
@@ -235,11 +235,11 @@ mod tests {
         match event {
             HookEvent::WaitingForInput {
                 context,
-                is_decision,
+                is_decision_required,
                 cwd,
             } => {
                 assert_eq!(context, "idle");
-                assert!(!is_decision);
+                assert!(!is_decision_required);
                 assert_eq!(cwd, "/project");
             }
             _ => panic!("Expected WaitingForInput"),

@@ -53,7 +53,7 @@ pub enum HookEvent {
     /// 等待用户输入
     WaitingForInput {
         context: String,
-        is_decision: bool,
+        is_decision_required: bool,
         cwd: String,
     },
     /// 权限请求

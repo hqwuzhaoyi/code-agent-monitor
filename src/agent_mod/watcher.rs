@@ -669,10 +669,8 @@ impl AgentWatcher {
             )
         } else {
             let context = truncate_for_status(&output);
-            let is_decision_required = context.contains("Pick ")
-                || context.contains("选择")
-                || (context.contains("1.") && context.contains("2."));
-            (context, "ManualTrigger".to_string(), is_decision_required)
+            // ManualTrigger 不做决策判断，由通知层 AI 处理
+            (context, "ManualTrigger".to_string(), false)
         };
 
         let dedup_key = generate_dedup_key(&context);
@@ -794,7 +792,7 @@ impl AgentWatcher {
 
         match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
             Ok(Some(message)) => {
-                let is_decision_required = message.is_decision;
+                let is_decision_required = message.is_decision_required;
                 let pattern_type = match &message.message_type {
                     MessageType::Choice => "Choice".to_string(),
                     MessageType::Confirmation => "Confirmation".to_string(),
@@ -929,6 +927,22 @@ mod tests {
         let formatted = format_watch_event(&event);
         assert!(formatted.contains("等待输入"));
         assert!(formatted.contains("Confirmation"));
+    }
+
+    #[test]
+    fn test_format_watch_event_decision_required() {
+        let event = WatchEvent::WaitingForInput {
+            agent_id: "cam-456".to_string(),
+            pattern_type: "Choice".to_string(),
+            is_decision_required: true,
+            context: "Which architecture? 1) Monolith 2) Microservices".to_string(),
+            dedup_key: "arch-choice".to_string(),
+        };
+
+        let formatted = format_watch_event(&event);
+        assert!(formatted.contains("⚠️"));
+        assert!(formatted.contains("Choice"));
+        assert!(formatted.contains("cam-456"));
     }
 
     #[test]

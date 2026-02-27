@@ -87,7 +87,7 @@ impl AgentAdapter for OpenCodeAdapter {
             }),
             "session.idle" => Some(HookEvent::WaitingForInput {
                 context: "idle".into(),
-                is_decision: false,
+                is_decision_required: false,
                 cwd,
             }),
             "session.error" => Some(HookEvent::Error {
@@ -234,11 +234,11 @@ mod tests {
         match event {
             HookEvent::WaitingForInput {
                 context,
-                is_decision,
+                is_decision_required,
                 cwd,
             } => {
                 assert_eq!(context, "idle");
-                assert!(!is_decision);
+                assert!(!is_decision_required);
                 assert_eq!(cwd, "/tmp/project");
             }
             _ => panic!("Expected WaitingForInput"),

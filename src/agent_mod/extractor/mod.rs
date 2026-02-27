@@ -29,9 +29,9 @@ pub use traits::{
 /// - `terminal_snapshot`: 终端快照内容
 ///
 /// # 返回
-/// - `Some((message, fingerprint))`: 成功提取到消息和指纹
+/// - `Some((message, fingerprint, is_decision_required))`: 成功提取到消息、指纹和决策标记
 /// - `None`: Agent 正在处理中、空闲或提取失败
-pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String, String)> {
+pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String, String, bool)> {
     let extractor = match HaikuExtractor::new() {
         Ok(e) => e,
         Err(e) => {
@@ -69,7 +69,7 @@ pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String,
                     iterations = iteration + 1,
                     "Message extracted successfully"
                 );
-                return Some((message.content, message.fingerprint));
+                return Some((message.content, message.fingerprint, message.is_decision_required));
             }
             ExtractionResult::NeedMoreContext => {
                 debug!(lines = lines, "Need more context, expanding");
@@ -86,7 +86,7 @@ pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String,
                     fingerprint = %fingerprint,
                     "Terminal error detected"
                 );
-                return Some((format!("ERROR: {}", error_msg), fingerprint));
+                return Some((format!("ERROR: {}", error_msg), fingerprint, false));
             }
             ExtractionResult::Failed(reason) => {
                 warn!(reason = %reason, "Extraction failed");
@@ -252,14 +252,16 @@ impl MessageExtractor for HaikuExtractor {
                 _ => MessageType::OpenEnded,
             };
 
-            let is_decision = parsed.get("is_decision").and_then(|v| v.as_bool()).unwrap_or(false);
+            let is_decision_required = parsed.get("is_decision")
+                .and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s.eq_ignore_ascii_case("true"))))
+                .unwrap_or(false);
 
             ExtractionResult::Success(ExtractedMessage {
                 content: message,
                 fingerprint,
                 context_complete: true,
                 message_type,
-                is_decision,
+                is_decision_required,
             })
         } else {
             // 无问题，返回空闲状态
@@ -282,7 +284,7 @@ impl MessageExtractor for HaikuExtractor {
                     status,
                     last_action,
                 },
-                is_decision: false,
+                is_decision_required: false,
             })
         }
     }
@@ -399,7 +401,7 @@ impl ReactExtractor {
                         fingerprint,
                         context_complete: true,
                         message_type: MessageType::OpenEnded,
-                        is_decision: false,
+                        is_decision_required: false,
                     }));
                 }
                 ExtractionResult::Failed(reason) => {
@@ -470,7 +472,7 @@ mod tests {
                 fingerprint: "test-question".into(),
                 context_complete: true,
                 message_type: MessageType::OpenEnded,
-                is_decision: false,
+                is_decision_required: false,
             }),
         ]);
 
@@ -665,7 +667,7 @@ mod tests {
             fingerprint: "test".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
-            is_decision: false,
+            is_decision_required: false,
         });
 
         let cloned = result.clone();
@@ -742,7 +744,7 @@ mod tests {
                 status: "idle".into(),
                 last_action: None,
             },
-            is_decision: false,
+            is_decision_required: false,
         })]);
 
         let react = ReactExtractor::new(Box::new(extractor));
