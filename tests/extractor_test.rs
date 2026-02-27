@@ -63,6 +63,7 @@ fn test_react_expands_context_until_success() {
             fingerprint: "test-question".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
+            is_decision: false,
         }),
     ]);
 
@@ -81,12 +82,14 @@ fn test_react_stops_on_first_success() {
             fingerprint: "first".into(),
             context_complete: true,
             message_type: MessageType::Confirmation,
+            is_decision: false,
         }),
         ExtractionResult::Success(ExtractedMessage {
             content: "Should not reach".into(),
             fingerprint: "second".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
+            is_decision: false,
         }),
     ]);
 
@@ -115,6 +118,7 @@ fn test_react_continues_on_failure() {
             fingerprint: "success".into(),
             context_complete: true,
             message_type: MessageType::Choice,
+            is_decision: false,
         }),
     ]);
 
@@ -221,6 +225,7 @@ fn test_extracted_message_clone() {
         fingerprint: "test-question".to_string(),
         context_complete: true,
         message_type: MessageType::OpenEnded,
+        is_decision: false,
     };
     let cloned = msg.clone();
     assert_eq!(cloned.content, msg.content);
@@ -235,6 +240,7 @@ fn test_extracted_message_serialization() {
         fingerprint: "choose-option".to_string(),
         context_complete: true,
         message_type: MessageType::Choice,
+        is_decision: false,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("Choose an option"));
@@ -253,6 +259,7 @@ fn test_extraction_result_success() {
         fingerprint: "test".into(),
         context_complete: true,
         message_type: MessageType::OpenEnded,
+        is_decision: false,
     });
     assert!(matches!(result, ExtractionResult::Success(_)));
 }

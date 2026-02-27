@@ -15,6 +15,9 @@ pub struct ExtractedMessage {
     pub context_complete: bool,
     /// 消息类型
     pub message_type: MessageType,
+    /// 是否是决策类问题（方案选择、架构设计等）
+    #[serde(default)]
+    pub is_decision: bool,
 }
 
 /// 消息类型
@@ -120,6 +123,7 @@ mod tests {
             fingerprint: "test-question".to_string(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
+            is_decision: false,
         };
         let cloned = msg.clone();
         assert_eq!(cloned.content, msg.content);

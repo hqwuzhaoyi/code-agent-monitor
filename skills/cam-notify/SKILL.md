@@ -35,7 +35,8 @@ CAM 发送的 system event 格式：
   "timestamp": "2026-02-18T10:00:00Z",
   "event_data": {
     "tool_name": "Bash",
-    "tool_input": {"command": "npm install express"}
+    "tool_input": {"command": "npm install express"},
+    "is_decision_required": false
   },
   "context": {
     "terminal_snapshot": "...",
@@ -60,6 +61,15 @@ CAM 发送的 system event 格式：
 | `risk_level` | string | 风险等级：`LOW`/`MEDIUM`/`HIGH` |
 
 **重要**：优先使用 `extracted_message`，它包含 AI 提取的完整上下文。只有当 `extracted_message` 为空时才回退到 `terminal_snapshot`。
+
+### event_data 字段说明（按 event_type）
+
+| event_type | 字段 | 类型 | 说明 |
+|------------|------|------|------|
+| `waiting_for_input` | `pattern_type` | string | 等待模式类型（Choice/Confirmation/OpenEnded） |
+| `waiting_for_input` | `is_decision_required` | bool | **是否需要关键决策**（方案选择、架构设计等） |
+| `permission_request` | `tool_name` | string | 工具名称 |
+| `permission_request` | `tool_input` | object | 工具输入参数 |
 
 ### Event Types
 
@@ -154,6 +164,31 @@ deploy, push --force, production, release
 - LOW: 只读操作、不影响系统状态、可逆操作、/tmp/ 路径 → 自动批准
 - MEDIUM: 写入操作但影响范围有限、项目内文件 → 自动批准并通知
 - HIGH: 删除、覆盖、不可逆、影响生产、敏感路径 → 人工确认
+
+### 决策类事件（必须人工确认）
+
+当 `event_data.is_decision_required == true` 时，表示 Agent 需要用户做出影响后续方向的重要决策。
+
+**决策类问题的特征**：
+- 技术方案选择（"Which approach?", "哪个方案？"）
+- 架构设计决策（"组件结构"、"数据流设计"）
+- 技术栈选择（"React vs Vue"、"选择框架"）
+- 功能取舍（"要不要加这个功能？"）
+- 实现策略（"从头开始还是增强现有？"、"重构还是新写？"）
+
+**处理规则**：
+- `is_decision_required == true` → **必须转发给用户**，不可自动处理
+- 即使问题看起来简单，也不能代替用户做决策
+- 使用 `choice` 或 `open_ended` 模板格式化后发送
+
+**禁止 决策类事件的合理化借口（全部禁止）**：
+
+| 借口 | 为什么是错的 |
+|------|-------------|
+| "这个决策很简单，我可以代替用户选" | 决策的价值在于用户参与，不在于难度 |
+| "用户之前选过类似的，我按惯例处理" | 每次决策的上下文不同，必须让用户确认 |
+| "选默认选项就好" | 没有"默认"概念，所有选项平等，需要用户判断 |
+| "这只是确认不是决策" | is_decision_required=true 时不区分，一律人工确认 |
 
 ### 自动批准后的通知规则
 
@@ -357,6 +392,7 @@ C) 选项三描述
 | 未检查 `extracted_message` 是否为 null 就使用 | 必须先检查，为 null 时回退到 `terminal_snapshot` |
 | 在合法通知中夹带 LOW 事件信息 | 每条通知只包含触发它的那个事件 |
 | 不区分 `message_type` 直接生成通知 | 必须按 choice/confirmation/open_ended 使用对应模板 |
+| is_decision_required=true 时自动处理或代替用户做选择 | 决策类事件必须转发给用户，不可自动处理或代选 |
 
 ## 用户回复处理
 

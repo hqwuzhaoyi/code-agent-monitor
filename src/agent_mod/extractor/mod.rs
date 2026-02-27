@@ -252,11 +252,14 @@ impl MessageExtractor for HaikuExtractor {
                 _ => MessageType::OpenEnded,
             };
 
+            let is_decision = parsed.get("is_decision").and_then(|v| v.as_bool()).unwrap_or(false);
+
             ExtractionResult::Success(ExtractedMessage {
                 content: message,
                 fingerprint,
                 context_complete: true,
                 message_type,
+                is_decision,
             })
         } else {
             // 无问题，返回空闲状态
@@ -279,6 +282,7 @@ impl MessageExtractor for HaikuExtractor {
                     status,
                     last_action,
                 },
+                is_decision: false,
             })
         }
     }
@@ -395,6 +399,7 @@ impl ReactExtractor {
                         fingerprint,
                         context_complete: true,
                         message_type: MessageType::OpenEnded,
+                        is_decision: false,
                     }));
                 }
                 ExtractionResult::Failed(reason) => {
@@ -465,6 +470,7 @@ mod tests {
                 fingerprint: "test-question".into(),
                 context_complete: true,
                 message_type: MessageType::OpenEnded,
+                is_decision: false,
             }),
         ]);
 
@@ -659,6 +665,7 @@ mod tests {
             fingerprint: "test".into(),
             context_complete: true,
             message_type: MessageType::OpenEnded,
+            is_decision: false,
         });
 
         let cloned = result.clone();
@@ -735,6 +742,7 @@ mod tests {
                 status: "idle".into(),
                 last_action: None,
             },
+            is_decision: false,
         })]);
 
         let react = ReactExtractor::new(Box::new(extractor));

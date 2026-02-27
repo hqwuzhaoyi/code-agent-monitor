@@ -794,7 +794,7 @@ impl AgentWatcher {
 
         match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
             Ok(Some(message)) => {
-                let is_decision_required = matches!(message.message_type, MessageType::Choice);
+                let is_decision_required = message.is_decision;
                 let pattern_type = match &message.message_type {
                     MessageType::Choice => "Choice".to_string(),
                     MessageType::Confirmation => "Confirmation".to_string(),

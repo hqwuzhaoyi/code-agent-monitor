@@ -86,6 +86,16 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
 4. "[用户正在输入...]" 表示用户还没提交回答，忽略它
 5. 检查终端是否显示明确的错误信息（如 "Error editing file"、"⎿  Error"）
 6. 如果检测到错误，设置 has_error = true 并提取错误信息到 error_message
+7. 判断是否是决策类问题（is_decision）：以下情况为 true：
+   - 技术方案选择（"which approach", "哪个方案", "你倾向"）
+   - 架构设计决策（"architecture", "设计", "结构"）
+   - 技术栈选择（"React vs Vue", "选择框架"）
+   - 功能取舍（"要不要加", "是否需要"）
+   - 实现策略（"从头开始还是增强", "重构还是新写"）
+   以下情况为 false：
+   - 权限确认（"Do you want to proceed?", "Continue?"）
+   - 简单的 y/n 确认
+   - 文件操作确认（"Create file?", "Overwrite?"）
 </rules>
 
 <output_format>
@@ -98,6 +108,7 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
   "fingerprint": string,       // 问题的语义指纹，用于去重
   "context_complete": boolean, // 只要能看到完整的问题和选项就是 true
   "message_type": "choice" | "confirmation" | "open_ended" | "idle",
+  "is_decision": boolean,      // 是否是决策类问题（方案选择、架构设计、技术栈选择、实现策略等）
   "agent_status": "completed" | "idle" | "waiting",
   "last_action": string | null
 }}
