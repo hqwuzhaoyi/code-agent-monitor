@@ -261,4 +261,403 @@ export default function (api) {
       }
     },
   });
+
+  // === Team Discovery ===
+
+  api.registerTool({
+    name: "cam_team_list",
+    description: "列出所有 Agent Teams / List all agent teams",
+    parameters: Type.Object({}),
+    async execute() {
+      try {
+        const result = await callCamMcp("team_list", {});
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_list failed", { error });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_members",
+    description: "列出 Team 的所有成员 / List all members of a team",
+    parameters: Type.Object({
+      team_name: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_members", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_members failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  // === Team Bridge ===
+
+  api.registerTool({
+    name: "cam_team_create",
+    description: "创建新的 Agent Team / Create a new agent team",
+    parameters: Type.Object({
+      name: Type.String({ description: "Team 名称" }),
+      description: Type.String({ description: "Team 描述" }),
+      project_path: Type.String({ description: "项目路径" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_create", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_create failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_delete",
+    description: "删除 Agent Team / Delete an agent team",
+    parameters: Type.Object({
+      name: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_delete", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_delete failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_status",
+    description: "获取 Team 状态 / Get team status",
+    parameters: Type.Object({
+      name: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_status", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_status failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_inbox_read",
+    description: "读取 Team 成员的收件箱 / Read a team member's inbox",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+      member: Type.String({ description: "成员名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("inbox_read", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_inbox_read failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_inbox_send",
+    description: "向 Team 成员发送消息 / Send a message to a team member",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+      member: Type.String({ description: "成员名称" }),
+      message: Type.String({ description: "消息内容" }),
+      from: Type.Optional(Type.String({ description: "发送者（默认 'user'）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("inbox_send", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_inbox_send failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_pending_requests",
+    description: "查看 Team 中待处理的请求 / List pending requests in a team",
+    parameters: Type.Object({
+      team: Type.Optional(Type.String({ description: "Team 名称（可选，不填则查看所有）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_pending_requests", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_pending_requests failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  // === Team Orchestration ===
+
+  api.registerTool({
+    name: "cam_team_spawn_agent",
+    description: "在 Team 中启动新 Agent / Spawn a new agent in a team",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+      name: Type.String({ description: "Agent 名称" }),
+      agent_type: Type.Optional(Type.String({ description: "Agent 类型: claude/opencode/codex" })),
+      initial_prompt: Type.String({ description: "Agent 初始提示词" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_spawn_agent", params, 45000);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_spawn_agent failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_progress",
+    description: "查看 Team 整体进度 / View team progress",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_progress", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_progress failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_shutdown",
+    description: "关闭 Team 及其所有 Agent / Shutdown a team and all its agents",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_shutdown", params, 30000);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_shutdown failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_orchestrate",
+    description: "自动编排 Team 执行任务 / Auto-orchestrate a team to execute a task",
+    parameters: Type.Object({
+      task_desc: Type.String({ description: "任务描述" }),
+      project: Type.Optional(Type.String({ description: "项目路径（可选）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_orchestrate", params, 60000);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_orchestrate failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_team_assign_task",
+    description: "向 Team 成员分配任务 / Assign a task to a team member",
+    parameters: Type.Object({
+      team: Type.String({ description: "Team 名称" }),
+      member: Type.String({ description: "成员名称" }),
+      task: Type.String({ description: "任务描述" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("team_assign_task", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_team_assign_task failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  // === Task Management ===
+
+  api.registerTool({
+    name: "cam_task_list",
+    description: "列出 Team 的任务列表 / List tasks for a team",
+    parameters: Type.Object({
+      team_name: Type.String({ description: "Team 名称" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("task_list", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_task_list failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_task_get",
+    description: "获取任务详情 / Get task details",
+    parameters: Type.Object({
+      team_name: Type.String({ description: "Team 名称" }),
+      task_id: Type.String({ description: "任务 ID" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("task_get", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_task_get failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_task_update",
+    description: "更新任务状态 / Update task status",
+    parameters: Type.Object({
+      team_name: Type.String({ description: "Team 名称" }),
+      task_id: Type.String({ description: "任务 ID" }),
+      status: Type.String({ description: "新状态 (pending/in_progress/completed/deleted)" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("task_update", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_task_update failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  // === Reply Management ===
+
+  api.registerTool({
+    name: "cam_get_pending_confirmations",
+    description: "查看所有待处理的确认请求 / List all pending confirmation requests",
+    parameters: Type.Object({}),
+    async execute() {
+      try {
+        const result = await callCamMcp("get_pending_confirmations", {});
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_get_pending_confirmations failed", { error });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_reply_pending",
+    description: "回复待处理的确认请求 / Reply to a pending confirmation request",
+    parameters: Type.Object({
+      reply: Type.String({ description: "回复内容（如 'y', 'n', 或具体回复）" }),
+      target: Type.Optional(Type.String({ description: "目标 agent（可选，支持通配符如 'cam-*'）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("reply_pending", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_reply_pending failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_handle_user_reply",
+    description: "处理用户回复（由通知系统调用）/ Handle a user reply from notification system",
+    parameters: Type.Object({
+      reply: Type.String({ description: "用户回复内容" }),
+      context: Type.Optional(Type.String({ description: "回复上下文（如 agent_id 或 session_id）" })),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("handle_user_reply", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_handle_user_reply failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  // === Agent Info ===
+
+  api.registerTool({
+    name: "cam_get_agent_info",
+    description: "通过 PID 获取 Agent 详细信息 / Get agent info by PID",
+    parameters: Type.Object({
+      pid: Type.Number({ description: "进程 ID" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("get_agent_info", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_get_agent_info failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_get_session_info",
+    description: "获取会话详细信息 / Get session info by session ID",
+    parameters: Type.Object({
+      session_id: Type.String({ description: "会话 ID" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("get_session_info", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_get_session_info failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
+
+  api.registerTool({
+    name: "cam_agent_by_session_id",
+    description: "通过会话 ID 查找 Agent / Find agent by session ID",
+    parameters: Type.Object({
+      session_id: Type.String({ description: "会话 ID" }),
+    }),
+    async execute(_id, params) {
+      try {
+        const result = await callCamMcp("agent_by_session_id", params);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_agent_by_session_id failed", { error, params });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
 }

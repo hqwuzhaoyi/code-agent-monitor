@@ -1,267 +1,98 @@
 ---
 name: agent-teams
-description: 创建和管理 Claude Code Agent Teams - 多 Agent 协作完成复杂任务。支持远程管理、快捷回复、风险评估。
+description: 管理多 Agent 协作团队 — Team 生命周期、成员管理、任务分配、Inbox 通信、进度追踪和远程管理。
 ---
 
-# Agent Teams 专家
+# Agent Teams — 多 Agent 协作编排
 
-创建专家团队来完成复杂的编码任务。每个团队由多个 Claude Code Agent 组成，可以并行工作、协作完成任务。
+管理多个 AI Agent 组成的协作团队，支持并行工作、任务分配、进度追踪和远程管理。
 
-## 核心能力
+## 工具清单
 
-### 1. 创建专家团队
+所有工具通过 OpenClaw Plugin 层暴露，统一使用 `cam_` 前缀。
 
-根据任务自动分析需要的角色，创建团队并启动对应的 Agent。
-
-```
-用户: 帮我在 /Users/admin/workspace/myapp 做代码审查
-助手: 好，创建专家团队...
-
-✅ 已创建 Team: myapp-review
-   项目: /Users/admin/workspace/myapp
-   成员:
-   - developer (代码分析)
-   - reviewer (代码审查)
-```
-
-### 2. 远程管理
-
-通过 Telegram/WhatsApp 远程管理团队。
-
-CAM 检测到事件后发送 system event 给 OpenClaw，OpenClaw Agent 决定：
-- 是否需要通知用户
-- 发送到哪个 thread
-- 是否可以自动审批
-
-用户回复后，OpenClaw 调用 CAM MCP 接口执行。
-
-### 3. 风险评估
-
-自动评估权限请求的风险等级：
-
-| 风险 | 示例 | 显示 |
-|------|------|------|
-| ✅ 低 | `ls`, `cat`, `/tmp` 文件 | 安全操作 |
-| ⚠️ 中 | `npm install`, 项目文件 | 请确认 |
-| 🔴 高 | `rm -rf`, `sudo`, 系统文件 | 高风险警告 |
-
----
-
-## MCP 工具
-
-### Team 编排工具
+### Team 发现
 
 | 工具 | 描述 | 参数 |
 |------|------|------|
-| `team_orchestrate` | 根据任务描述创建团队 | `task_desc`, `project` |
-| `team_spawn_agent` | 在团队中启动 Agent | `team`, `name`, `agent_type`, `initial_prompt` |
-| `team_progress` | 获取团队聚合进度 | `team` |
-| `team_shutdown` | 优雅关闭团队 | `team` |
-| `team_assign_task` | 分配任务给成员 | `team`, `member`, `task` |
+| `cam_team_list` | 列出所有 Teams | 无 |
+| `cam_team_members` | 获取 Team 成员列表 | `team_name` |
 
-### 快捷回复工具
+### Team 生命周期
 
 | 工具 | 描述 | 参数 |
 |------|------|------|
-| `get_pending_confirmations` | 获取待处理确认 | - |
-| `reply_pending` | 回复待处理确认 | `reply`, `target` (可选) |
-| `handle_user_reply` | 处理自然语言回复 | `reply`, `context` (可选) |
+| `cam_team_create` | 创建空 Team | `name`, `description`, `project_path` |
+| `cam_team_delete` | 删除 Team 及其资源 | `name` |
+| `cam_team_status` | 获取 Team 完整状态（成员、任务、消息） | `name` |
+| `cam_team_orchestrate` | 根据任务描述自动创建 Team 并启动 agents | `task_desc`, `project` |
 
-### 基础 Team 工具
+### 成员管理
 
 | 工具 | 描述 | 参数 |
 |------|------|------|
-| `team_create` | 创建空团队 | `name`, `description`, `project_path` |
-| `team_delete` | 删除团队 | `name` |
-| `team_status` | 获取团队状态 | `name` |
-| `inbox_read` | 读取成员消息 | `team`, `member` |
-| `inbox_send` | 发送消息给成员 | `team`, `member`, `message` |
-
----
-
-## 自然语言意图映射
-
-### 创建团队
-
-| 用户说的 | 意图 | 操作 |
-|----------|------|------|
-| "启动一个团队做 xxx" | 创建团队 | `team_orchestrate` |
-| "帮我在 xxx 项目做 yyy" | 创建团队 | `team_orchestrate` |
-| "组个团队修复 bug" | 创建团队 | `team_orchestrate` |
-| "在 xxx 加个 developer" | 添加成员 | `team_spawn_agent` |
-
-### 查看状态
-
-| 用户说的 | 意图 | 操作 |
-|----------|------|------|
-| "团队进度怎样" | 查看进度 | `team_progress` |
-| "xxx team 在干嘛" | 查看状态 | `team_status` |
-| "有什么等着我" | 待处理确认 | `get_pending_confirmations` |
-| "看看消息" | 查看 inbox | `inbox_read` |
-
-### 快捷回复
-
-| 用户说的 | 意图 | 操作 |
-|----------|------|------|
-| "y" / "yes" / "是" / "好" / "可以" / "批准" | 批准 | `reply_pending("y")` |
-| "n" / "no" / "否" / "不" / "取消" / "拒绝" | 拒绝 | `reply_pending("n")` |
-| "1" / "2" / "3" | 选择选项 | `reply_pending("1")` |
+| `cam_team_spawn_agent` | 在 Team 中启动新 Agent | `team`, `name`, `agent_type`, `initial_prompt?` |
+| `cam_team_progress` | 获取 Team 聚合进度 | `team` |
+| `cam_team_shutdown` | 优雅关闭 Team（停止所有 agents） | `team` |
+| `cam_team_assign_task` | 分配任务给成员 | `team`, `member`, `task` |
 
 ### 任务管理
 
-| 用户说的 | 意图 | 操作 |
-|----------|------|------|
-| "给 developer 分配 xxx" | 分配任务 | `team_assign_task` |
-| "告诉 xxx 去做 yyy" | 分配任务 | `team_assign_task` |
-| "停掉团队" / "关闭 xxx team" | 关闭团队 | `team_shutdown` |
+| 工具 | 描述 | 参数 |
+|------|------|------|
+| `cam_task_list` | 列出 Team 所有任务 | `team_name` |
+| `cam_task_get` | 获取任务详情 | `team_name`, `task_id` |
+| `cam_task_update` | 更新任务状态 | `team_name`, `task_id`, `status` |
+
+`cam_task_update` 的 `status` 可选值：`pending`, `in_progress`, `completed`, `deleted`。
+
+### Inbox 通信
+
+| 工具 | 描述 | 参数 |
+|------|------|------|
+| `cam_inbox_read` | 读取成员 inbox 消息 | `team`, `member` |
+| `cam_inbox_send` | 发送消息到成员 inbox | `team`, `member`, `message`, `from?` |
+| `cam_team_pending_requests` | 获取等待中的权限请求 | `team?`（不指定则返回所有 Team） |
+
+### 回复管理
+
+| 工具 | 描述 | 参数 |
+|------|------|------|
+| `cam_get_pending_confirmations` | 获取所有待处理确认 | 无 |
+| `cam_reply_pending` | 回复待处理确认 | `reply`, `target?` |
+| `cam_handle_user_reply` | 处理自然语言回复（自动解析意图） | `reply`, `context?` |
 
 ---
 
-## 完整示例对话
+## Team 编排流程
 
-### 示例 1：创建专家团队完成任务
+### 自动编排（推荐）
 
-```
-用户: 帮我在 /Users/admin/workspace/myapp 实现用户认证功能
-
-助手: 好，创建专家团队处理这个任务...
-
-✅ 已创建 Team: myapp-8234
-   项目: /Users/admin/workspace/myapp
-   任务: 实现用户认证功能
-   成员:
-   - developer (负责实现)
-
-   developer 正在分析项目结构...
-
-[几分钟后]
-
-助手: ⚠️ myapp-8234/developer 请求权限
-
-   操作: 安装依赖
-   命令: npm install jsonwebtoken bcrypt
-   风险: 中 ⚠️
-
-   回复 y 允许 / n 拒绝
-
-用户: y
-
-助手: 已发送，developer 继续执行中...
-
-[任务完成]
-
-助手: ✅ myapp-8234 任务完成
-
-   完成内容:
-   - 创建 src/auth/login.ts
-   - 创建 src/auth/register.ts
-   - 更新 package.json
-   - 添加 JWT 认证中间件
-
-   要查看详细变更吗？
-```
-
-### 示例 2：多成员协作
+使用 `cam_team_orchestrate` 一步完成创建和启动：
 
 ```
-用户: 组个团队做代码审查，需要 reviewer 和 tester
-
-助手: 好，创建多成员团队...
-
-✅ 已创建 Team: review-team-5678
-   成员:
-   - reviewer (代码审查)
-   - tester (测试验证)
-
-   reviewer 正在分析代码...
-   tester 正在准备测试环境...
-
-[几分钟后]
-
-助手: 📊 团队进度
-
-   review-team-5678
-   ├── reviewer: 执行中 (context 35%)
-   │   最近: 审查 src/api/
-   ├── tester: 等待输入
-   │   等待: 确认测试范围
-   └── 任务: 1/3 完成
-
-用户: 告诉 tester 只测 API 模块
-
-助手: 已发送任务给 tester:
-   "只测 API 模块"
-
-   tester 开始执行测试...
+cam_team_orchestrate(
+  task_desc: "在 myapp 项目实现用户认证功能",
+  project: "/Users/admin/workspace/myapp"
+)
 ```
 
-### 示例 3：远程快捷回复
+系统自动分析任务 → 创建 Team → 分配角色 → 启动 Agents。
+
+### 手动编排
+
+分步操作，适合精细控制：
 
 ```
-[Telegram 通知]
-🔐 myapp-8234 请求权限
-
-执行: Bash
-rm -rf node_modules && npm install
-
-风险: 高 🔴
-
-回复 y 允许 / n 拒绝 `cam-1770529396`
-
-用户: y
-
-助手: 已批准 myapp-8234/developer 的请求
-   developer 继续执行中...
+1. team_create(name: "auth-team", description: "认证功能开发", project_path: "/path/to/myapp")
+2. team_spawn_agent(team: "auth-team", name: "developer", agent_type: "general-purpose", initial_prompt: "实现 JWT 认证")
+3. team_spawn_agent(team: "auth-team", name: "tester", agent_type: "general-purpose", initial_prompt: "为认证模块编写测试")
+4. team_assign_task(team: "auth-team", member: "developer", task: "实现登录注册 API")
 ```
 
-### 示例 4：查看待处理请求
+### 角色自动分配规则
 
-```
-用户: 有什么等着我
-
-助手: 2 个待处理确认:
-
-   1. [myapp-8234/developer]
-      执行: git push origin main
-      风险: 中 ⚠️
-
-   2. [review-team/tester]
-      创建: test/api.test.ts
-      风险: 低 ✅
-
-   回复 "y 1" 批准第一个，或 "y" 批准全部
-
-用户: y 1
-
-助手: 已批准 myapp-8234/developer 的 git push 请求
-```
-
----
-
-## CLI 命令
-
-```bash
-# 在团队中启动 Agent
-cam team-spawn <team> <name> [-t type] [-p prompt] [--json]
-
-# 获取团队进度
-cam team-progress <team> [--json]
-
-# 关闭团队
-cam team-shutdown <team>
-
-# 查看待处理确认
-cam pending-confirmations [--json]
-
-# 快捷回复
-cam reply <reply> [--target <id>]
-```
-
----
-
-## 角色自动分配规则
-
-根据任务描述自动分配角色：
+`cam_team_orchestrate` 根据任务描述自动分配角色：
 
 | 任务关键词 | 分配角色 |
 |-----------|---------|
@@ -273,51 +104,229 @@ cam reply <reply> [--target <id>]
 
 ---
 
+## 自然语言意图映射
+
+### 创建团队
+
+| 用户说的 | 意图 | 操作 |
+|----------|------|------|
+| "启动一个团队做 xxx" | 创建团队 | `cam_team_orchestrate` |
+| "帮我在 xxx 项目做 yyy" | 创建团队 | `cam_team_orchestrate` |
+| "组个团队修复 bug" | 创建团队 | `cam_team_orchestrate` |
+| "在 xxx 加个 developer" | 添加成员 | `cam_team_spawn_agent` |
+
+### 查看状态
+
+| 用户说的 | 意图 | 操作 |
+|----------|------|------|
+| "团队进度怎样" | 查看进度 | `cam_team_progress` |
+| "xxx team 在干嘛" | 查看状态 | `cam_team_status` |
+| "有什么等着我" | 待处理确认 | `cam_get_pending_confirmations` |
+| "看看消息" | 查看 inbox | `cam_inbox_read` |
+| "有哪些团队" | 列出团队 | `cam_team_list` |
+| "xxx 团队有谁" | 成员列表 | `cam_team_members` |
+
+### 快捷回复
+
+| 用户说的 | 意图 | 操作 |
+|----------|------|------|
+| "y" / "yes" / "是" / "好" / "可以" / "批准" | 批准 | `cam_reply_pending(reply: "y")` |
+| "n" / "no" / "否" / "不" / "取消" / "拒绝" | 拒绝 | `cam_reply_pending(reply: "n")` |
+| "1" / "2" / "3" | 选择选项 | `cam_reply_pending(reply: "1")` |
+
+### 任务管理
+
+| 用户说的 | 意图 | 操作 |
+|----------|------|------|
+| "给 developer 分配 xxx" | 分配任务 | `cam_team_assign_task` |
+| "告诉 xxx 去做 yyy" | 分配任务 | `cam_team_assign_task` |
+| "看看任务列表" | 查看任务 | `cam_task_list` |
+| "xxx 任务完成了" | 更新状态 | `cam_task_update(status: "completed")` |
+| "停掉团队" / "关闭 xxx team" | 关闭团队 | `cam_team_shutdown` |
+
+---
+
+## 风险评估
+
+权限请求自动评估风险等级：
+
+| 风险 | 示例 | 显示 |
+|------|------|------|
+| LOW | `ls`, `cat`, `/tmp` 文件、测试命令 | 安全操作 |
+| MEDIUM | `npm install`, `git push`, 项目文件写入 | 请确认 |
+| HIGH | `rm -rf`, `sudo`, 系统文件、命令链 | 高风险警告 |
+
+详细的自动审批规则（白名单/黑名单/LLM 判断三层决策模型）见 [cam-notify SKILL](../cam-notify/SKILL.md)。
+
+---
+
 ## System Event 架构
 
-CAM 通过 `system event` 发送结构化数据给 OpenClaw，由 OpenClaw Agent 决定：
+CAM 检测到 Agent 事件后发送 system event 给 OpenClaw，OpenClaw Agent 决定：
 - 是否需要通知用户
-- 发送到哪个 Telegram thread
-- 是否自动审批
+- 发送到哪个 thread
+- 是否可以自动审批
 
-详见 [cam-notify Skill](../cam-notify/SKILL.md) 了解 system event 数据结构和处理指南。
+用户回复后，OpenClaw 调用 CAM MCP 工具执行操作。
 
-### 与 cam-notify 的关系
+### 与 cam-notify 的分工
 
 | Skill | 职责 |
 |-------|------|
-| agent-teams | Team 编排、成员管理、任务分配 |
-| cam-notify | System Event 处理、AI 决策指南、回复路由 |
+| agent-teams | Team 编排、成员管理、任务分配、Inbox 通信 |
+| cam-notify | System Event 处理、通知格式化、自动审批决策、回复路由 |
+
+---
+
+## 完整示例
+
+### 示例 1：创建专家团队完成任务
+
+```
+用户: 帮我在 /Users/admin/workspace/myapp 实现用户认证功能
+
+助手: 好，创建专家团队处理这个任务...
+
+team_orchestrate(task_desc: "实现用户认证功能", project: "/Users/admin/workspace/myapp")
+
+已创建 Team: myapp-8234
+  项目: /Users/admin/workspace/myapp
+  成员:
+  - developer (负责实现)
+
+[几分钟后，收到权限请求通知]
+
+助手: myapp-8234/developer 请求权限
+  操作: npm install jsonwebtoken bcrypt
+  风险: MEDIUM
+
+  回复 y 允许 / n 拒绝
+
+用户: y
+
+reply_pending(reply: "y")
+
+已发送，developer 继续执行中...
+```
+
+### 示例 2：多成员协作
+
+```
+用户: 组个团队做代码审查，需要 reviewer 和 tester
+
+助手: 好，创建多成员团队...
+
+team_create(name: "review-team", description: "代码审查", project_path: ".")
+team_spawn_agent(team: "review-team", name: "reviewer", agent_type: "general-purpose", initial_prompt: "审查代码质量")
+team_spawn_agent(team: "review-team", name: "tester", agent_type: "general-purpose", initial_prompt: "准备测试")
+
+[几分钟后]
+
+用户: 团队进度怎样
+
+team_progress(team: "review-team")
+
+  review-team
+  ├── reviewer: 执行中 (context 35%)
+  │   最近: 审查 src/api/
+  ├── tester: 等待输入
+  │   等待: 确认测试范围
+  └── 任务: 1/3 完成
+
+用户: 告诉 tester 只测 API 模块
+
+team_assign_task(team: "review-team", member: "tester", task: "只测 API 模块")
+
+已发送任务给 tester，tester 开始执行测试...
+```
+
+### 示例 3：查看和管理任务
+
+```
+用户: 看看 review-team 的任务
+
+task_list(team_name: "review-team")
+
+  ID     | 状态        | 负责人   | 描述
+  task-1 | completed   | reviewer | 审查 src/api/
+  task-2 | in_progress | tester   | 测试 API 模块
+  task-3 | pending     | -        | 审查 src/utils/
+
+用户: task-3 已经完成了
+
+task_update(team_name: "review-team", task_id: "task-3", status: "completed")
+
+已更新 task-3 状态为 completed。
+```
+
+### 示例 4：远程快捷回复
+
+```
+[通知] myapp-8234 请求权限
+  执行: Bash
+  rm -rf node_modules && npm install
+  风险: HIGH
+
+  回复 y 允许 / n 拒绝
+
+用户: y
+
+reply_pending(reply: "y")
+
+已批准 myapp-8234/developer 的请求，developer 继续执行中...
+```
+
+### 示例 5：查看待处理请求
+
+```
+用户: 有什么等着我
+
+get_pending_confirmations()
+
+  2 个待处理确认:
+
+  1. [myapp-8234/developer]
+     执行: git push origin main
+     风险: MEDIUM
+
+  2. [review-team/tester]
+     创建: test/api.test.ts
+     风险: LOW
+
+  回复 "y 1" 批准第一个，或 "y" 批准全部
+
+用户: y 1
+
+reply_pending(reply: "y", target: "myapp-8234/developer")
+
+已批准 myapp-8234/developer 的 git push 请求。
+```
+
+---
+
+## CLI 命令
+
+```bash
+# Team 管理
+cam team-create <name>              # 创建 Team
+cam team-spawn <team> <name>        # 启动 Agent
+cam team-progress <team>            # 查看进度
+cam team-shutdown <team>            # 关闭 Team
+
+# 回复管理
+cam pending-confirmations           # 查看待处理
+cam reply <reply> [--target <id>]   # 回复确认
+cam reply y --all                   # 批准全部
+cam reply y --agent "cam-*"         # 按 agent 匹配批准
+cam reply y --risk low              # 按风险等级批准
+```
 
 ---
 
 ## 最佳实践
 
-### 1. 任务描述要清晰
-
-```
-❌ "帮我改改代码"
-✅ "帮我在 /Users/admin/workspace/myapp 修复登录页面的表单验证 bug"
-```
-
-### 2. 及时响应权限请求
-
-高风险操作会阻塞 Agent，及时回复可以提高效率。
-
-### 3. 使用快捷回复
-
-- `y` - 批准
-- `n` - 拒绝
-- `1/2/3` - 选择选项
-
-### 4. 定期检查进度
-
-```
-用户: 团队进度怎样
-```
-
-### 5. 任务完成后关闭团队
-
-```
-用户: 停掉 myapp-8234 团队
-```
+1. **任务描述要清晰** — `"帮我在 /path/to/myapp 修复登录页面的表单验证 bug"` 优于 `"帮我改改代码"`
+2. **及时响应权限请求** — HIGH 风险操作会阻塞 Agent，及时回复提高效率
+3. **使用快捷回复** — `y` 批准 / `n` 拒绝 / `1/2/3` 选择选项
+4. **定期检查进度** — `cam_team_progress` 查看团队状态
+5. **任务完成后关闭团队** — `cam_team_shutdown` 释放资源

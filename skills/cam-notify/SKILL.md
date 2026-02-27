@@ -50,6 +50,8 @@ CAM 发送的 system event 格式：
 
 ### Event Types
 
+> **注意**: Webhook payload 中 `event_type` 使用 snake_case（如下表所示）。代码内部枚举使用 PascalCase（如 `WaitingForInput`），序列化时自动转换。
+
 | event_type | 描述 | 典型 urgency |
 |------------|------|-------------|
 | `permission_request` | 权限请求（工具执行确认） | HIGH |
@@ -61,6 +63,8 @@ CAM 发送的 system event 格式：
 | `session_end` | 会话结束 | LOW |
 
 ### Risk Levels
+
+> **权威来源**: 此处是风险等级的完整定义。agent-teams skill 中的风险等级引用此处。
 
 | risk_level | 描述 | 示例 |
 |------------|------|------|
@@ -319,7 +323,7 @@ Agent 正在配置 AI 功能，需要 API 密钥
 
 ## 用户回复处理
 
-当用户回复时，调用 CAM MCP 接口：
+当用户回复时，调用 CAM Plugin 工具：
 
 | 用户回复 | 操作 |
 |----------|------|
@@ -327,6 +331,17 @@ Agent 正在配置 AI 功能，需要 API 密钥
 | n / no / 拒绝 | `cam_agent_send(agent_id, "n")` |
 | 1 / 2 / 3 | `cam_agent_send(agent_id, "1")` 等 |
 | 其他文本 | `cam_agent_send(agent_id, 用户输入)` |
+
+### 回复工具
+
+所有回复工具均可通过 CAM Plugin 调用（`cam_` 前缀）：
+
+| 工具 | 说明 |
+|------|------|
+| `cam_agent_send(agent_id, message)` | 向指定 agent 发送消息 |
+| `cam_get_pending_confirmations()` | 获取所有待处理的确认请求 |
+| `cam_reply_pending(reply, target?)` | 回复待处理确认（支持 y/n/1/2/3 快捷回复） |
+| `cam_handle_user_reply(reply, context?)` | 处理自然语言回复（自动解析意图） |
 
 ### 批量回复
 
@@ -341,7 +356,7 @@ Agent 正在配置 AI 功能，需要 API 密钥
 ### Team 回复路由
 
 如果 agent_id 包含 team 信息（如 `team-xxx/member`）：
-- 使用 `inbox_send(team, member, reply)` 发送回复
+- 使用 `cam_inbox_send(team, member, reply)` 发送回复
 
 ## 重复确认机制
 

@@ -88,39 +88,61 @@ pub fn handle_setup(args: SetupArgs) -> Result<()> {
     Ok(())
 }
 
+/// 解析 cam 二进制的绝对路径
+/// 优先级: plugin 位置 > current_exe > which > fallback
+fn get_cam_binary_path() -> String {
+    // 1. Check plugin location (~/.claude/plugins/cam/bin/cam)
+    if let Some(home) = dirs::home_dir() {
+        let plugin_path = home.join(".claude/plugins/cam/bin/cam");
+        if plugin_path.exists() {
+            return plugin_path.to_string_lossy().to_string();
+        }
+    }
+    // 2. current_exe
+    if let Ok(exe) = std::env::current_exe() {
+        return exe.to_string_lossy().to_string();
+    }
+    // 3. which
+    if let Ok(path) = which::which("cam") {
+        return path.to_string_lossy().to_string();
+    }
+    // 4. fallback
+    "cam".to_string()
+}
+
 /// 生成 hook 配置
 fn generate_hook_config(tool: &str) -> Result<String> {
+    let cam_path = get_cam_binary_path();
     match tool {
-        "codex" => Ok(r#"notify = ["cam", "codex-notify"]"#.to_string()),
-        "claude" => Ok(r#"{
-  "hooks": {
-    "Stop": [
-      {
-        "matcher": ".*",
-        "hooks": ["cam notify --event stop"]
-      }
-    ],
-    "notification": [
-      {
-        "matcher": ".*",
-        "hooks": ["cam notify --event notification"]
-      }
-    ],
-    "session_start": [
-      {
-        "matcher": ".*",
-        "hooks": ["cam notify --event session_start"]
-      }
-    ]
-  }
-}"#
-        .to_string()),
-        "opencode" => Ok(r#"# OpenCode hook configuration
-[hooks]
-on_idle = "cam notify --event WaitingForInput"
-on_error = "cam notify --event Error"
-"#
-        .to_string()),
+        "codex" => Ok(format!(r#"notify = ["{}", "codex-notify"]"#, cam_path)),
+        "claude" => {
+            let events = [
+                ("Notification", "notification"),
+                ("PermissionRequest", "permission_request"),
+                ("SessionEnd", "session_end"),
+                ("SessionStart", "session_start"),
+                ("Stop", "stop"),
+            ];
+            let mut hooks = serde_json::Map::new();
+            for (event_name, event_arg) in &events {
+                let command = format!(
+                    "{} notify --event {} --agent-id ${{SESSION_ID:-unknown}}",
+                    cam_path, event_arg
+                );
+                let hook_entry = serde_json::json!([
+                    {
+                        "matcher": "",
+                        "hooks": [{"type": "command", "command": command}]
+                    }
+                ]);
+                hooks.insert(event_name.to_string(), hook_entry);
+            }
+            let config = serde_json::json!({ "hooks": hooks });
+            Ok(serde_json::to_string_pretty(&config)?)
+        }
+        "opencode" => Err(anyhow::anyhow!(
+            "OpenCode hook configuration is not yet supported. Please configure manually."
+        )),
         _ => Err(anyhow::anyhow!("Unsupported tool: {}", tool)),
     }
 }
@@ -157,21 +179,9 @@ fn apply_hook_config(tool: &str, config_path: &Path, new_config: &str) -> Result
             }
         }
         "opencode" => {
-            // 追加到 TOML
-            let mut content = if config_path.exists() {
-                fs::read_to_string(config_path)?
-            } else {
-                String::new()
-            };
-            if !content.contains("[hooks]") {
-                if !content.is_empty() && !content.ends_with('\n') {
-                    content.push('\n');
-                }
-                content.push_str(new_config);
-            } else {
-                println!("⚠️  hooks already configured, skipping");
-            }
-            fs::write(config_path, content)?;
+            return Err(anyhow::anyhow!(
+                "OpenCode hook configuration is not yet supported. Please configure manually."
+            ));
         }
         _ => {
             return Err(anyhow::anyhow!("Unsupported tool: {}", tool));
@@ -218,25 +228,58 @@ mod tests {
     fn test_generate_codex_config() {
         let config = generate_hook_config("codex").unwrap();
         assert!(config.contains("notify"));
-        assert!(config.contains("cam"));
         assert!(config.contains("codex-notify"));
+        // Should contain an absolute path or fallback, not bare "cam"
+        assert!(config.starts_with("notify = [\""));
     }
 
     #[test]
     fn test_generate_claude_config() {
         let config = generate_hook_config("claude").unwrap();
-        assert!(config.contains("hooks"));
-        assert!(config.contains("Stop"));
-        assert!(config.contains("notification"));
-        assert!(config.contains("cam notify"));
+        let json: serde_json::Value = serde_json::from_str(&config).unwrap();
+
+        // Must have hooks object
+        let hooks = json.get("hooks").expect("missing hooks key");
+
+        // All 5 PascalCase events
+        let expected_events = [
+            "Notification",
+            "PermissionRequest",
+            "SessionEnd",
+            "SessionStart",
+            "Stop",
+        ];
+        for event in &expected_events {
+            assert!(
+                hooks.get(event).is_some(),
+                "missing event: {}",
+                event
+            );
+        }
+
+        // Each event has correct structure: array of objects with matcher and hooks array
+        for event in &expected_events {
+            let entries = hooks[event].as_array().expect("event should be array");
+            assert_eq!(entries.len(), 1);
+            let entry = &entries[0];
+            assert_eq!(entry["matcher"], "");
+            let hook_list = entry["hooks"].as_array().expect("hooks should be array");
+            assert_eq!(hook_list.len(), 1);
+            assert_eq!(hook_list[0]["type"], "command");
+            let cmd = hook_list[0]["command"].as_str().unwrap();
+            assert!(cmd.contains("notify --event"), "command missing 'notify --event': {}", cmd);
+            assert!(cmd.contains("--agent-id ${SESSION_ID:-unknown}"), "command missing agent-id: {}", cmd);
+        }
     }
 
     #[test]
     fn test_generate_opencode_config() {
-        let config = generate_hook_config("opencode").unwrap();
-        assert!(config.contains("[hooks]"));
-        assert!(config.contains("on_idle"));
-        assert!(config.contains("on_error"));
+        let result = generate_hook_config("opencode");
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("not yet supported"));
     }
 
     #[test]
@@ -248,33 +291,39 @@ mod tests {
     #[test]
     fn test_merge_claude_config_empty() {
         let existing = "{}";
-        let new_config = r#"{"hooks": {"Stop": [{"matcher": ".*", "hooks": ["cam notify"]}]}}"#;
-        let merged = merge_claude_config(existing, new_config).unwrap();
+        let new_config = generate_hook_config("claude").unwrap();
+        let merged = merge_claude_config(existing, &new_config).unwrap();
         let json: serde_json::Value = serde_json::from_str(&merged).unwrap();
         assert!(json.get("hooks").is_some());
         assert!(json["hooks"].get("Stop").is_some());
+        assert!(json["hooks"].get("Notification").is_some());
+        assert!(json["hooks"].get("PermissionRequest").is_some());
     }
 
     #[test]
     fn test_merge_claude_config_existing_hooks() {
-        let existing = r#"{"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": ["echo test"]}]}}"#;
-        let new_config = r#"{"hooks": {"Stop": [{"matcher": ".*", "hooks": ["cam notify"]}]}}"#;
-        let merged = merge_claude_config(existing, new_config).unwrap();
+        let existing =
+            r#"{"hooks": {"PreToolUse": [{"matcher": ".*", "hooks": ["echo test"]}]}}"#;
+        let new_config = generate_hook_config("claude").unwrap();
+        let merged = merge_claude_config(existing, &new_config).unwrap();
         let json: serde_json::Value = serde_json::from_str(&merged).unwrap();
         // 保留现有的 PreToolUse
         assert!(json["hooks"].get("PreToolUse").is_some());
-        // 添加新的 Stop
+        // 添加新的事件
         assert!(json["hooks"].get("Stop").is_some());
+        assert!(json["hooks"].get("Notification").is_some());
     }
 
     #[test]
     fn test_merge_claude_config_skip_existing() {
         let existing = r#"{"hooks": {"Stop": [{"matcher": ".*", "hooks": ["existing"]}]}}"#;
-        let new_config = r#"{"hooks": {"Stop": [{"matcher": ".*", "hooks": ["cam notify"]}]}}"#;
-        let merged = merge_claude_config(existing, new_config).unwrap();
+        let new_config = generate_hook_config("claude").unwrap();
+        let merged = merge_claude_config(existing, &new_config).unwrap();
         let json: serde_json::Value = serde_json::from_str(&merged).unwrap();
         // 保留现有的 Stop，不覆盖
         let stop_hooks = &json["hooks"]["Stop"][0]["hooks"][0];
         assert_eq!(stop_hooks.as_str().unwrap(), "existing");
+        // 但新事件应被添加
+        assert!(json["hooks"].get("Notification").is_some());
     }
 }

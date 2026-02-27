@@ -554,6 +554,10 @@ fn step_agent_hooks(auto: bool) -> Result<()> {
     println!("  检测到: {}", detected.join(", "));
 
     for tool in &detected {
+        if *tool == "opencode" {
+            println!("  ⚠️  OpenCode hooks 暂不支持自动配置，请手动配置。");
+            continue;
+        }
         if auto {
             println!("  [auto] 配置 {} hooks...", tool);
             run_setup(tool)?;
