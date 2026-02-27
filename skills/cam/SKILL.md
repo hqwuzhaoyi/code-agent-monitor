@@ -1,6 +1,6 @@
 ---
 name: code-agent-monitor
-description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex)。CAM 负责 Agent 生命周期管理、会话管理和意图路由。Team 协作详见 agent-teams Skill，通知决策详见 cam-notify Skill。
+description: "Use when user wants to monitor, start, stop, resume, or manage AI coding agents (Claude Code, OpenCode, Codex). Handles agent lifecycle, session history, tmux session management, and natural language intent routing. For team orchestration see agent-teams skill; for notification decisions see cam-notify skill."
 ---
 
 # Code Agent Monitor (CAM)
@@ -9,10 +9,23 @@ description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex
 
 ## 相关 Skills
 
-- **[agent-teams](../agent-teams/SKILL.md)** - Team 编排、多 Agent 协作、任务分配
-- **[cam-notify](../cam-notify/SKILL.md)** - System Event 处理、AI 决策、回复路由
+- **agent-teams** skill - Team 编排、多 Agent 协作、任务分配
+- **cam-notify** skill - System Event 处理、AI 决策、回复路由
 
 > 注：新架构下，CAM 只发送 system event，通知决策由 OpenClaw Agent 处理。
+
+## When to Use
+
+- 启动、停止、恢复单个 Agent
+- 查看 Agent 状态、日志、输出
+- 管理历史会话（列出、恢复）
+- 处理单 Agent 的确认回复
+- 自然语言意图路由到具体操作
+
+## When NOT to Use
+
+- 多 Agent 团队编排（使用 **agent-teams** skill）
+- 通知决策、自动审批、风险判断（使用 **cam-notify** skill）
 
 ---
 
@@ -57,7 +70,7 @@ description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex
 
 ### 回复管理工具
 
-处理 Agent 的确认请求和用户回复。详见 [cam-notify Skill](../cam-notify/SKILL.md) 了解决策规则。
+处理 Agent 的确认请求和用户回复。详见 **cam-notify** skill 了解决策规则。
 
 | 工具 | 描述 | 必需参数 | 可选参数 |
 |------|------|----------|----------|
@@ -67,38 +80,13 @@ description: 监控和管理 AI 编码代理进程 (Claude Code, OpenCode, Codex
 
 ### Team 管理工具（简要）
 
-Team 编排的完整工具、意图映射和使用指南详见 [agent-teams Skill](../agent-teams/SKILL.md)。
-
-**编排工具**：
+完整 Team 工具详见 **agent-teams** skill。
 
 | 工具 | 描述 | 关键参数 |
 |------|------|----------|
 | `cam_team_orchestrate` | 根据任务描述创建团队并启动 Agents | `task_desc`, `project` |
 | `cam_team_progress` | 获取团队聚合进度 | `team` |
 | `cam_team_shutdown` | 优雅关闭团队 | `team` |
-| `cam_team_spawn_agent` | 在团队中启动 Agent | `team`, `name`, `agent_type`, `initial_prompt` |
-| `cam_team_assign_task` | 分配任务给成员 | `team`, `member`, `task` |
-
-**基础工具**：
-
-| 工具 | 描述 | 关键参数 |
-|------|------|----------|
-| `cam_team_create` | 创建空团队 | `name`, `description`, `project_path` |
-| `cam_team_delete` | 删除团队 | `name` |
-| `cam_team_status` | 获取团队状态 | `name` |
-| `cam_team_list` | 列出所有 Teams | - |
-| `cam_team_members` | 获取成员列表 | `team_name` |
-
-**消息和任务工具**：
-
-| 工具 | 描述 | 关键参数 |
-|------|------|----------|
-| `cam_inbox_read` | 读取成员消息 | `team`, `member` |
-| `cam_inbox_send` | 发送消息给成员 | `team`, `member`, `message` |
-| `cam_team_pending_requests` | 获取等待中的权限请求 | `team` |
-| `cam_task_list` | 列出 Team 的所有任务 | `team_name` |
-| `cam_task_get` | 获取任务详情 | `team_name`, `task_id` |
-| `cam_task_update` | 更新任务状态 | `team_name`, `task_id`, `status` |
 
 ---
 
@@ -122,7 +110,7 @@ Team 编排的完整工具、意图映射和使用指南详见 [agent-teams Skil
 
 ### Team 管理意图（简要）
 
-完整的 Team 意图映射详见 [agent-teams Skill](../agent-teams/SKILL.md)。
+完整的 Team 意图映射详见 **agent-teams** skill。
 
 | 用户可能说的 | 意图 | 对应操作 |
 |-------------|------|---------|
@@ -216,6 +204,17 @@ tmux send-keys -t cam-xxxxxxx C-c
 
 ---
 
+## Common Mistakes
+
+| 错误 | 正确做法 |
+|------|----------|
+| 混用 `cam_agent_stop` 和 `cam_kill_agent` | `cam_agent_stop` 优雅停止 Agent；`cam_kill_agent` 是低级进程操作，仅调试用 |
+| 把 `cam_agent_logs` 中的百分比当成任务进度 | 百分比是 context window 占用率，不是任务完成度 |
+| 多 Agent 时不指定目标就发送命令 | 有多个运行中 Agent 时，必须先确认操作目标 |
+| 用 cam 工具管理 Team 成员 | Team 成员通过 **agent-teams** skill 的工具管理 |
+
+---
+
 ## 完整示例对话
 
 ### 示例 1：从零开始一个任务
@@ -277,25 +276,6 @@ tmux send-keys -t cam-xxxxxxx C-c
 
 用户: 把 1 停掉
 助手: 已停止 cam-abc123 (myapp)
-```
-
-### 示例 4：Team 任务（简要）
-
-Team 任务的完整示例详见 [agent-teams Skill](../agent-teams/SKILL.md)。
-
-```
-用户: 帮我修复 myapp 的登录 bug
-助手: 好，创建 Team 处理这个任务...
-      已创建 Team myapp-login-fix
-      - developer 正在分析问题
-
-[几分钟后]
-助手: myapp-login-fix/developer 请求执行:
-      git commit -m "fix: login bug"
-      回复 y 允许，n 拒绝
-
-用户: y
-助手: 已发送，developer 继续执行中...
 ```
 
 ---

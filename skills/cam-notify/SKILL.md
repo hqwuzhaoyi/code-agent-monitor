@@ -1,11 +1,24 @@
 ---
 name: cam-notify
-description: 处理 CAM System Event 并做出通知决策。当收到 CAM 发送的 system event 时，决定是否通知用户、发送到哪个 thread、是否自动审批。
+description: "Use when receiving a CAM system event (permission_request, waiting_for_input, agent_exited, error) to decide whether to notify user, auto-approve, or request human confirmation. Covers three-layer decision model (whitelist, blacklist, LLM judgment), risk levels, message formatting, and reply routing."
 ---
 
 # CAM System Event 处理指南
 
 当你收到来自 CAM 的 system event 时，使用此 skill 处理。
+
+## When to Use
+
+- 收到 CAM 发送的 system event webhook
+- 需要决定是否通知用户
+- 需要自动审批 permission_request
+- 需要格式化通知消息
+- 需要路由用户回复到正确的 Agent
+
+## When NOT to Use
+
+- 管理 Agent 生命周期（使用 **cam** skill）
+- Team 编排和多 Agent 协作（使用 **agent-teams** skill）
 
 ## System Event 数据结构
 
@@ -161,6 +174,32 @@ deploy, push --force, production, release
 
 **LOW 风险**：直接执行 `cam_agent_send(agent_id, "y")`，不向用户发送任何消息。
 
+**非确认类 LOW 事件**（如 `session_start`、`session_end`、`notification` 且 urgency=LOW）：完全忽略，不执行任何操作，不产生任何输出。
+
+**🚫 "完全静默"的含义 — 不可绕过**：
+
+当规则要求静默时，意味着**不产生任何面向用户的输出**。包括但不限于：
+- ❌ 不发送通知消息
+- ❌ 不发送状态播报（如"agent 正在继续跑..."）
+- ❌ 不发送操作汇报（如"刚才批准了 xxx"）
+- ❌ 不发送进度更新
+- ❌ 不在回复中附带提及这些事件
+
+**常见的合理化借口（全部禁止）**：
+
+| 借口 | 为什么是错的 |
+|------|-------------|
+| "我不是在发通知，是在汇报状态" | 汇报状态 = 通知用户，静默意味着两者都不做 |
+| "用户可能想知道 agent 在干什么" | 用户需要时会主动查看，不需要被动推送 |
+| "我只是顺便提一下" | 顺便提 = 发送了消息，违反静默规则 |
+| "批准了多个操作，应该汇总一下" | LOW 风险批量操作同样静默，不需要汇总 |
+| "让用户知道我在监控" | 静默本身就是正确的监控行为 |
+| "确认一下收到了事件" | 确认收到 = 发送消息，静默意味着不做任何回应 |
+| "和其他通知一起顺带提一句" | 不得在合法的 MEDIUM/HIGH 通知中夹带 LOW 事件信息 |
+| "用户之前说过想知道所有操作" | 用户偏好不覆盖静默规则，LOW 事件始终静默 |
+
+**正确行为**：处理完 LOW 风险事件后，什么都不说，等待下一个需要用户操作的事件。
+
 ## AgentExited 处理
 
 区分正常退出和异常退出：
@@ -179,7 +218,7 @@ deploy, push --force, production, release
 |---------|----------|------|
 | HIGH | 不聚合 | 立即发送 |
 | MEDIUM | 30 秒 | 合并同类通知 |
-| LOW | 5 分钟 | 合并或静默 |
+| LOW | — | **完全静默** — 不聚合、不通知、不产生任何用户可见输出 |
 
 **聚合格式**：
 ```
@@ -221,22 +260,6 @@ C) 选项三描述
 [{agent_id}]
 ```
 
-**示例**：
-```
-💬 需要你选择
-
-📋 问题:
-你想要增强现有的 React Todo List 还是从头开始？
-
-🔢 选项:
-A) 增强现有项目 - 添加新功能到当前代码
-B) 从头开始 - 创建全新的项目结构
-
-📝 回复字母选择 (A/B)
-
-[cam-abc123]
-```
-
 #### 确认题 (confirmation)
 
 当 `context.message_type == "confirmation"` 或 `event_type == "permission_request"` 时：
@@ -257,23 +280,6 @@ B) 从头开始 - 创建全新的项目结构
 [{agent_id}]
 ```
 
-**示例**：
-```
-⚠️ 请求确认
-
-🔧 操作:
-Bash: rm -rf ./node_modules
-
-💡 上下文:
-Agent 正在清理项目依赖，准备重新安装
-
-⚡ 风险: 🟡 MEDIUM
-
-📝 回复 y 允许 / n 拒绝
-
-[cam-abc123]
-```
-
 #### 开放式问题 (open_ended)
 
 当 `context.message_type == "open_ended"` 时：
@@ -290,21 +296,6 @@ Agent 正在清理项目依赖，准备重新安装
 📝 直接回复你的答案
 
 [{agent_id}]
-```
-
-**示例**：
-```
-💬 需要你输入
-
-📋 问题:
-请提供你的 OpenAI API Key
-
-💡 背景:
-Agent 正在配置 AI 功能，需要 API 密钥
-
-📝 直接回复你的答案
-
-[cam-abc123]
 ```
 
 ### AI 提取失败时的处理
@@ -357,6 +348,15 @@ Agent 正在配置 AI 功能，需要 API 密钥
 
 [{agent_id}]
 ```
+
+## Common Mistakes
+
+| 错误 | 正确做法 |
+|------|----------|
+| LOW 风险事件时向用户发送状态更新 | LOW 事件完全静默，不产生任何用户可见输出 |
+| 未检查 `extracted_message` 是否为 null 就使用 | 必须先检查，为 null 时回退到 `terminal_snapshot` |
+| 在合法通知中夹带 LOW 事件信息 | 每条通知只包含触发它的那个事件 |
+| 不区分 `message_type` 直接生成通知 | 必须按 choice/confirmation/open_ended 使用对应模板 |
 
 ## 用户回复处理
 
@@ -546,56 +546,29 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 [cam-fail001]
 ```
 
-### 场景 5: 自动批准 - 安全命令
+### 场景 5: 自动批准 — 不同风险等级对比
 
-**收到的 Payload**:
-```json
-{
-  "agent_id": "cam-auto001",
-  "event_type": "permission_request",
-  "urgency": "HIGH",
-  "event_data": {
-    "tool_name": "Bash",
-    "tool_input": {"command": "cargo test"}
-  },
-  "context": {
-    "risk_level": "LOW"
-  }
-}
-```
+| | LOW 风险 | MEDIUM 风险 |
+|---|---------|------------|
+| 示例命令 | `cargo test` | `npm install express` |
+| 匹配规则 | 白名单命中 | LLM 判断 |
+| 是否自动批准 | 是 | 是 |
+| 通知用户 | **否（完全静默）** | 是（简短通知） |
 
-**处理流程**:
+**LOW 风险处理流程**:
 1. 检查白名单 → `cargo test` 在白名单中
 2. 检查参数安全 → 无敏感路径
 3. 自动批准，执行 `cam_agent_send("cam-auto001", "y")`
 4. **不通知用户**（LOW 风险静默）
 
-### 场景 5b: 自动批准 - MEDIUM 风险命令
-
-**收到的 Payload**:
-```json
-{
-  "agent_id": "cam-med001",
-  "event_type": "permission_request",
-  "urgency": "HIGH",
-  "event_data": {
-    "tool_name": "Bash",
-    "tool_input": {"command": "npm install express"}
-  },
-  "context": {
-    "risk_level": "MEDIUM"
-  }
-}
-```
-
-**处理流程**:
+**MEDIUM 风险处理流程**:
 1. 检查白名单 → `npm install` 不在白名单
 2. 检查黑名单 → 不在黑名单
 3. LLM 判断 → MEDIUM 风险，自动批准
 4. 执行 `cam_agent_send("cam-med001", "y")`
 5. 发送简短通知
 
-**通知**:
+**MEDIUM 风险通知**:
 ```
 ✅ 已自动批准: npm install express (MEDIUM)
 
