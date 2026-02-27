@@ -186,7 +186,7 @@ deploy, push --force, production, release
 当 `context.message_type == "choice"` 时：
 
 ```
-💬 [{agent_id}] 需要你选择
+💬 需要你选择
 
 📋 问题:
 {extracted_message 中的问题文本}
@@ -198,11 +198,13 @@ B) 选项二描述
 C) 选项三描述
 
 📝 回复字母选择 (A/B/C)
+
+[{agent_id}]
 ```
 
 **示例**：
 ```
-💬 [cam-abc123] 需要你选择
+💬 需要你选择
 
 📋 问题:
 你想要增强现有的 React Todo List 还是从头开始？
@@ -212,6 +214,8 @@ A) 增强现有项目 - 添加新功能到当前代码
 B) 从头开始 - 创建全新的项目结构
 
 📝 回复字母选择 (A/B)
+
+[cam-abc123]
 ```
 
 #### 确认题 (confirmation)
@@ -219,7 +223,7 @@ B) 从头开始 - 创建全新的项目结构
 当 `context.message_type == "confirmation"` 或 `event_type == "permission_request"` 时：
 
 ```
-⚠️ [{agent_id}] 请求确认
+⚠️ 请求确认
 
 🔧 操作:
 {tool_name}: {tool_input 的关键信息}
@@ -230,11 +234,13 @@ B) 从头开始 - 创建全新的项目结构
 ⚡ 风险: {risk_level_emoji} {risk_level}
 
 📝 回复 y 允许 / n 拒绝
+
+[{agent_id}]
 ```
 
 **示例**：
 ```
-⚠️ [cam-abc123] 请求确认
+⚠️ 请求确认
 
 🔧 操作:
 Bash: rm -rf ./node_modules
@@ -245,6 +251,8 @@ Agent 正在清理项目依赖，准备重新安装
 ⚡ 风险: 🟡 MEDIUM
 
 📝 回复 y 允许 / n 拒绝
+
+[cam-abc123]
 ```
 
 #### 开放式问题 (open_ended)
@@ -252,7 +260,7 @@ Agent 正在清理项目依赖，准备重新安装
 当 `context.message_type == "open_ended"` 时：
 
 ```
-💬 [{agent_id}] 需要你输入
+💬 需要你输入
 
 📋 问题:
 {extracted_message 中的完整问题}
@@ -261,11 +269,13 @@ Agent 正在清理项目依赖，准备重新安装
 {如果 extracted_message 包含背景信息}
 
 📝 直接回复你的答案
+
+[{agent_id}]
 ```
 
 **示例**：
 ```
-💬 [cam-abc123] 需要你输入
+💬 需要你输入
 
 📋 问题:
 请提供你的 OpenAI API Key
@@ -274,6 +284,8 @@ Agent 正在清理项目依赖，准备重新安装
 Agent 正在配置 AI 功能，需要 API 密钥
 
 📝 直接回复你的答案
+
+[cam-abc123]
 ```
 
 ### AI 提取失败时的处理
@@ -281,7 +293,7 @@ Agent 正在配置 AI 功能，需要 API 密钥
 当 `extracted_message` 为空或 AI 提取失败时：
 
 ```
-⚠️ [{agent_id}] 需要你的输入
+⚠️ 需要你的输入
 
 📋 无法解析具体问题，请查看终端
 
@@ -289,6 +301,8 @@ Agent 正在配置 AI 功能，需要 API 密钥
 {terminal_snapshot 最后 20 行，去除 UI 噪音}
 
 📝 查看终端后回复
+
+[{agent_id}]
 ```
 
 **处理步骤**：
@@ -308,17 +322,21 @@ Agent 正在配置 AI 功能，需要 API 密钥
 ### 错误通知
 
 ```
-❌ [{agent_id}] 遇到错误
+❌ 遇到错误
 
 {error_message}
 
 回复查看详情或处理建议
+
+[{agent_id}]
 ```
 
 ### 自动批准通知
 
 ```
-✅ [{agent_id}] 已自动批准: {command}
+✅ 已自动批准: {command}
+
+[{agent_id}]
 ```
 
 ## 用户回复处理
@@ -388,7 +406,7 @@ Agent 正在配置 AI 功能，需要 API 密钥
 
 **发送给用户的消息**:
 ```
-💬 [cam-abc123] 需要你选择
+💬 需要你选择
 
 📋 问题:
 你想要增强现有的 React Todo List 还是从头开始？
@@ -398,6 +416,8 @@ A) 增强现有项目 - 在当前代码基础上添加新功能
 B) 从头开始 - 使用最新最佳实践创建全新项目
 
 📝 回复字母选择 (A/B)
+
+[cam-abc123]
 ```
 
 **用户回复**: `A`
@@ -425,7 +445,7 @@ B) 从头开始 - 使用最新最佳实践创建全新项目
 
 **发送给用户的消息**:
 ```
-⚠️ [cam-xyz789] 请求确认
+⚠️ 请求确认
 
 🔧 操作:
 Bash: rm -rf ./dist && rm -rf ./node_modules
@@ -436,6 +456,8 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 ⚡ 风险: 🔴 HIGH
 
 📝 回复 y 允许 / n 拒绝
+
+[cam-xyz789]
 ```
 
 **用户回复**: `y`
@@ -459,12 +481,14 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 
 **发送给用户的消息**:
 ```
-💬 [cam-def456] 需要你输入
+💬 需要你输入
 
 📋 问题:
 请提供你的 GitHub Personal Access Token，用于创建 PR
 
 📝 直接回复你的答案
+
+[cam-def456]
 ```
 
 **用户回复**: `ghp_xxxxxxxxxxxx`
@@ -488,7 +512,7 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 
 **发送给用户的消息**:
 ```
-⚠️ [cam-fail001] 需要你的输入
+⚠️ 需要你的输入
 
 📋 无法解析具体问题，请查看终端
 
@@ -499,6 +523,8 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 ❯
 
 📝 查看终端后回复
+
+[cam-fail001]
 ```
 
 ### 场景 5: 自动批准 - 安全命令
@@ -528,7 +554,9 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 
 **可选通知**:
 ```
-✅ [cam-auto001] 已自动批准: cargo test
+✅ 已自动批准: cargo test
+
+[cam-auto001]
 ```
 
 ### 场景 6: Agent 异常退出
@@ -552,7 +580,7 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 
 **发送给用户的消息**:
 ```
-❌ [cam-exit001] Agent 异常退出
+❌ Agent 异常退出
 
 退出码: 1
 原因: Process terminated unexpectedly
@@ -561,4 +589,6 @@ Bash: rm -rf ./dist && rm -rf ./node_modules
 error: could not compile `myapp`
 
 回复 "resume" 恢复会话，或 "logs" 查看完整日志
+
+[cam-exit001]
 ```
