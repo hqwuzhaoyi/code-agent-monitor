@@ -131,6 +131,18 @@ context_complete = false 的条件：问题或选项被截断，无法完整显�
     )
 }
 
+/// 阻塞上下文提取提示词 - 用于 `cam summary` 命令
+///
+/// 给 Haiku 一个终端快照，提取 agent 等待用户回答的问题摘要。
+pub fn blocking_context_prompt(terminal_content: &str) -> String {
+    format!(
+        r#"你是终端分析助理。以下是一个正在等待用户输入的 AI coding agent 终端快照。用一句中文（30字以内）概括 agent 在等什么。忽略状态栏、进度条等 UI 元素，只关注问题本身。如果找不到明确问题，回复"等待输入"。
+
+终端快照：
+{terminal_content}"#
+    )
+}
+
 /// 进展总结提示词 - 用于 `cam summary` 命令
 ///
 /// 给 Haiku 一个终端快照，生成 20 字以内的中文进展描述。
@@ -174,5 +186,13 @@ mod tests {
         assert!(prompt.contains("cargo build output here"));
         assert!(prompt.contains("20字以内"));
         assert!(prompt.contains("正在处理中"));
+    }
+
+    #[test]
+    fn test_blocking_context_prompt_contains_snapshot() {
+        let prompt = blocking_context_prompt("Do you want to proceed? (y/n)");
+        assert!(prompt.contains("Do you want to proceed? (y/n)"));
+        assert!(prompt.contains("30字以内"));
+        assert!(prompt.contains("等待输入"));
     }
 }

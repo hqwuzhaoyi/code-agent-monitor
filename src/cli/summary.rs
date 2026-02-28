@@ -4,7 +4,7 @@ use anyhow::Result;
 use clap::Args;
 use tracing::warn;
 
-use crate::agent::extractor::prompts::progress_summary_prompt;
+use crate::agent::extractor::prompts::{blocking_context_prompt, progress_summary_prompt};
 use crate::agent::{AgentManager, AgentStatus};
 use crate::ai::client::AnthropicClient;
 use crate::notification::store::NotificationStore;
@@ -88,15 +88,24 @@ pub fn build_summary_message(
 /// 执行 summary 命令主逻辑
 pub fn run_summary(args: &SummaryArgs) -> Result<()> {
     let manager = AgentManager::new();
-    let agents = manager.list_agents().unwrap_or_default();
+    let all_agents = manager.list_agents().unwrap_or_default();
+
+    // 过滤掉外部会话（ext-xxx），只保留 CAM 管理的 agent
+    let agents: Vec<_> = all_agents
+        .iter()
+        .filter(|a| !a.agent_id.starts_with("ext-"))
+        .collect();
 
     // 读取近期通知（最近 50 条，用于找异常退出和错误）
     let recent_records = NotificationStore::read_recent(50);
     let thirty_min_ago = chrono::Utc::now() - chrono::Duration::minutes(30);
 
-    // 找近期异常退出
+    // 找近期异常退出（也过滤 ext-）
     let mut exits: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
+        if record.agent_id.starts_with("ext-") {
+            continue;
+        }
         if record.event == "AgentExited" && record.ts > thirty_min_ago {
             // 只报告不在当前活跃列表中的（已退出的）
             if !agents.iter().any(|a| a.agent_id == record.agent_id) {
@@ -111,9 +120,12 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
         }
     }
 
-    // 找近期错误（活跃的 agent 中）
+    // 找近期错误（活跃的 agent 中，也过滤 ext-）
     let mut errors: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
+        if record.agent_id.starts_with("ext-") {
+            continue;
+        }
         if record.event == "Error" && record.ts > thirty_min_ago {
             if agents.iter().any(|a| a.agent_id == record.agent_id) {
                 // 避免重复
@@ -137,7 +149,7 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
         return Ok(());
     }
 
-    // 创建 Haiku 客户端（可选，失败时回退到"正在处理中"）
+    // 创建 Haiku 客户端（可选，失败时回退到默认文本）
     let haiku = AnthropicClient::from_config().ok();
 
     let mut blocking: Vec<AgentSummaryItem> = Vec::new();
@@ -151,25 +163,23 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
 
         match &agent.status {
             AgentStatus::WaitingForInput | AgentStatus::DecisionRequired => {
-                // 取最后 3 行作为上下文（通常是问题内容）
-                let context: String = snapshot
-                    .lines()
-                    .filter(|l| !l.trim().is_empty())
-                    .rev()
-                    .take(3)
-                    .collect::<Vec<_>>()
-                    .into_iter()
-                    .rev()
-                    .collect::<Vec<_>>()
-                    .join(" / ");
+                // 使用 Haiku AI 提取等待上下文，避免抓到状态栏噪音
+                let detail = if let Some(ref client) = haiku {
+                    let prompt = blocking_context_prompt(&snapshot);
+                    match client.complete(&prompt, None) {
+                        Ok(resp) => resp.trim().to_string(),
+                        Err(e) => {
+                            warn!(error = %e, "Haiku blocking context extraction failed");
+                            "等待输入".to_string()
+                        }
+                    }
+                } else {
+                    "等待输入".to_string()
+                };
                 blocking.push(AgentSummaryItem {
                     agent_id: agent.agent_id.clone(),
                     project_path: agent.project_path.clone(),
-                    detail: if context.is_empty() {
-                        "等待输入".to_string()
-                    } else {
-                        context
-                    },
+                    detail,
                 });
             }
             AgentStatus::Processing | AgentStatus::Running => {
