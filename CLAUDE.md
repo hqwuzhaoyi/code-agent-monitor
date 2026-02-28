@@ -35,6 +35,18 @@ cam team-spawn <team> <name>      # 启动 Agent
 cam team-progress <team>          # 查看进度
 cam team-shutdown <team>          # 关闭 Team
 
+# 状态汇总
+cam summary --dry-run             # 预览汇总（不发送）
+cam summary --always              # 强制发送（无论是否有异常）
+cam summary                       # 有异常时发送（cron 用）
+
+# OpenClaw 定时汇报（工作时间每30分钟）
+openclaw cron add --name "cam-periodic-summary" \
+  --cron "*/30 9-18 * * 1-5" --tz "Asia/Shanghai" \
+  --session isolated \
+  --message "调用 cam_summary 工具获取 agent 状态汇总，将结果直接发给我。" \
+  --announce --channel telegram
+
 # 快捷回复
 cam pending-confirmations         # 查看待处理
 cam reply y                       # 批准

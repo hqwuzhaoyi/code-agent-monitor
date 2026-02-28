@@ -78,6 +78,16 @@ description: "Use when user wants to monitor, start, stop, resume, or manage AI 
 | `cam_reply_pending` | 回复待处理确认（支持 y/n/1/2/3） | `reply` | `target` |
 | `cam_handle_user_reply` | 处理自然语言回复（自动解析意图） | `reply` | `context` |
 
+### 汇总工具
+
+定时状态汇报，供 OpenClaw Cron 调用。
+
+| 工具 | 描述 | 必需参数 | 可选参数 |
+|------|------|----------|----------|
+| `cam_summary` | 生成 CEO 视角的 agent 状态汇总（活跃数、等待决策、异常、近期进展） | - | - |
+
+> `cam_summary` 使用 Haiku AI 分析每个 agent 的终端快照，生成进展描述。外部会话（ext-*）自动过滤。
+
 ### Team 管理工具（简要）
 
 完整 Team 工具详见 **agent-teams** skill。

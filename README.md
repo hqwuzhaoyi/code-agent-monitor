@@ -337,26 +337,43 @@ cam summary --always            # Send even when everything is healthy
 cam summary                     # Send only if there are blockers/errors (for cron)
 ```
 
-#### Optional: Periodic Summary via Cron
+#### Optional: Periodic Summary via OpenClaw Cron
 
-Add a cron job to receive periodic status digests during work hours. The command is silent when all agents are healthy, so you'll only get notified when something needs attention.
+OpenClaw has a built-in cron scheduler. Configure it to call `cam_summary` during work hours — you'll receive status digests on your phone via your configured channel.
+
+**Quick setup (one command):**
 
 ```bash
-crontab -e
+openclaw cron add \
+  --name "cam-periodic-summary" \
+  --cron "*/30 9-18 * * 1-5" \
+  --tz "Asia/Shanghai" \
+  --session isolated \
+  --message "调用 cam_summary 工具获取 agent 状态汇总，将结果直接发给我。如果所有 agent 正常运行无需关注，回复「✅ 所有 agent 运行正常」。" \
+  --announce \
+  --channel telegram
 ```
 
-```cron
-# Every 30 minutes during work hours (9:00–19:00, weekdays)
-*/30 9-18 * * 1-5 ~/.claude/plugins/cam/bin/cam summary >> ~/.config/code-agent-monitor/summary.log 2>&1
+This runs every 30 minutes during work hours (9:00–19:00 weekdays, Asia/Shanghai timezone). OpenClaw calls the `cam_summary` plugin tool, which uses Haiku AI to analyze each agent's terminal, then announces the result to your Telegram.
+
+**Manage the cron job:**
+
+```bash
+openclaw cron list                # View all cron jobs
+openclaw cron run <id>            # Trigger immediately (for testing)
+openclaw cron edit <id> --disable # Pause the job
+openclaw cron edit <id> --enable  # Resume the job
 ```
 
-Adjust the schedule to your preference:
+**Adjust the schedule:**
 
 | Schedule | Cron Expression |
 |----------|----------------|
 | Every 30 minutes, 9am–7pm weekdays | `*/30 9-18 * * 1-5` |
 | Every hour, all day | `0 * * * *` |
 | Every 15 minutes, 10am–6pm | `*/15 10-17 * * *` |
+
+> **Alternative:** You can also use system crontab directly: `*/30 9-18 * * 1-5 cam summary >> ~/.config/code-agent-monitor/summary.log 2>&1`
 
 ## Configuration
 
