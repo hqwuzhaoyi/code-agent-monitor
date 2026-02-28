@@ -1074,6 +1074,16 @@ impl McpServer {
                     "required": ["reply"]
                 }),
             },
+            McpTool {
+                name: "summary".to_string(),
+                description: "生成 CEO 视角的 agent 状态汇总（活跃数、等待决策、异常、近期进展）"
+                    .to_string(),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }),
+            },
         ];
 
         Ok(serde_json::json!({ "tools": tools }))
@@ -1722,6 +1732,20 @@ impl McpServer {
                     "content": [{
                         "type": "text",
                         "text": result
+                    }]
+                }))
+            }
+            "summary" => {
+                let text = match crate::cli::generate_summary() {
+                    Ok(Some(msg)) => msg,
+                    Ok(None) => "✅ 所有 agent 运行正常，无需关注。".to_string(),
+                    Err(e) => format!("⚠️ 生成汇总失败: {}", e),
+                };
+
+                Ok(serde_json::json!({
+                    "content": [{
+                        "type": "text",
+                        "text": text
                     }]
                 }))
             }

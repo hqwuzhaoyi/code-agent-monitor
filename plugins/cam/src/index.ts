@@ -660,4 +660,22 @@ export default function (api) {
       }
     },
   });
+
+  // === Summary ===
+
+  api.registerTool({
+    name: "cam_summary",
+    description: "生成 CEO 视角的 agent 状态汇总，包含活跃数、等待决策、异常、近期进展。用于定时汇报。",
+    parameters: Type.Object({}),
+    async execute() {
+      try {
+        // summary 会调用 Haiku AI 分析每个 agent，需要较长超时
+        const result = await callCamMcp("summary", {}, 120000);
+        return { content: [{ type: "text", text: JSON.stringify(result) }] };
+      } catch (error) {
+        api.logger.error("cam_summary failed", { error });
+        return { content: [{ type: "text", text: JSON.stringify({ error: true, message: error.message }) }] };
+      }
+    },
+  });
 }

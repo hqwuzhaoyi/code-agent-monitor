@@ -85,8 +85,11 @@ pub fn build_summary_message(
     msg
 }
 
-/// 执行 summary 命令主逻辑
-pub fn run_summary(args: &SummaryArgs) -> Result<()> {
+/// 生成汇总消息（核心逻辑，供 CLI 和 MCP 工具共用）
+///
+/// 返回 `Ok(Some(message))` 表示有需要关注的内容，
+/// 返回 `Ok(None)` 表示一切正常无需汇报。
+pub fn generate_summary() -> Result<Option<String>> {
     let manager = AgentManager::new();
     let all_agents = manager.list_agents().unwrap_or_default();
 
@@ -107,7 +110,6 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
             continue;
         }
         if record.event == "AgentExited" && record.ts > thirty_min_ago {
-            // 只报告不在当前活跃列表中的（已退出的）
             if !agents.iter().any(|a| a.agent_id == record.agent_id) {
                 let mins_ago = (chrono::Utc::now() - record.ts).num_minutes();
                 let project = record.project.clone().unwrap_or_else(|| "unknown".to_string());
@@ -128,7 +130,6 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
         }
         if record.event == "Error" && record.ts > thirty_min_ago {
             if agents.iter().any(|a| a.agent_id == record.agent_id) {
-                // 避免重复
                 if !errors.iter().any(|e| e.agent_id == record.agent_id) {
                     errors.push(AgentSummaryItem {
                         agent_id: record.agent_id.clone(),
@@ -144,9 +145,8 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
     let has_blocking = agents.iter().any(|a| a.status.is_waiting());
     let has_issues = !errors.is_empty() || !exits.is_empty();
 
-    if !has_blocking && !has_issues && !args.always {
-        // 一切正常，静默退出
-        return Ok(());
+    if !has_blocking && !has_issues && agents.is_empty() {
+        return Ok(None);
     }
 
     // 创建 Haiku 客户端（可选，失败时回退到默认文本）
@@ -163,7 +163,6 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
 
         match &agent.status {
             AgentStatus::WaitingForInput | AgentStatus::DecisionRequired => {
-                // 使用 Haiku AI 提取等待上下文，避免抓到状态栏噪音
                 let detail = if let Some(ref client) = haiku {
                     let prompt = blocking_context_prompt(&snapshot);
                     match client.complete(&prompt, None) {
@@ -213,7 +212,29 @@ pub fn run_summary(args: &SummaryArgs) -> Result<()> {
         }
     }
 
-    let message = build_summary_message(agents.len(), &blocking, &running, &errors, &exits);
+    Ok(Some(build_summary_message(
+        agents.len(),
+        &blocking,
+        &running,
+        &errors,
+        &exits,
+    )))
+}
+
+/// 执行 summary 命令主逻辑
+pub fn run_summary(args: &SummaryArgs) -> Result<()> {
+    let message = if args.always {
+        // --always: 强制生成汇总，即使一切正常
+        match generate_summary()? {
+            Some(msg) => msg,
+            None => build_summary_message(0, &[], &[], &[], &[]),
+        }
+    } else {
+        match generate_summary()? {
+            Some(msg) => msg,
+            None => return Ok(()), // 一切正常，静默退出
+        }
+    };
 
     if args.dry_run {
         println!("{}", message);
