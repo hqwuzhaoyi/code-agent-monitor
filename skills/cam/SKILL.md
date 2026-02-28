@@ -129,6 +129,15 @@ description: "Use when user wants to monitor, start, stop, resume, or manage AI 
 | "停掉 xxx team" | 关闭团队 | `cam_team_shutdown` |
 | "有什么等着我" / "待处理" | 查看待处理请求 | `cam_get_pending_confirmations` |
 
+### 定时汇报意图
+
+| 用户可能说的 | 意图 | 对应操作 |
+|-------------|------|---------|
+| "帮我每半小时汇报一次" / "定时看看 agent" | 定时汇报 | 配置 Cron 定时调用 `cam_summary` |
+| "别推了" / "关掉定时汇报" | 停止定时汇报 | 关闭对应 Cron 任务 |
+
+> Cron 任务中调用 `cam_summary` 即可获取完整汇总，包含活跃数、等待决策、异常、近期进展。
+
 ### 模糊输入处理
 
 当用户输入不明确时：

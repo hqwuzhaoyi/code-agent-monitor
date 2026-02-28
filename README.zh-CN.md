@@ -301,6 +301,9 @@ cam reply y --risk low
 | `cam watch-trigger --agent-id <id>` | 手动触发检测（调试用） |
 | `cam pending-confirmations` | 查看待处理确认 |
 | `cam reply <response>` | 回复确认（支持 `--all`、`--agent`、`--risk`） |
+| `cam summary` | 生成 Agent 状态汇总（有异常时发送） |
+| `cam summary --dry-run` | 预览汇总（不发送） |
+| `cam summary --always` | 强制发送（无论是否有异常） |
 
 ### 服务管理
 
@@ -356,6 +359,30 @@ OpenClaw 使用三层决策模型处理低风险操作：
 - **LLM 判断** — 不在名单中的命令由 AI 分析风险
 
 即使白名单命令，如果参数包含敏感路径（`/etc/`、`~/.ssh/`、`.env`），仍需人工确认。
+
+### Agent 状态汇总
+
+`cam summary` 生成 CEO 视角的状态摘要并通过 OpenClaw 发送。只在有阻塞或异常时通知——一切正常则静默退出。
+
+```
+🤖 Agent 汇总 · 09:30
+━━━━━━━━━━━━━━━━━━━
+活跃: 3 个  |  等待决策: 1 个  |  异常: 0 个
+
+🚧 需要你决策
+  cam-abc12345 · /workspace/auth
+  → 是否使用 JWT 还是 session-based 认证？
+
+✅ 最近进展
+  cam-def67890 · /workspace/api → 完成了用户注册接口
+  cam-ghi11111 · /workspace/ui → 实现了登录表单组件
+```
+
+每个 Agent 的进展描述由 AI（Claude Haiku）从终端快照生成。外部会话（`ext-*`）自动排除。
+
+告诉 OpenClaw：`每半小时调用 cam summary 看看 agent 状态`
+
+## 配置
 
 ## 配置
 
