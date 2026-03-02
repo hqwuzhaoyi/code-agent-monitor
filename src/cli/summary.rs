@@ -93,22 +93,19 @@ pub fn generate_summary() -> Result<Option<String>> {
     let manager = AgentManager::new();
     let all_agents = manager.list_agents().unwrap_or_default();
 
-    // 过滤掉外部会话（ext-xxx），只保留 CAM 管理的 agent
+    // 仅保留有 tmux 会话的 agent（可远程交互的会话）
     let agents: Vec<_> = all_agents
         .iter()
-        .filter(|a| !a.agent_id.starts_with("ext-"))
+        .filter(|a| !a.tmux_session.is_empty())
         .collect();
 
     // 读取近期通知（最近 50 条，用于找异常退出和错误）
     let recent_records = NotificationStore::read_recent(50);
     let thirty_min_ago = chrono::Utc::now() - chrono::Duration::minutes(30);
 
-    // 找近期异常退出（也过滤 ext-）
+    // 找近期异常退出（仅统计有 tmux 会话的 agent）
     let mut exits: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
-        if record.agent_id.starts_with("ext-") {
-            continue;
-        }
         if record.event == "AgentExited" && record.ts > thirty_min_ago {
             if !agents.iter().any(|a| a.agent_id == record.agent_id) {
                 let mins_ago = (chrono::Utc::now() - record.ts).num_minutes();
@@ -122,12 +119,9 @@ pub fn generate_summary() -> Result<Option<String>> {
         }
     }
 
-    // 找近期错误（活跃的 agent 中，也过滤 ext-）
+    // 找近期错误（活跃且有 tmux 会话的 agent）
     let mut errors: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
-        if record.agent_id.starts_with("ext-") {
-            continue;
-        }
         if record.event == "Error" && record.ts > thirty_min_ago {
             if agents.iter().any(|a| a.agent_id == record.agent_id) {
                 if !errors.iter().any(|e| e.agent_id == record.agent_id) {

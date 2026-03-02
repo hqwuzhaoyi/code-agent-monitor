@@ -27,6 +27,35 @@ use std::process::Command;
 use std::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
+/// 检查 agent 是否有关联的 tmux 会话
+/// 没有 tmux 会话的 agent 无法远程回复，不发送通知
+fn has_tmux_session(agent_id: &str) -> bool {
+    let agents_path = dirs::home_dir()
+        .unwrap_or_else(|| std::path::PathBuf::from("."))
+        .join(".config/code-agent-monitor/agents.json");
+
+    let content = match std::fs::read_to_string(&agents_path) {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+
+    let json: serde_json::Value = match serde_json::from_str(&content) {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+
+    if let Some(agents) = json["agents"].as_array() {
+        for agent in agents {
+            if agent["agent_id"].as_str() == Some(agent_id) {
+                let tmux = agent["tmux_session"].as_str().unwrap_or("");
+                return !tmux.is_empty();
+            }
+        }
+    }
+
+    false
+}
+
 /// 记录到 hook.log
 fn log_to_hook_file(message: &str) {
     let log_path = dirs::home_dir()
@@ -195,17 +224,16 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<SendResult> {
-        // 外部会话（ext-xxx）不发送通知
-        // 原因：外部会话无法远程回复，通知只会造成打扰
-        if agent_id.starts_with("ext-") {
+        // 无 tmux 会话的 agent 不发送通知（无法远程回复）
+        if !has_tmux_session(agent_id) {
             if self.dry_run {
                 eprintln!(
-                    "[DRY-RUN] External session (cannot reply remotely), skipping: {} {}",
+                    "[DRY-RUN] No tmux session (cannot reply remotely), skipping: {} {}",
                     agent_id, event_type
                 );
             }
-            debug!(agent_id = %agent_id, event_type = %event_type, "Skipping external session notification");
-            return Ok(SendResult::Skipped("external session".to_string()));
+            debug!(agent_id = %agent_id, event_type = %event_type, "Skipping notification - no tmux session");
+            return Ok(SendResult::Skipped("no tmux session".to_string()));
         }
 
         let urgency = get_urgency(event_type, context);
@@ -267,10 +295,10 @@ impl OpenclawNotifier {
 
         let agent_id = &event.agent_id;
 
-        // 外部会话不发送通知
-        if agent_id.starts_with("ext-") {
-            debug!(agent_id = %agent_id, "Skipping external session notification");
-            return Ok(SendResult::Skipped("external session".to_string()));
+        // 无 tmux 会话的 agent 不发送通知（无法远程回复）
+        if !has_tmux_session(agent_id) {
+            debug!(agent_id = %agent_id, "Skipping notification - no tmux session");
+            return Ok(SendResult::Skipped("no tmux session".to_string()));
         }
 
         // 检测处理中状态

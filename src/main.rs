@@ -1080,10 +1080,17 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
-                    if (event == "session_end" || event == "stop")
-                        && resolved_agent_id.starts_with("ext-")
-                    {
+                    // 如果是 session_end/stop 事件且该会话没有 tmux，会话结束后清理记录
+                    let should_cleanup_no_tmux = if event == "session_end" || event == "stop" {
+                        match agent_manager.get_agent(&resolved_agent_id) {
+                            Ok(Some(agent)) => agent.tmux_session.is_empty(),
+                            _ => false,
+                        }
+                    } else {
+                        false
+                    };
+
+                    if should_cleanup_no_tmux {
                         let cleanup_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                         if let Err(e) = agent_manager.remove_agent(&resolved_agent_id) {
                             if let Ok(mut file) =
@@ -1091,7 +1098,7 @@ async fn main() -> Result<()> {
                             {
                                 let _ = writeln!(
                                     file,
-                                    "[{}] ⚠️ Failed to cleanup external session {}: {}",
+                                    "[{}] ⚠️ Failed to cleanup no-tmux session {}: {}",
                                     cleanup_timestamp, resolved_agent_id, e
                                 );
                             }
@@ -1100,7 +1107,7 @@ async fn main() -> Result<()> {
                         {
                             let _ = writeln!(
                                 file,
-                                "[{}] ✅ Cleaned up external session {}",
+                                "[{}] ✅ Cleaned up no-tmux session {}",
                                 cleanup_timestamp, resolved_agent_id
                             );
                         }
