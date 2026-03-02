@@ -259,8 +259,8 @@ impl App {
         // 从 AgentManager 获取已注册的 agents
         if let Ok(agents) = agent_manager.list_agents() {
             for agent in agents {
-                // TUI 只展示 CAM 管理会话，过滤外部会话（ext-*）
-                if agent.agent_id.starts_with("ext-") {
+                // TUI 只展示有 tmux 会话的 agent（可远程交互）
+                if agent.tmux_session.is_empty() {
                     continue;
                 }
 

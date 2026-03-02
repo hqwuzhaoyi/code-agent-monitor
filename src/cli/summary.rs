@@ -103,9 +103,12 @@ pub fn generate_summary() -> Result<Option<String>> {
     let recent_records = NotificationStore::read_recent(50);
     let thirty_min_ago = chrono::Utc::now() - chrono::Duration::minutes(30);
 
-    // 找近期异常退出（仅统计有 tmux 会话的 agent）
+    // 找近期异常退出（仅统计有 tmux 会话的 agent，历史记录用 ext- 前缀过滤）
     let mut exits: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
+        if record.agent_id.starts_with("ext-") {
+            continue;
+        }
         if record.event == "AgentExited" && record.ts > thirty_min_ago {
             if !agents.iter().any(|a| a.agent_id == record.agent_id) {
                 let mins_ago = (chrono::Utc::now() - record.ts).num_minutes();
@@ -119,9 +122,12 @@ pub fn generate_summary() -> Result<Option<String>> {
         }
     }
 
-    // 找近期错误（活跃且有 tmux 会话的 agent）
+    // 找近期错误（活跃且有 tmux 会话的 agent，历史记录用 ext- 前缀过滤）
     let mut errors: Vec<AgentSummaryItem> = Vec::new();
     for record in &recent_records {
+        if record.agent_id.starts_with("ext-") {
+            continue;
+        }
         if record.event == "Error" && record.ts > thirty_min_ago {
             if agents.iter().any(|a| a.agent_id == record.agent_id) {
                 if !errors.iter().any(|e| e.agent_id == record.agent_id) {

@@ -29,31 +29,14 @@ use tracing::{debug, error, info, warn};
 
 /// 检查 agent 是否有关联的 tmux 会话
 /// 没有 tmux 会话的 agent 无法远程回复，不发送通知
+/// 未找到 agent 时默认返回 true（宁可多发不可漏发）
 fn has_tmux_session(agent_id: &str) -> bool {
-    let agents_path = dirs::home_dir()
-        .unwrap_or_else(|| std::path::PathBuf::from("."))
-        .join(".config/code-agent-monitor/agents.json");
-
-    let content = match std::fs::read_to_string(&agents_path) {
-        Ok(c) => c,
-        Err(_) => return false,
-    };
-
-    let json: serde_json::Value = match serde_json::from_str(&content) {
-        Ok(v) => v,
-        Err(_) => return false,
-    };
-
-    if let Some(agents) = json["agents"].as_array() {
-        for agent in agents {
-            if agent["agent_id"].as_str() == Some(agent_id) {
-                let tmux = agent["tmux_session"].as_str().unwrap_or("");
-                return !tmux.is_empty();
-            }
-        }
+    use crate::agent::AgentManager;
+    let manager = AgentManager::new();
+    match manager.get_agent(agent_id) {
+        Ok(Some(agent)) => !agent.tmux_session.is_empty(),
+        _ => true, // 未找到或出错时默认允许通知
     }
-
-    false
 }
 
 /// 记录到 hook.log
