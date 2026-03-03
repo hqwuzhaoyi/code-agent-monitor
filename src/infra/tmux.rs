@@ -126,6 +126,23 @@ impl TmuxManager {
         }
     }
 
+    /// 仅发送 Enter 键（不发送任何文本）
+    /// 用于补按丢失的回车键
+    pub fn send_enter(&self, session_name: &str) -> Result<()> {
+        info!(session = %session_name, "Sending Enter key to tmux session");
+        let status = Command::new("tmux")
+            .args(["send-keys", "-t", session_name, "Enter"])
+            .status()?;
+
+        if status.success() {
+            info!(session = %session_name, "Enter key sent successfully");
+            Ok(())
+        } else {
+            error!(session = %session_name, "Failed to send Enter key");
+            Err(anyhow!("Failed to send Enter to session: {}", session_name))
+        }
+    }
+
     /// 捕获 session 的终端输出
     pub fn capture_pane(&self, session_name: &str, lines: u32) -> Result<String> {
         let output = Command::new("tmux")
