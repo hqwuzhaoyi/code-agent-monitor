@@ -18,6 +18,9 @@ pub struct ExtractedMessage {
     /// 是否是决策类问题（方案选择、架构设计等）
     #[serde(default, alias = "is_decision")]
     pub is_decision_required: bool,
+    /// 输入行是否有已键入但未提交的文本（cam reply 的 Enter 丢失）
+    #[serde(default)]
+    pub has_pending_input: bool,
 }
 
 /// 消息类型
@@ -124,9 +127,37 @@ mod tests {
             context_complete: true,
             message_type: MessageType::OpenEnded,
             is_decision_required: false,
+            has_pending_input: false,
         };
         let cloned = msg.clone();
         assert_eq!(cloned.content, msg.content);
         assert_eq!(cloned.fingerprint, msg.fingerprint);
+    }
+
+    #[test]
+    fn test_extracted_message_has_pending_input_default() {
+        let json = r#"{
+            "content": "Test",
+            "fingerprint": "test",
+            "context_complete": true,
+            "message_type": "open_ended",
+            "is_decision": false
+        }"#;
+        let msg: ExtractedMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.has_pending_input, false);
+    }
+
+    #[test]
+    fn test_extracted_message_has_pending_input_true() {
+        let json = r#"{
+            "content": "Test",
+            "fingerprint": "test",
+            "context_complete": true,
+            "message_type": "open_ended",
+            "is_decision": false,
+            "has_pending_input": true
+        }"#;
+        let msg: ExtractedMessage = serde_json::from_str(json).unwrap();
+        assert_eq!(msg.has_pending_input, true);
     }
 }

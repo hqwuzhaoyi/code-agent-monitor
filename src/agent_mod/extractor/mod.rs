@@ -262,6 +262,7 @@ impl MessageExtractor for HaikuExtractor {
                 context_complete: true,
                 message_type,
                 is_decision_required,
+                has_pending_input: false,
             })
         } else {
             // 无问题，返回空闲状态
@@ -285,6 +286,7 @@ impl MessageExtractor for HaikuExtractor {
                     last_action,
                 },
                 is_decision_required: false,
+                has_pending_input: false,
             })
         }
     }
@@ -402,6 +404,7 @@ impl ReactExtractor {
                         context_complete: true,
                         message_type: MessageType::OpenEnded,
                         is_decision_required: false,
+                        has_pending_input: false,
                     }));
                 }
                 ExtractionResult::Failed(reason) => {
@@ -473,6 +476,7 @@ mod tests {
                 context_complete: true,
                 message_type: MessageType::OpenEnded,
                 is_decision_required: false,
+                has_pending_input: false,
             }),
         ]);
 
@@ -668,6 +672,7 @@ mod tests {
             context_complete: true,
             message_type: MessageType::OpenEnded,
             is_decision_required: false,
+            has_pending_input: false,
         });
 
         let cloned = result.clone();
@@ -745,6 +750,7 @@ mod tests {
                 last_action: None,
             },
             is_decision_required: false,
+            has_pending_input: false,
         })]);
 
         let react = ReactExtractor::new(Box::new(extractor));
