@@ -19,7 +19,7 @@ use crate::notification::{generate_dedup_key, NotificationDeduplicator, NotifyAc
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 /// 监控事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -673,19 +673,32 @@ impl AgentWatcher {
             (context, "ManualTrigger".to_string(), false)
         };
 
-        // Enhance is_decision_required using ReactExtractor for better AI-based detection
-        let is_decision_required = if wait_result.is_waiting {
+        // Enhance is_decision_required and detect pending input using ReactExtractor
+        let (is_decision_required, has_pending_input) = if wait_result.is_waiting {
             if let Some(ref react_extractor) = self.react_extractor {
                 match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
-                    Ok(Some(message)) => message.is_decision_required,
-                    _ => is_decision_required,
+                    Ok(Some(message)) => (message.is_decision_required, message.has_pending_input),
+                    _ => (is_decision_required, false),
                 }
             } else {
-                is_decision_required
+                (is_decision_required, false)
             }
         } else {
-            is_decision_required
+            (is_decision_required, false)
         };
+
+        // Auto-press Enter if pending input detected
+        if has_pending_input {
+            info!(agent_id = %agent_id, "Detected pending input, auto-pressing Enter");
+            if let Err(e) = self.tmux.send_enter(&agent.tmux_session) {
+                warn!(agent_id = %agent_id, error = %e, "Failed to auto-press Enter");
+            }
+        }
+
+        let mut context = context;
+        if has_pending_input {
+            context.push_str("\n[已自动补按 Enter]");
+        }
 
         let dedup_key = generate_dedup_key(&context);
 
@@ -807,6 +820,7 @@ impl AgentWatcher {
         match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
             Ok(Some(message)) => {
                 let is_decision_required = message.is_decision_required;
+                let has_pending_input = message.has_pending_input;
                 let pattern_type = match &message.message_type {
                     MessageType::Choice => "Choice".to_string(),
                     MessageType::Confirmation => "Confirmation".to_string(),
@@ -814,10 +828,23 @@ impl AgentWatcher {
                     MessageType::Idle { .. } => return None,
                 };
 
+                // Auto-press Enter if pending input detected
+                if has_pending_input {
+                    info!(agent_id = %agent.agent_id, "Detected pending input, auto-pressing Enter");
+                    if let Err(e) = self.tmux.send_enter(&agent.tmux_session) {
+                        warn!(agent_id = %agent.agent_id, error = %e, "Failed to auto-press Enter");
+                    }
+                }
+
+                let mut context = message.content;
+                if has_pending_input {
+                    context.push_str("\n[已自动补按 Enter]");
+                }
+
                 Some(WatchEvent::WaitingForInput {
                     agent_id: agent.agent_id.clone(),
                     pattern_type,
-                    context: message.content,
+                    context,
                     dedup_key: message.fingerprint,
                     is_decision_required,
                 })

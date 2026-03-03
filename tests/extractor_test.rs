@@ -64,6 +64,7 @@ fn test_react_expands_context_until_success() {
             context_complete: true,
             message_type: MessageType::OpenEnded,
             is_decision_required: false,
+            has_pending_input: false,
         }),
     ]);
 
@@ -83,6 +84,7 @@ fn test_react_stops_on_first_success() {
             context_complete: true,
             message_type: MessageType::Confirmation,
             is_decision_required: false,
+            has_pending_input: false,
         }),
         ExtractionResult::Success(ExtractedMessage {
             content: "Should not reach".into(),
@@ -90,6 +92,7 @@ fn test_react_stops_on_first_success() {
             context_complete: true,
             message_type: MessageType::OpenEnded,
             is_decision_required: false,
+            has_pending_input: false,
         }),
     ]);
 
@@ -119,6 +122,7 @@ fn test_react_continues_on_failure() {
             context_complete: true,
             message_type: MessageType::Choice,
             is_decision_required: false,
+            has_pending_input: false,
         }),
     ]);
 
@@ -226,6 +230,7 @@ fn test_extracted_message_clone() {
         context_complete: true,
         message_type: MessageType::OpenEnded,
         is_decision_required: false,
+        has_pending_input: false,
     };
     let cloned = msg.clone();
     assert_eq!(cloned.content, msg.content);
@@ -241,6 +246,7 @@ fn test_extracted_message_serialization() {
         context_complete: true,
         message_type: MessageType::Choice,
         is_decision_required: false,
+        has_pending_input: false,
     };
     let json = serde_json::to_string(&msg).unwrap();
     assert!(json.contains("Choose an option"));
@@ -260,6 +266,7 @@ fn test_extraction_result_success() {
         context_complete: true,
         message_type: MessageType::OpenEnded,
         is_decision_required: false,
+        has_pending_input: false,
     });
     assert!(matches!(result, ExtractionResult::Success(_)));
 }
@@ -621,6 +628,7 @@ fn test_is_decision_required_true_parsing() {
         context_complete: true,
         message_type: MessageType::Choice,
         is_decision_required: true,
+        has_pending_input: false,
     })]);
 
     let result = extractor.extract("test snapshot", 80);
@@ -641,6 +649,7 @@ fn test_is_decision_required_true_with_confirmation() {
         context_complete: true,
         message_type: MessageType::Confirmation,
         is_decision_required: true,
+        has_pending_input: false,
     };
 
     assert!(msg.is_decision_required);
@@ -656,6 +665,7 @@ fn test_is_decision_required_serde_roundtrip() {
         context_complete: true,
         message_type: MessageType::Choice,
         is_decision_required: true,
+        has_pending_input: false,
     };
 
     let json = serde_json::to_string(&msg).unwrap();
