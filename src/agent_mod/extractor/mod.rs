@@ -29,9 +29,9 @@ pub use traits::{
 /// - `terminal_snapshot`: 终端快照内容
 ///
 /// # 返回
-/// - `Some((message, fingerprint, is_decision_required))`: 成功提取到消息、指纹和决策标记
+/// - `Some((message, fingerprint, is_decision_required, has_pending_input))`: 成功提取到消息、指纹、决策标记和待提交输入标记
 /// - `None`: Agent 正在处理中、空闲或提取失败
-pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String, String, bool)> {
+pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String, String, bool, bool)> {
     let extractor = match HaikuExtractor::new() {
         Ok(e) => e,
         Err(e) => {
@@ -69,7 +69,7 @@ pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String,
                     iterations = iteration + 1,
                     "Message extracted successfully"
                 );
-                return Some((message.content, message.fingerprint, message.is_decision_required));
+                return Some((message.content, message.fingerprint, message.is_decision_required, message.has_pending_input));
             }
             ExtractionResult::NeedMoreContext => {
                 debug!(lines = lines, "Need more context, expanding");
@@ -86,7 +86,7 @@ pub fn extract_message_from_snapshot(terminal_snapshot: &str) -> Option<(String,
                     fingerprint = %fingerprint,
                     "Terminal error detected"
                 );
-                return Some((format!("ERROR: {}", error_msg), fingerprint, false));
+                return Some((format!("ERROR: {}", error_msg), fingerprint, false, false));
             }
             ExtractionResult::Failed(reason) => {
                 warn!(reason = %reason, "Extraction failed");
@@ -256,13 +256,18 @@ impl MessageExtractor for HaikuExtractor {
                 .and_then(|v| v.as_bool().or_else(|| v.as_str().map(|s| s.eq_ignore_ascii_case("true"))))
                 .unwrap_or(false);
 
+            let has_pending_input = parsed
+                .get("has_pending_input")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+
             ExtractionResult::Success(ExtractedMessage {
                 content: message,
                 fingerprint,
                 context_complete: true,
                 message_type,
                 is_decision_required,
-                has_pending_input: false,
+                has_pending_input,
             })
         } else {
             // 无问题，返回空闲状态
@@ -757,5 +762,48 @@ mod tests {
 
         // 验证配置正确
         assert!(react.config.max_iterations > 0);
+    }
+
+    #[test]
+    fn test_mock_extractor_pending_input_true() {
+        let extractor = MockExtractor::new(vec![
+            ExtractionResult::Success(ExtractedMessage {
+                content: "Continue? (y/n)".into(),
+                fingerprint: "continue-yn".into(),
+                context_complete: true,
+                message_type: MessageType::Confirmation,
+                is_decision_required: false,
+                has_pending_input: true,
+            }),
+        ]);
+
+        let result = extractor.extract("test snapshot", 80);
+        if let ExtractionResult::Success(msg) = result {
+            assert!(msg.has_pending_input);
+            assert_eq!(msg.content, "Continue? (y/n)");
+        } else {
+            panic!("Expected Success variant");
+        }
+    }
+
+    #[test]
+    fn test_mock_extractor_pending_input_false_by_default() {
+        let extractor = MockExtractor::new(vec![
+            ExtractionResult::Success(ExtractedMessage {
+                content: "Choose option".into(),
+                fingerprint: "choose-option".into(),
+                context_complete: true,
+                message_type: MessageType::Choice,
+                is_decision_required: false,
+                has_pending_input: false,
+            }),
+        ]);
+
+        let result = extractor.extract("test snapshot", 80);
+        if let ExtractionResult::Success(msg) = result {
+            assert!(!msg.has_pending_input);
+        } else {
+            panic!("Expected Success variant");
+        }
     }
 }
