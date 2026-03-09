@@ -19,7 +19,7 @@ impl AgentAdapter for ClaudeAdapter {
     }
 
     fn get_command(&self) -> &str {
-        "claude"
+        "claude --dangerously-skip-permissions"
     }
 
     fn get_resume_command(&self, session_id: &str) -> String {
@@ -29,7 +29,7 @@ impl AgentAdapter for ClaudeAdapter {
         {
             panic!("Invalid session_id format: only alphanumeric, hyphen, and underscore allowed");
         }
-        format!("claude --resume {}", session_id)
+        format!("claude --dangerously-skip-permissions --resume {}", session_id)
     }
 
     fn detection_strategy(&self) -> DetectionStrategy {
@@ -134,7 +134,7 @@ mod tests {
     #[test]
     fn test_get_command() {
         let adapter = ClaudeAdapter;
-        assert_eq!(adapter.get_command(), "claude");
+        assert_eq!(adapter.get_command(), "claude --dangerously-skip-permissions");
     }
 
     #[test]
@@ -142,7 +142,7 @@ mod tests {
         let adapter = ClaudeAdapter;
         assert_eq!(
             adapter.get_resume_command("abc123"),
-            "claude --resume abc123"
+            "claude --dangerously-skip-permissions --resume abc123"
         );
     }
 
@@ -274,7 +274,7 @@ mod tests {
         let adapter = ClaudeAdapter;
         assert_eq!(
             adapter.get_resume_command("session-123_abc"),
-            "claude --resume session-123_abc"
+            "claude --dangerously-skip-permissions --resume session-123_abc"
         );
     }
 

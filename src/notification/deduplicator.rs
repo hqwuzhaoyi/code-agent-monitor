@@ -234,12 +234,10 @@ impl NotificationDeduplicator {
         let fingerprint = Self::content_fingerprint(content);
 
         // 先检查当前 agent 是否超过最大时限（在清理之前）
+        // 注意：不删除 lock，避免下次调用走「首次通知」路径重新触发
         if let Some(lock) = self.locks.get(agent_id) {
             let total_elapsed = now.saturating_sub(lock.first_notified_at);
             if total_elapsed >= Self::MAX_NOTIFICATION_DURATION_SECS {
-                // 超过 2 小时，停止发送并清理记录
-                self.locks.remove(agent_id);
-                self.save_state();
                 return NotifyAction::Suppressed("max duration exceeded".into());
             }
         }
@@ -519,6 +517,36 @@ mod tests {
         let action = dedup.should_send(agent_id, content);
         assert!(
             matches!(action, NotifyAction::Suppressed(reason) if reason.contains("max duration"))
+        );
+    }
+
+    #[test]
+    fn test_should_send_stays_suppressed_after_max_duration() {
+        let mut dedup = NotificationDeduplicator::new_without_persistence();
+        let agent_id = "agent-1";
+        let content = "Question?";
+
+        // 首次发送
+        assert_eq!(dedup.should_send(agent_id, content), NotifyAction::Send);
+
+        // 模拟时间流逝：超过 2 小时
+        if let Some(lock) = dedup.locks.get_mut(agent_id) {
+            lock.first_notified_at -= 7201;
+            lock.locked_at -= 7201;
+        }
+
+        // 第一次超时调用：应该被抑制
+        let action = dedup.should_send(agent_id, content);
+        assert!(
+            matches!(action, NotifyAction::Suppressed(ref reason) if reason.contains("max duration")),
+            "expected max duration suppression, got {:?}", action
+        );
+
+        // 第二次调用：lock 必须仍然存在，不能走「首次通知」路径重新发送
+        let action2 = dedup.should_send(agent_id, content);
+        assert!(
+            matches!(action2, NotifyAction::Suppressed(ref reason) if reason.contains("max duration")),
+            "second call after max duration should still be suppressed, got {:?}", action2
         );
     }
 

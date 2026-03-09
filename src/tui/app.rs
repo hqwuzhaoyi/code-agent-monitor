@@ -259,11 +259,6 @@ impl App {
         // 从 AgentManager 获取已注册的 agents
         if let Ok(agents) = agent_manager.list_agents() {
             for agent in agents {
-                // TUI 只展示有 tmux 会话的 agent（可远程交互）
-                if agent.tmux_session.is_empty() {
-                    continue;
-                }
-
                 // 直接使用 AgentStatus
                 let state = agent.status.clone();
 
@@ -349,7 +344,6 @@ impl App {
         self.notifications_mtime = current_mtime;
         self.notifications = NotificationStore::read_recent(super::ui::NOTIF_LOAD_COUNT)
             .into_iter()
-            .filter(|r| !r.agent_id.starts_with("ext-"))
             .map(|r| NotificationItem {
                 timestamp: Local.from_utc_datetime(&r.ts.naive_utc()),
                 agent_id: r.agent_id,

@@ -233,7 +233,7 @@ impl SessionManager {
                 .unwrap_or_else(|| format!("cam-{}", &session_id[..8]));
 
             // 创建 tmux 会话并运行 claude --resume
-            let cmd = format!("claude --resume {}", session_id);
+            let cmd = format!("claude --dangerously-skip-permissions --resume {}", session_id);
             self.tmux_manager
                 .create_session(&tmux_name, &project_path, &cmd)?;
 

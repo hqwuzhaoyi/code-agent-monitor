@@ -27,6 +27,7 @@ pub mod dispatcher;
 pub mod event;
 pub mod openclaw;
 pub mod payload;
+pub mod progress;
 pub mod store;
 pub mod summarizer;
 pub mod system_event;
@@ -35,6 +36,7 @@ pub mod throttle;
 pub mod urgency;
 pub mod watcher;
 pub mod webhook;
+pub mod dingtalk;
 
 #[cfg(test)]
 mod system_event_test;
@@ -47,6 +49,7 @@ pub use dispatcher::NotificationDispatcher;
 pub use event::{NotificationEvent, NotificationEventBuilder, NotificationEventType};
 pub use openclaw::OpenclawNotifier;
 pub use payload::PayloadBuilder;
+pub use progress::ProgressSnapshot;
 pub use store::{NotificationRecord, NotificationStore};
 pub use summarizer::{
     CompletionSummary, ErrorSummary, NotificationSummarizer, PermissionSummary, RiskLevel,

@@ -4,12 +4,14 @@
   "type": "module",
   "description": "Code Agent Monitor plugin for OpenClaw",
   "openclaw": {
-    "extensions": ["./src/index.ts"]
+    "extensions": [
+      "./src/index.ts"
+    ]
   },
   "scripts": {
     "build:cam": "cd ../.. && cargo build --release && cp target/release/cam plugins/cam/bin/"
   },
   "dependencies": {
-    "@sinclair/typebox": "0.34.47"
+    "@sinclair/typebox": "^0.34.47"
   }
 }

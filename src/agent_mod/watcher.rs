@@ -19,7 +19,7 @@ use crate::notification::{generate_dedup_key, NotificationDeduplicator, NotifyAc
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
 /// 监控事件类型
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -493,8 +493,30 @@ impl AgentWatcher {
                     continue;
                 }
 
-                // Perform AI detection
-                let wait_result = self.input_detector.detect_immediate(&output);
+                // Perform AI detection: prefer ReactExtractor when available,
+                // fall back to InputWaitDetector.
+                let wait_result = if self.react_extractor.is_some() {
+                    match self.check_waiting_with_react(agent) {
+                        Some(WatchEvent::WaitingForInput {
+                            ref context,
+                            is_decision_required,
+                            ..
+                        }) => InputWaitResult {
+                            is_waiting: true,
+                            is_decision_required,
+                            pattern_type: Some(InputWaitPattern::Other),
+                            context: context.clone(),
+                        },
+                        Some(_) | None => InputWaitResult {
+                            is_waiting: false,
+                            is_decision_required: false,
+                            pattern_type: None,
+                            context: crate::infra::terminal::truncate_for_status(&output),
+                        },
+                    }
+                } else {
+                    self.input_detector.detect_immediate(&output)
+                };
 
                 // Mark AI checked
                 if let Some(stability) = self.stability_states.get_mut(&agent_id) {
@@ -673,32 +695,19 @@ impl AgentWatcher {
             (context, "ManualTrigger".to_string(), false)
         };
 
-        // Enhance is_decision_required and detect pending input using ReactExtractor
-        let (is_decision_required, has_pending_input) = if wait_result.is_waiting {
+        // Enhance is_decision_required using ReactExtractor for better AI-based detection
+        let is_decision_required = if wait_result.is_waiting {
             if let Some(ref react_extractor) = self.react_extractor {
                 match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
-                    Ok(Some(message)) => (message.is_decision_required, message.has_pending_input),
-                    _ => (is_decision_required, false),
+                    Ok(Some(message)) => message.is_decision_required,
+                    _ => is_decision_required,
                 }
             } else {
-                (is_decision_required, false)
+                is_decision_required
             }
         } else {
-            (is_decision_required, false)
+            is_decision_required
         };
-
-        // Auto-press Enter if pending input detected
-        if has_pending_input {
-            info!(agent_id = %agent_id, "Detected pending input, auto-pressing Enter");
-            if let Err(e) = self.tmux.send_enter(&agent.tmux_session) {
-                warn!(agent_id = %agent_id, error = %e, "Failed to auto-press Enter");
-            }
-        }
-
-        let mut context = context;
-        if has_pending_input {
-            context.push_str("\n[已自动补按 Enter]");
-        }
 
         let dedup_key = generate_dedup_key(&context);
 
@@ -810,9 +819,9 @@ impl AgentWatcher {
             .collect())
     }
 
-    /// 使用 ReactExtractor 检测等待状态（新实现）
+    /// 使用 ReactExtractor 检测等待状态
     ///
-    /// 这是一个实验性方法，使用 ReAct 循环提取消息。
+    /// 当 ReactExtractor 可用时，由 poll_once 调用，替代旧的 InputWaitDetector 路径。
     /// 如果 ReactExtractor 不可用，返回 None。
     pub fn check_waiting_with_react(&self, agent: &AgentRecord) -> Option<WatchEvent> {
         let react_extractor = self.react_extractor.as_ref()?;
@@ -820,7 +829,6 @@ impl AgentWatcher {
         match react_extractor.extract_message(&agent.tmux_session, &self.tmux) {
             Ok(Some(message)) => {
                 let is_decision_required = message.is_decision_required;
-                let has_pending_input = message.has_pending_input;
                 let pattern_type = match &message.message_type {
                     MessageType::Choice => "Choice".to_string(),
                     MessageType::Confirmation => "Confirmation".to_string(),
@@ -828,23 +836,10 @@ impl AgentWatcher {
                     MessageType::Idle { .. } => return None,
                 };
 
-                // Auto-press Enter if pending input detected
-                if has_pending_input {
-                    info!(agent_id = %agent.agent_id, "Detected pending input, auto-pressing Enter");
-                    if let Err(e) = self.tmux.send_enter(&agent.tmux_session) {
-                        warn!(agent_id = %agent.agent_id, error = %e, "Failed to auto-press Enter");
-                    }
-                }
-
-                let mut context = message.content;
-                if has_pending_input {
-                    context.push_str("\n[已自动补按 Enter]");
-                }
-
                 Some(WatchEvent::WaitingForInput {
                     agent_id: agent.agent_id.clone(),
                     pattern_type,
-                    context,
+                    context: message.content,
                     dedup_key: message.fingerprint,
                     is_decision_required,
                 })

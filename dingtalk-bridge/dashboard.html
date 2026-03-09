@@ -1,0 +1,2657 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>CAM Admin</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --card: #161b22;
+  --border: #30363d;
+  --text: #e6edf3;
+  --text-dim: #8b949e;
+  --green: #3fb950;
+  --yellow: #d29922;
+  --red: #f85149;
+  --blue: #58a6ff;
+  --orange: #d18616;
+  --purple: #bc8cff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header */
+.header {
+  position: sticky; top: 0; z-index: 100;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 12px 16px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.header h1 { font-size: 16px; font-weight: 600; }
+.header-back {
+  display: none; font-size: 14px; color: var(--blue);
+  cursor: pointer; background: none; border: none; padding: 4px 0;
+}
+.status-dot {
+  display: inline-block; width: 8px; height: 8px;
+  border-radius: 50%; margin-right: 6px; vertical-align: middle;
+}
+.status-dot.online { background: var(--green); box-shadow: 0 0 6px var(--green); }
+.status-dot.offline { background: var(--red); }
+.status-dot.stale { background: var(--yellow); }
+.conn-status { font-size: 12px; color: var(--text-dim); display: flex; align-items: center; gap: 4px; }
+
+/* Login */
+#loginView {
+  display: none; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 100vh; min-height: 100dvh; padding: 24px;
+}
+.login-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 16px; padding: 32px 24px; width: 100%; max-width: 320px; text-align: center;
+}
+.login-card h2 { font-size: 20px; margin-bottom: 8px; }
+.login-card p { font-size: 13px; color: var(--text-dim); margin-bottom: 24px; }
+.login-input {
+  width: 100%; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px 16px; font-size: 16px;
+  color: var(--text); outline: none; margin-bottom: 16px; -webkit-appearance: none;
+}
+.login-input:focus { border-color: var(--blue); }
+.login-btn {
+  width: 100%; background: var(--blue); color: #fff; border: none;
+  border-radius: 10px; padding: 12px; font-size: 16px; font-weight: 600; cursor: pointer;
+}
+.login-btn:active { opacity: 0.7; }
+.login-btn:disabled { opacity: 0.4; }
+.login-error { color: var(--red); font-size: 13px; margin-top: 12px; min-height: 18px; }
+
+/* Sections */
+.section { padding: 12px 16px 0; }
+.section-title {
+  font-size: 13px; font-weight: 600; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+  display: flex; align-items: center; gap: 6px;
+}
+.badge { background: var(--red); color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 10px; font-weight: 700; }
+.badge.info { background: var(--blue); }
+
+/* Cards (pending confirmations) */
+.card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+}
+.card.clickable { cursor: pointer; transition: border-color 0.15s; }
+.card.clickable:active { border-color: var(--blue); }
+.card.urgent { border-color: var(--orange); border-width: 1.5px; }
+.card-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.card-body { font-size: 13px; line-height: 1.5; color: var(--text); margin-bottom: 8px; word-break: break-word; }
+.card-body pre { background: var(--bg); padding: 8px; border-radius: 6px; font-size: 12px; overflow-x: auto; white-space: pre-wrap; margin-top: 4px; }
+.risk-badge { font-size: 11px; padding: 2px 6px; border-radius: 4px; font-weight: 600; }
+.risk-badge.high { background: rgba(248,81,73,0.2); color: var(--red); }
+.risk-badge.medium { background: rgba(210,134,22,0.2); color: var(--orange); }
+.risk-badge.low { background: rgba(63,185,80,0.2); color: var(--green); }
+
+/* Agent Cards */
+.agent-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 14px 16px; margin-bottom: 10px;
+  display: flex; align-items: center; gap: 12px;
+  transition: border-color 0.15s, transform 0.1s;
+}
+.agent-card.clickable { cursor: pointer; }
+.agent-card.clickable:active { border-color: var(--blue); transform: scale(0.985); }
+.agent-card-icon {
+  width: 42px; height: 42px; border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px; flex-shrink: 0;
+}
+.agent-card-icon.processing { background: rgba(63,185,80,0.15); }
+.agent-card-icon.waiting { background: rgba(210,153,34,0.15); }
+.agent-card-icon.decision { background: rgba(248,81,73,0.15); }
+.agent-card-icon.unknown { background: rgba(139,148,158,0.15); }
+.agent-card-body { flex: 1; min-width: 0; }
+.agent-card-row1 { display: flex; align-items: center; gap: 8px; margin-bottom: 3px; }
+.agent-card-name {
+  font-size: 14px; font-weight: 600; color: var(--text);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; flex: 1; min-width: 0;
+  cursor: pointer; -webkit-tap-highlight-color: transparent;
+  border-bottom: 1px dashed var(--text-dim);
+}
+.agent-card-name:active { color: var(--blue); }
+.agent-card-status {
+  font-size: 11px; font-weight: 600; padding: 2px 8px;
+  border-radius: 6px; white-space: nowrap; flex-shrink: 0;
+}
+.agent-card-status.processing { background: rgba(63,185,80,0.15); color: var(--green); }
+.agent-card-status.waiting { background: rgba(210,153,34,0.15); color: var(--yellow); }
+.agent-card-status.decision { background: rgba(248,81,73,0.15); color: var(--red); }
+.agent-card-status.unknown { background: rgba(139,148,158,0.12); color: var(--text-dim); }
+.agent-card-project {
+  font-size: 12px; color: var(--text-dim); margin-bottom: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-card-meta { font-size: 11px; color: var(--text-dim); display: flex; align-items: center; gap: 6px; }
+.agent-card-meta span { white-space: nowrap; }
+.agent-card-actions {
+  display: flex; flex-direction: column; align-items: center;
+  gap: 4px; flex-shrink: 0; margin-left: 4px;
+}
+/* Actions */
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.btn {
+  border: none; border-radius: 8px; padding: 8px 16px;
+  font-size: 14px; font-weight: 600; cursor: pointer;
+  transition: opacity 0.15s; flex: 1; min-width: 60px; text-align: center;
+}
+.btn:active { opacity: 0.7; }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.btn-approve { background: var(--green); color: #fff; }
+.btn-reject { background: var(--red); color: #fff; }
+.btn-custom { background: var(--border); color: var(--text); flex: 0; min-width: 44px; font-size: 16px; }
+.btn-option { background: var(--border); color: var(--text); }
+
+/* Custom input */
+.custom-input-row { display: none; margin-top: 8px; gap: 8px; }
+.custom-input-row.show { display: flex; }
+.custom-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; font-size: 14px; color: var(--text); outline: none;
+}
+.custom-input:focus { border-color: var(--blue); }
+.btn-send {
+  background: var(--blue); color: #fff; border: none;
+  border-radius: 8px; padding: 8px 14px; font-size: 14px; font-weight: 600; cursor: pointer;
+}
+
+/* Agent status */
+.agent-status { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 500; }
+.agent-status.processing { color: var(--green); }
+.agent-status.waiting { color: var(--yellow); }
+.agent-status.decision { color: var(--red); }
+.agent-status.unknown { color: var(--text-dim); }
+
+.copy-btn {
+  display: inline-block; margin-left: 6px; cursor: pointer;
+  font-size: 14px; opacity: 0.5; transition: opacity 0.15s;
+  vertical-align: middle;
+}
+.copy-btn:active { opacity: 1; }
+.copy-btn.copied { opacity: 1; }
+
+.agent-del {
+  background: none; border: none;
+  color: var(--text-dim); font-size: 18px; cursor: pointer;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  transition: all 0.15s; line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  position: relative; z-index: 2;
+}
+.agent-del:active { color: var(--red); background: rgba(248,81,73,0.12); }
+.agent-card-open {
+  color: var(--text-dim); font-size: 14px;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px; background: rgba(88,166,255,0.08);
+}
+.agent-clone {
+  background: none; border: none;
+  color: var(--text-dim); font-size: 15px; cursor: pointer;
+  width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 10px;
+  transition: all 0.15s; line-height: 1;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  position: relative; z-index: 2;
+}
+.agent-clone:active { color: var(--blue); background: rgba(88,166,255,0.12); }
+
+.empty { text-align: center; padding: 24px; color: var(--text-dim); font-size: 13px; }
+
+/* Toast */
+.toast {
+  position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+  background: var(--card); border: 1px solid var(--border); border-radius: 10px;
+  padding: 10px 20px; font-size: 13px; z-index: 200; opacity: 0;
+  transition: opacity 0.3s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+.toast.success { border-color: var(--green); }
+.toast.error { border-color: var(--red); }
+
+/* New Agent Form */
+.new-agent-btn {
+  background: var(--blue); color: #fff; border: none; border-radius: 8px;
+  font-size: 12px; font-weight: 600; padding: 5px 12px; cursor: pointer;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.new-agent-btn:active { opacity: 0.8; }
+.agent-form {
+  background: var(--card); border: 1px solid var(--border); border-radius: 12px;
+  padding: 14px; margin-bottom: 12px; display: flex; flex-direction: column; gap: 10px;
+}
+.agent-form input, .agent-form textarea {
+  background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 10px 12px; font-size: 13px; color: var(--text); width: 100%;
+  box-sizing: border-box; font-family: inherit; resize: vertical;
+}
+.agent-form input::placeholder, .agent-form textarea::placeholder { color: var(--text-dim); }
+.agent-form input:focus, .agent-form textarea:focus {
+  outline: none; border-color: var(--blue);
+}
+.agent-form-actions { display: flex; gap: 8px; justify-content: flex-end; }
+.agent-form-cancel {
+  background: none; border: 1px solid var(--border); border-radius: 8px;
+  color: var(--text-dim); font-size: 13px; padding: 8px 16px; cursor: pointer;
+}
+.agent-form-submit {
+  background: var(--blue); border: none; border-radius: 8px;
+  color: #fff; font-size: 13px; font-weight: 600; padding: 8px 20px; cursor: pointer;
+}
+.agent-form-submit:active { opacity: 0.8; }
+.agent-form-submit:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.last-update { text-align: center; padding: 16px; font-size: 11px; color: var(--text-dim); }
+.offline-banner {
+  display: none; background: rgba(210,153,34,0.15);
+  border-bottom: 1px solid var(--yellow, #d29922); padding: 8px 16px;
+  text-align: center; font-size: 13px; color: var(--yellow, #d29922);
+}
+.offline-banner.show { display: block; }
+
+/* ─── Portal Cards ─── */
+.portal-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 12px; padding: 16px;
+}
+.portal-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 20px 16px; text-align: center;
+  cursor: pointer; transition: border-color 0.15s, transform 0.1s;
+  text-decoration: none; color: var(--text);
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+}
+.portal-card:active { border-color: var(--blue); transform: scale(0.97); }
+.portal-icon { font-size: 32px; line-height: 1; }
+.portal-label { font-size: 14px; font-weight: 600; }
+.portal-desc { font-size: 11px; color: var(--text-dim); line-height: 1.4; }
+.portal-badge {
+  font-size: 10px; padding: 2px 8px; border-radius: 8px;
+  font-weight: 600; margin-top: 2px;
+}
+
+/* ─── Terminal Layout (sidebar + terminal) ─── */
+#terminalLayout { display: none; }
+#terminalLayout.active { display: block; height: calc(100vh - 49px); height: calc(100dvh - 49px); }
+
+/* Sidebar - 手机端默认隐藏 */
+#termSidebar {
+  position: fixed; top: 49px; left: -320px; bottom: 0; width: 320px;
+  background: var(--card); border-right: 1px solid var(--border);
+  z-index: 150; transition: left 0.25s ease;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+#termSidebar.open { left: 0; }
+.sidebar-header {
+  padding: 12px 16px; border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center;
+  font-size: 14px; font-weight: 600; flex-shrink: 0;
+}
+.sidebar-header-right { display: flex; align-items: center; gap: 4px; }
+#sidebarNewBtn {
+  background: var(--blue); border: none; color: #fff; font-size: 14px; font-weight: 700;
+  width: 28px; height: 28px; border-radius: 6px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+#sidebarNewBtn:active { opacity: 0.7; }
+#sidebarClose {
+  background: none; border: none; color: var(--text-dim); font-size: 18px;
+  cursor: pointer; padding: 4px 8px; border-radius: 6px;
+}
+#sidebarClose:active { color: var(--text); background: var(--border); }
+#sidebarNewForm {
+  display: none; padding: 10px 12px; border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+#sidebarNewForm .agent-form { margin-bottom: 0; }
+#sidebarAgentList { flex: 1; overflow-y: auto; padding: 8px; }
+
+/* Sidebar 卡片 - 复用 agent-card 样式但适配侧边栏宽度 */
+#sidebarAgentList .agent-card {
+  margin-bottom: 6px; padding: 10px 12px; cursor: grab;
+  transition: border-color 0.15s, transform 0.1s, opacity 0.2s, box-shadow 0.2s;
+}
+#sidebarAgentList .agent-card.current {
+  border-color: var(--blue); background: rgba(88,166,255,0.06);
+}
+#sidebarAgentList .agent-card-name { font-size: 13px; }
+#sidebarAgentList .agent-card-project { font-size: 11px; }
+#sidebarAgentList .agent-card-meta { font-size: 10px; }
+#sidebarAgentList .agent-card-icon { width: 36px; height: 36px; font-size: 17px; }
+#sidebarAgentList .agent-card-actions { gap: 2px; }
+#sidebarAgentList .agent-del,
+#sidebarAgentList .agent-clone { width: 28px; height: 28px; font-size: 14px; }
+#sidebarAgentList .agent-card-open { width: 28px; height: 28px; font-size: 12px; }
+
+/* 拖拽状态（通用） */
+.agent-card.dragging {
+  opacity: 0.3; transform: scale(0.97);
+}
+.drag-drop-indicator {
+  height: 2px; background: var(--blue); border-radius: 1px;
+  margin: -1px 8px; transition: none;
+}
+/* 拖拽跟随的幽灵卡片 */
+.drag-ghost {
+  position: fixed; z-index: 300; pointer-events: none;
+  opacity: 0.85; transform: scale(0.95);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+  border: 1px solid var(--blue);
+  border-radius: 14px; background: var(--card);
+}
+/* 拖拽模式下禁止 touch 默认行为 */
+.drag-active { touch-action: none; -webkit-user-select: none; user-select: none; }
+/* 长按就绪反馈 */
+.agent-card.drag-ready {
+  transform: scale(1.02);
+  box-shadow: 0 4px 16px rgba(88,166,255,0.3);
+  border-color: var(--blue);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+
+/* Sidebar overlay - 手机端遮罩 */
+#sidebarOverlay {
+  display: none; position: fixed; top: 49px; left: 0; right: 0; bottom: 0;
+  background: rgba(0,0,0,0.5); z-index: 140;
+}
+#sidebarOverlay.open { display: block; }
+
+/* 手机端菜单按钮 */
+#termMenuBtn {
+  display: none; background: none; border: none; color: var(--blue);
+  font-size: 20px; cursor: pointer; padding: 4px 8px; line-height: 1;
+}
+
+/* Sidebar 右键菜单 */
+#sidebarCtxMenu {
+  display: none; position: fixed; z-index: 200;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; min-width: 140px; padding: 4px 0;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+}
+#sidebarCtxMenu.open { display: block; }
+.ctx-item {
+  padding: 10px 16px; font-size: 13px; cursor: pointer;
+  display: flex; align-items: center; gap: 8px; color: var(--text);
+  transition: background 0.1s;
+}
+.ctx-item:hover { background: rgba(88,166,255,0.08); }
+.ctx-item:active { background: rgba(88,166,255,0.15); }
+.ctx-item.danger { color: var(--red); }
+.ctx-item.danger:hover { background: rgba(248,81,73,0.1); }
+
+/* PC 端布局 */
+@media (min-width: 768px) {
+  #terminalLayout.active { display: flex; }
+  #termSidebar {
+    position: static; left: 0; width: 320px; flex-shrink: 0;
+    transition: none;
+  }
+  #termSidebar.open { left: 0; } /* 无效化 open class */
+  #sidebarClose { display: none; }
+  #sidebarOverlay { display: none !important; }
+  #termMenuBtn { display: none !important; }
+  #terminalView.active { flex: 1; min-width: 0; height: 100%; }
+}
+
+/* ─── Terminal View ─── */
+#terminalView { display: none; position: relative; overflow: hidden; }
+#terminalView.active { display: flex; flex-direction: column; height: calc(100vh - 49px); height: calc(100dvh - 49px); max-width: 100%; }
+.term-info {
+  padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--border);
+  font-size: 12px; color: var(--text-dim); display: flex; justify-content: space-between; align-items: center;
+  gap: 12px;
+}
+.term-info-left {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.term-path-btn {
+  appearance: none;
+  border: none;
+  background: none;
+  color: var(--blue);
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  cursor: pointer;
+  min-width: 0;
+  max-width: 100%;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.term-path-btn:hover { opacity: 0.85; }
+.term-path-btn:disabled { opacity: 0.5; cursor: default; }
+.term-info .agent-status { font-size: 11px; }
+.term-output {
+  flex: 1; overflow-y: scroll; overflow-x: auto;
+  -webkit-overflow-scrolling: touch; padding: 8px 12px;
+  font-family: 'SF Mono', Menlo, 'Courier New', monospace; font-size: 12px;
+  line-height: 1.4; white-space: pre; word-break: normal;
+  background: var(--bg); color: var(--text);
+  min-width: 0;
+}
+.term-output .loading { color: var(--text-dim); text-align: center; padding: 40px; }
+.term-load-more {
+  text-align: center; padding: 10px 8px; color: var(--blue); cursor: pointer;
+  font-size: 12px; border-bottom: 1px solid var(--border); user-select: none;
+  white-space: normal;
+}
+.term-load-more:active { opacity: 0.7; }
+.term-load-more.loading { color: var(--text-dim); cursor: default; }
+.term-input-bar {
+  display: flex; gap: 8px; padding: 8px 12px;
+  background: var(--card); border-top: 1px solid var(--border);
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+.term-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 15px;
+  color: var(--text); outline: none; font-family: 'SF Mono', Menlo, monospace;
+}
+.term-input:focus { border-color: var(--blue); }
+.term-send-btn {
+  background: var(--blue); color: #fff; border: none;
+  border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.term-send-btn:active { opacity: 0.7; }
+.term-send-btn:disabled { opacity: 0.4; }
+
+/* 快捷命令栏 */
+.term-shortcuts {
+  display: flex; gap: 6px; padding: 6px 12px; overflow-x: auto;
+  background: var(--card); border-top: 1px solid var(--border);
+  -webkit-overflow-scrolling: touch; scrollbar-width: none;
+}
+.term-shortcuts::-webkit-scrollbar { display: none; }
+.term-shortcut {
+  background: rgba(88,166,255,0.08); border: 1px solid rgba(88,166,255,0.2);
+  color: var(--text); border-radius: 8px; padding: 6px 12px;
+  font-size: 12px; white-space: nowrap; cursor: pointer;
+  transition: all 0.15s; flex-shrink: 0;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+}
+.term-shortcut:active { background: rgba(88,166,255,0.2); border-color: var(--blue); }
+.term-shortcut.term-key {
+  font-weight: 700; font-size: 13px; padding: 6px 10px;
+  background: rgba(139,148,158,0.12); border-color: rgba(139,148,158,0.3);
+  font-family: 'SF Mono', Menlo, monospace;
+}
+.term-shortcut.term-key:active { background: rgba(139,148,158,0.25); }
+
+/* / 命令弹窗 */
+.term-cmd-popup {
+  display: none; position: absolute; bottom: 92px; left: 12px; right: 12px;
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; max-height: 240px; overflow-y: auto;
+  box-shadow: 0 -4px 16px rgba(0,0,0,0.3); z-index: 50;
+}
+.term-cmd-popup.open { display: block; }
+.term-cmd-item {
+  padding: 10px 14px; cursor: pointer; display: flex; align-items: center; gap: 10px;
+  border-bottom: 1px solid rgba(48,54,61,0.4); transition: background 0.1s;
+}
+.term-cmd-item:last-child { border-bottom: none; }
+.term-cmd-item:active { background: rgba(88,166,255,0.1); }
+.term-cmd-icon { font-size: 16px; flex-shrink: 0; width: 24px; text-align: center; }
+.term-cmd-body { flex: 1; min-width: 0; }
+.term-cmd-name { font-size: 13px; font-weight: 600; color: var(--text); }
+.term-cmd-desc { font-size: 11px; color: var(--text-dim); margin-top: 1px; }
+
+/* 重命名按钮 */
+.term-rename-btn {
+  background: none; border: none; font-size: 14px; cursor: pointer;
+  padding: 4px 6px; opacity: 0.5; transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.term-rename-btn:hover { opacity: 1; }
+
+/* 截图按钮 */
+.term-screenshot-btn {
+  background: none; border: none; font-size: 16px; cursor: pointer;
+  padding: 4px 8px; opacity: 0.6; transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent;
+}
+.term-screenshot-btn:active { opacity: 1; }
+
+/* 上传按钮 */
+.term-upload-btn {
+  background: none; border: none; font-size: 20px; cursor: pointer;
+  padding: 6px 4px 6px 0; opacity: 0.5; transition: opacity 0.15s;
+  -webkit-tap-highlight-color: transparent; touch-action: manipulation;
+  flex-shrink: 0;
+}
+.term-upload-btn:active { opacity: 1; }
+
+/* 上传进度提示 */
+.term-upload-toast { font-size: 12px; color: var(--text-dim); padding: 4px 12px; }
+
+
+/* ─── Chat History View ─── */
+.chat-session {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; margin-bottom: 8px; overflow: hidden;
+}
+.chat-session-header {
+  padding: 10px 12px; display: flex; justify-content: space-between;
+  align-items: center; cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.chat-session-header:active { background: var(--border); }
+.chat-session-body { display: none; border-top: 1px solid var(--border); }
+.chat-session-body.open { display: block; }
+.chat-msg {
+  padding: 8px 12px; font-size: 12px; line-height: 1.5;
+  border-bottom: 1px solid rgba(48,54,61,0.5);
+}
+.chat-msg:last-child { border-bottom: none; }
+.chat-msg.user { background: rgba(88,166,255,0.05); }
+.chat-msg.assistant { background: rgba(63,185,80,0.05); }
+.chat-role { font-size: 10px; font-weight: 700; text-transform: uppercase; margin-bottom: 2px; }
+.chat-role.user { color: var(--blue); }
+.chat-role.assistant { color: var(--green); }
+.chat-content { white-space: pre-wrap; word-break: break-word; }
+
+/* ─── Knowledge View ─── */
+.kb-toolbar {
+  display: flex; gap: 8px; padding: 0 16px 8px; flex-wrap: wrap;
+}
+.kb-toolbar-btn {
+  border: none; border-radius: 8px; padding: 8px 14px; font-size: 13px;
+  font-weight: 600; cursor: pointer; transition: opacity 0.15s;
+}
+.kb-toolbar-btn:active { opacity: 0.7; }
+.kb-toolbar-btn.primary { background: var(--purple); color: #fff; }
+.kb-toolbar-btn.secondary { background: var(--border); color: var(--text); }
+.kb-search {
+  flex: 1; min-width: 120px; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; font-size: 13px; color: var(--text); outline: none;
+}
+.kb-search:focus { border-color: var(--blue); }
+.kb-search::placeholder { color: var(--text-dim); }
+.kb-file {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 10px; padding: 12px; margin-bottom: 8px;
+  display: flex; justify-content: space-between; align-items: center;
+}
+.kb-file-info { flex: 1; min-width: 0; }
+.kb-file-name { font-size: 13px; font-weight: 600; color: var(--blue); word-break: break-all; }
+.kb-file-meta { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+.kb-actions { display: flex; gap: 6px; flex-shrink: 0; margin-left: 8px; }
+.kb-btn {
+  border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px;
+  font-weight: 600; cursor: pointer;
+}
+.kb-btn:active { opacity: 0.7; }
+.kb-btn.view { background: var(--blue); color: #fff; }
+.kb-btn.exec { background: var(--green); color: #fff; }
+.kb-btn.del { background: var(--red); color: #fff; }
+
+/* Knowledge detail modal (editable) */
+.kb-detail {
+  display: none; position: fixed; inset: 0; z-index: 300;
+  background: var(--bg); flex-direction: column;
+}
+.kb-detail.open { display: flex; }
+.kb-detail-header {
+  padding: 12px 16px; background: var(--card); border-bottom: 1px solid var(--border);
+  display: flex; justify-content: space-between; align-items: center; gap: 8px;
+}
+.kb-detail-header h3 { font-size: 14px; font-weight: 600; flex: 1; min-width: 0; }
+.kb-detail-actions { display: flex; gap: 8px; }
+.kb-detail-btn {
+  background: none; border: none; color: var(--blue); font-size: 13px;
+  cursor: pointer; padding: 4px 8px; font-weight: 600;
+}
+.kb-detail-btn.save { color: var(--green); }
+.kb-detail-content {
+  flex: 1; overflow-y: auto; padding: 12px 16px;
+  font-family: 'SF Mono', Menlo, monospace; font-size: 12px;
+  line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+}
+.kb-detail-editor {
+  flex: 1; display: none; padding: 0;
+}
+.kb-detail-editor textarea {
+  width: 100%; height: 100%; background: var(--bg); color: var(--text);
+  border: none; padding: 12px 16px; font-family: 'SF Mono', Menlo, monospace;
+  font-size: 12px; line-height: 1.5; resize: none; outline: none;
+}
+
+/* ─── KB Chat View ─── */
+#kbChatView { display: none; }
+#kbChatView.active { display: flex; flex-direction: column; height: calc(100vh - 49px); height: calc(100dvh - 49px); }
+.kb-chat-info {
+  padding: 8px 16px; background: var(--card); border-bottom: 1px solid var(--border);
+  display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+}
+.kb-chat-info label { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+.kb-chat-files {
+  flex: 1; min-width: 0; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 6px; padding: 6px 8px; font-size: 12px; color: var(--text); outline: none;
+}
+.kb-chat-files:focus { border-color: var(--blue); }
+.kb-chat-messages {
+  flex: 1; overflow-y: auto; -webkit-overflow-scrolling: touch;
+  padding: 12px 16px; display: flex; flex-direction: column; gap: 12px;
+}
+.kb-chat-msg {
+  max-width: 85%; padding: 10px 14px; border-radius: 12px;
+  font-size: 13px; line-height: 1.6; word-break: break-word; white-space: pre-wrap;
+}
+.kb-chat-msg.user {
+  align-self: flex-end; background: var(--blue); color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.kb-chat-msg.assistant {
+  align-self: flex-start; background: var(--card); border: 1px solid var(--border);
+  border-bottom-left-radius: 4px;
+}
+.kb-chat-msg.assistant a { color: var(--blue); }
+.kb-chat-msg.system {
+  align-self: center; background: none; color: var(--text-dim);
+  font-size: 11px; padding: 4px;
+}
+.kb-chat-input-bar {
+  display: flex; gap: 8px; padding: 8px 12px;
+  background: var(--card); border-top: 1px solid var(--border);
+  padding-bottom: max(8px, env(safe-area-inset-bottom));
+}
+.kb-chat-input {
+  flex: 1; background: var(--bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 10px 12px; font-size: 15px;
+  color: var(--text); outline: none;
+}
+.kb-chat-input:focus { border-color: var(--blue); }
+.kb-chat-send-btn {
+  background: var(--purple); color: #fff; border: none;
+  border-radius: 8px; padding: 10px 16px; font-size: 14px; font-weight: 600;
+  cursor: pointer; white-space: nowrap;
+}
+.kb-chat-send-btn:active { opacity: 0.7; }
+.kb-chat-send-btn:disabled { opacity: 0.4; }
+
+/* Upload dialog */
+.kb-upload-overlay {
+  display: none; position: fixed; inset: 0; z-index: 350;
+  background: rgba(0,0,0,0.6); align-items: center; justify-content: center;
+}
+.kb-upload-overlay.open { display: flex; }
+.kb-upload-card {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: 14px; padding: 24px; width: 90%; max-width: 340px; text-align: center;
+}
+.kb-upload-card h3 { font-size: 16px; margin-bottom: 16px; }
+.kb-upload-card input[type="file"] { margin-bottom: 12px; color: var(--text); font-size: 13px; }
+.kb-upload-card .kb-toolbar-btn { width: 100%; margin-top: 8px; }
+
+/* View container */
+.view { display: none; }
+.view.active { display: block; }
+</style>
+</head>
+<body>
+
+<!-- ─── 登录页 ─── -->
+<div id="loginView">
+  <div class="login-card">
+    <h2>CAM Admin</h2>
+    <p>请输入密码访问控制台</p>
+    <input class="login-input" id="loginPassword" type="password" placeholder="密码"
+           onkeydown="if(event.key==='Enter')doLogin()" autofocus>
+    <button class="login-btn" id="loginBtn" onclick="doLogin()">登录</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+
+<!-- ─── 主界面 ─── -->
+<div id="mainApp" style="display:none">
+
+<div class="header">
+  <div style="display:flex;align-items:center;gap:4px">
+    <button class="header-back" id="backBtn">&larr; 返回</button>
+    <button id="termMenuBtn" onclick="toggleSidebar()">&#x2630;</button>
+  </div>
+  <h1 id="headerTitle">CAM Admin</h1>
+  <div class="conn-status">
+    <span class="status-dot" id="macDot"></span>
+    <span id="macLabel">connecting...</span>
+  </div>
+</div>
+<div class="offline-banner" id="offlineBanner">Mac 重连中... 终端预览稍后恢复</div>
+
+<!-- ─── 门户首页 ─── -->
+<div id="portalView" class="view">
+  <div class="portal-grid">
+    <div class="portal-card" onclick="navigateTo('agents')">
+      <span class="portal-icon">&#x1F916;</span>
+      <span class="portal-label">Agent 监控</span>
+      <span class="portal-desc">查看活跃 Agent、待处理确认</span>
+      <span class="portal-badge info" id="portalAgentBadge" style="display:none"></span>
+    </div>
+    <a class="portal-card" href="http://192.168.0.103:18789" target="_blank">
+      <span class="portal-icon">&#x2699;&#xFE0F;</span>
+      <span class="portal-label">OpenClaw 后台</span>
+      <span class="portal-desc">AI 对话管理、插件配置</span>
+    </a>
+    <div class="portal-card" onclick="navigateTo('chat')">
+      <span class="portal-icon">&#x1F4AC;</span>
+      <span class="portal-label">钉钉会话</span>
+      <span class="portal-desc">查看 AI 对话记录</span>
+    </div>
+    <div class="portal-card" onclick="navigateTo('knowledge')">
+      <span class="portal-icon">&#x1F4DA;</span>
+      <span class="portal-label">知识库</span>
+      <span class="portal-desc">浏览、管理、执行知识文件</span>
+    </div>
+  </div>
+</div>
+
+<!-- ─── Agent 视图 ─── -->
+<div id="agentsView" class="view">
+  <div id="pendingSection" class="section" style="display:none">
+    <div class="section-title">
+      待处理 <span class="badge" id="pendingCount">0</span>
+    </div>
+    <div id="pendingList"></div>
+  </div>
+  <div class="section">
+    <div class="section-title" style="justify-content:space-between">
+      <span>活跃 Agents <span class="badge info" id="agentCount">0</span></span>
+      <button class="new-agent-btn" onclick="showNewAgentForm()">&#x2B; 新会话</button>
+    </div>
+    <div id="newAgentForm" style="display:none">
+      <div class="agent-form">
+        <input id="newAgentCwd" type="text" placeholder="工作目录，如 ~/project/my-app" autocomplete="off" />
+        <input id="newAgentName" type="text" placeholder="会话名称（可选）" autocomplete="off" />
+        <textarea id="newAgentPrompt" placeholder="任务描述..." rows="3"></textarea>
+        <div class="agent-form-actions">
+          <button class="agent-form-cancel" onclick="hideNewAgentForm()">取消</button>
+          <button class="agent-form-submit" onclick="startNewAgent()">启动</button>
+        </div>
+      </div>
+    </div>
+    <div id="agentList"></div>
+  </div>
+  <div class="last-update" id="lastUpdate">等待连接...</div>
+</div>
+
+<!-- ─── 终端布局（侧边栏 + 终端） ─── -->
+<div id="terminalLayout">
+<div id="termSidebar">
+  <div class="sidebar-header">
+    <span>Agents</span>
+    <div class="sidebar-header-right">
+      <button id="sidebarNewBtn" onclick="toggleSidebarNewForm()" title="新会话">&#x2B;</button>
+      <button id="sidebarClose" onclick="closeSidebar()">&#x2715;</button>
+    </div>
+  </div>
+  <div id="sidebarNewForm">
+    <div class="agent-form">
+      <input id="sbNewCwd" type="text" placeholder="工作目录，如 ~/project/my-app" autocomplete="off" />
+      <input id="sbNewName" type="text" placeholder="会话名称（可选）" autocomplete="off" />
+      <textarea id="sbNewPrompt" placeholder="任务描述..." rows="2"></textarea>
+      <div class="agent-form-actions">
+        <button class="agent-form-cancel" onclick="toggleSidebarNewForm()">取消</button>
+        <button class="agent-form-submit" id="sbNewSubmit" onclick="startSidebarAgent()">启动</button>
+      </div>
+    </div>
+  </div>
+  <div id="sidebarAgentList"></div>
+</div>
+<div id="sidebarOverlay" onclick="closeSidebar()"></div>
+<!-- ─── 终端视图 ─── -->
+<div id="terminalView">
+  <div class="term-info">
+    <div class="term-info-left">
+      <span id="termAgent"></span>
+      <button id="termProjectPath" class="term-path-btn" style="display:none"></button>
+    </div>
+    <span id="termStatus"></span>
+    <button class="term-rename-btn" onclick="startRenameAgent()" title="重命名">&#x270F;</button>
+    <button class="term-screenshot-btn" onclick="termScreenshot()" title="截图">&#x1F4F7;</button>
+  </div>
+  <div class="term-output" id="termOutput">
+    <div class="loading">加载中...</div>
+  </div>
+  <!-- 快捷命令栏 -->
+  <div class="term-shortcuts" id="termShortcuts">
+    <button class="term-shortcut term-key" onclick="termSendKey('Escape')">Esc</button>
+    <button class="term-shortcut term-key" onclick="termSendKey('Up')">&#x25B2;</button>
+    <button class="term-shortcut term-key" onclick="termSendKey('Down')">&#x25BC;</button>
+    <button class="term-shortcut" onclick="termQuickCmd('/compact')">&#x1F9F9; 压缩</button>
+    <button class="term-shortcut" onclick="termQuickSend('继续')">&#x23ED; 继续</button>
+    <button class="term-shortcut" onclick="termQuickSend('请先回顾当前需求、约束和验收标准，然后继续执行。')">&#x1F4CB; 回顾需求</button>
+    <button class="term-shortcut" onclick="termQuickSend('y')">&#x2705; Yes</button>
+    <button class="term-shortcut" onclick="termQuickSend('n')">&#x274C; No</button>
+    <button class="term-shortcut" onclick="termQuickCmd('/clear')">&#x1F5D1; 清屏</button>
+    <button class="term-shortcut" onclick="termQuickCmd('/resume')">&#x25B6; 恢复</button>
+  </div>
+  <!-- / 命令提示弹窗 -->
+  <div class="term-cmd-popup" id="termCmdPopup"></div>
+  <div class="term-input-bar">
+    <button class="term-upload-btn" onclick="document.getElementById('termImageInput').click()" title="上传图片">&#x1F4CE;</button>
+    <input type="file" id="termImageInput" accept="image/*" style="display:none" onchange="termUploadImage(this)">
+    <input class="term-input" id="termInput" placeholder="输入消息... 输入 / 查看命令"
+           onkeydown="termInputKeydown(event)" oninput="termInputChanged()">
+    <button class="term-send-btn" id="termSendBtn" onclick="termSend()">发送</button>
+  </div>
+</div>
+</div><!-- /terminalLayout -->
+
+<!-- ─── 聊天记录视图 ─── -->
+<div id="chatView" class="view">
+  <div class="section">
+    <div class="section-title" style="justify-content:space-between">
+      <span>钉钉 AI 对话记录</span>
+      <button class="kb-btn del" onclick="clearAllChat()" style="font-size:11px;padding:3px 10px">清除全部</button>
+    </div>
+    <div id="chatList"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
+<!-- ─── 知识库视图 ─── -->
+<div id="knowledgeView" class="view">
+  <div class="kb-toolbar">
+    <button class="kb-toolbar-btn primary" onclick="navigateTo('kb-chat')">&#x1F52C; 知识挖掘</button>
+    <button class="kb-toolbar-btn secondary" onclick="showUploadDialog()">&#x2B06; 上传</button>
+    <button class="kb-toolbar-btn secondary" onclick="createKbFile()">&#x2795; 新建</button>
+    <input class="kb-search" id="kbSearch" placeholder="搜索文件..." oninput="filterKbFiles()">
+  </div>
+  <div class="section">
+    <div class="section-title">知识库文件</div>
+    <div id="kbList"><div class="empty">加载中...</div></div>
+  </div>
+</div>
+
+<!-- ─── 知识挖掘对话视图 ─── -->
+<div id="kbChatView">
+  <div class="kb-chat-info">
+    <label>关联文件:</label>
+    <input class="kb-chat-files" id="kbChatFiles" placeholder="可选，输入文件名用逗号分隔">
+  </div>
+  <div class="kb-chat-messages" id="kbChatMessages">
+    <div class="kb-chat-msg system">开始对话，AI 可以读取、分析和保存知识库文件</div>
+  </div>
+  <div class="kb-chat-input-bar">
+    <input class="kb-chat-input" id="kbChatInput" placeholder="输入问题..."
+           onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendKbChat();}">
+    <button class="kb-chat-send-btn" id="kbChatSendBtn" onclick="sendKbChat()">发送</button>
+  </div>
+</div>
+
+</div><!-- /mainApp -->
+
+<!-- 知识详情浮层 (可编辑) -->
+<div class="kb-detail" id="kbDetail">
+  <div class="kb-detail-header">
+    <h3 id="kbDetailTitle">文件内容</h3>
+    <div class="kb-detail-actions">
+      <button class="kb-detail-btn" id="kbEditBtn" onclick="toggleKbEdit()">编辑</button>
+      <button class="kb-detail-btn save" id="kbSaveBtn" onclick="saveKbFile()" style="display:none">保存</button>
+      <button class="kb-detail-btn" onclick="closeKbDetail()">关闭</button>
+    </div>
+  </div>
+  <div class="kb-detail-content" id="kbDetailContent"></div>
+  <div class="kb-detail-editor" id="kbDetailEditor">
+    <textarea id="kbDetailTextarea"></textarea>
+  </div>
+</div>
+
+<!-- 上传对话框 -->
+<div class="kb-upload-overlay" id="kbUploadOverlay" onclick="if(event.target===this)closeUploadDialog()">
+  <div class="kb-upload-card">
+    <h3>上传知识文件</h3>
+    <input type="file" id="kbUploadFile">
+    <button class="kb-toolbar-btn primary" onclick="doUploadKbFile()">上传</button>
+    <button class="kb-toolbar-btn secondary" onclick="closeUploadDialog()">取消</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+<div id="sidebarCtxMenu">
+  <div class="ctx-item" onclick="ctxRestart()">&#x1F504; 重启会话</div>
+  <div class="ctx-item" onclick="ctxCopyCmd()">&#x1F4CB; 复制 tmux attach</div>
+  <div class="ctx-item" onclick="ctxRename()">&#x270F;&#xFE0F; 重命名</div>
+  <div class="ctx-item danger" onclick="ctxDelete()">&#x1F5D1; 删除</div>
+</div>
+
+<script>
+const API_BASE = location.origin;
+let state = null;
+let evtSource = null;
+
+// View & nav state
+let currentView = 'portal';  // portal | agents | chat | knowledge | kb-chat
+let currentAgent = null;      // for terminal view
+let termPollTimer = null;
+let termSessionId = null;     // 当前终端 session 标识，用于防竞态
+let termAbortCtrl = null;     // AbortController，切换时取消在途请求
+let lastTermContent = '';
+let termCurrentLines = 200;   // 当前请求行数，滚动到顶部时递增
+let termHasMore = false;      // 是否还有更多历史内容
+let termLoadingMore = false;  // 正在加载更多
+
+// ─── Login ───
+async function doLogin() {
+  const pwd = document.getElementById('loginPassword').value;
+  const btn = document.getElementById('loginBtn');
+  const err = document.getElementById('loginError');
+  if (!pwd) { err.textContent = '请输入密码'; return; }
+  btn.disabled = true; err.textContent = '';
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/login`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: pwd }),
+    });
+    const data = await res.json();
+    if (data.ok) enterApp();
+    else err.textContent = data.error || '密码错误';
+  } catch (e) { err.textContent = '网络错误: ' + e.message; }
+  finally { btn.disabled = false; }
+}
+
+function enterApp() {
+  document.getElementById('loginView').style.display = 'none';
+  document.getElementById('mainApp').style.display = '';
+  connectSSE();
+  setInterval(() => { if (state && currentView === 'agents' && !currentAgent) renderAgents(); }, 5000);
+  // Route from hash
+  const hash = location.hash.replace('#', '') || 'portal';
+  if (hash.startsWith('terminal/')) {
+    // 等 SSE 拿到 state 后再定位终端
+    const sessionName = hash.substring('terminal/'.length);
+    waitForStateAndOpenTerminal(sessionName);
+  } else {
+    navigateTo(hash, true);
+  }
+}
+
+// 等待 state 加载后打开终端（从链接直接进入时）
+function waitForStateAndOpenTerminal(sessionName) {
+  navigateTo('agents', true);
+  const maxWait = 10000;
+  const start = Date.now();
+  const check = () => {
+    if (state) {
+      const agents = Array.isArray(state.agents) ? state.agents : [];
+      const agent = agents.find(a => a.tmux_session === sessionName);
+      if (agent) {
+        openTerminal(agent);
+        return;
+      }
+    }
+    if (Date.now() - start < maxWait) setTimeout(check, 500);
+  };
+  check();
+}
+
+// ─── Navigation ───
+function navigateTo(view, replace) {
+  // Close terminal if open
+  if (currentAgent) closeTerminal(true);
+
+  currentView = view;
+  if (!replace) location.hash = view === 'portal' ? '' : view;
+
+  // Hide all views
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('terminalLayout').classList.remove('active');
+  document.getElementById('terminalView').classList.remove('active');
+  document.getElementById('termMenuBtn').style.display = 'none';
+
+  const back = document.getElementById('backBtn');
+  const title = document.getElementById('headerTitle');
+
+  if (view === 'portal') {
+    document.getElementById('portalView').classList.add('active');
+    back.style.display = 'none';
+    title.textContent = 'CAM Admin';
+    back.onclick = null;
+    updatePortalBadges();
+  } else if (view === 'agents') {
+    document.getElementById('agentsView').classList.add('active');
+    back.style.display = ''; back.onclick = () => navigateTo('portal');
+    title.textContent = 'Agent 监控';
+    renderAgents();
+  } else if (view === 'chat') {
+    document.getElementById('chatView').classList.add('active');
+    back.style.display = ''; back.onclick = () => navigateTo('portal');
+    title.textContent = '钉钉会话';
+    loadChatHistory();
+  } else if (view === 'knowledge') {
+    document.getElementById('knowledgeView').classList.add('active');
+    back.style.display = ''; back.onclick = () => navigateTo('portal');
+    title.textContent = '知识库';
+    loadKnowledge();
+  } else if (view === 'kb-chat') {
+    document.getElementById('kbChatView').classList.add('active');
+    back.style.display = ''; back.onclick = () => navigateTo('knowledge');
+    title.textContent = '知识挖掘';
+    document.getElementById('kbChatInput').focus();
+  }
+}
+
+function updatePortalBadges() {
+  if (!state) return;
+  const agents = Array.isArray(state.agents) ? state.agents : [];
+  const rawPending = state.pending;
+  const pCount = Array.isArray(rawPending) ? rawPending.length : (rawPending?.confirmations?.length || 0);
+  const badge = document.getElementById('portalAgentBadge');
+  if (agents.length > 0 || pCount > 0) {
+    badge.style.display = '';
+    badge.textContent = pCount > 0 ? `${agents.length} 个 Agent · ${pCount} 待处理` : `${agents.length} 个 Agent`;
+    if (pCount > 0) { badge.className = 'portal-badge'; badge.style.background = 'rgba(248,81,73,0.2)'; badge.style.color = 'var(--red)'; }
+    else { badge.className = 'portal-badge info'; badge.style.background = ''; badge.style.color = ''; }
+  } else { badge.style.display = 'none'; }
+}
+
+// ─── SSE ───
+function connectSSE() {
+  if (evtSource) evtSource.close();
+  evtSource = new EventSource(`${API_BASE}/api/cam/events`);
+  evtSource.onmessage = (e) => {
+    try {
+      const data = JSON.parse(e.data);
+      if (data.type === 'state') {
+        state = data;
+        if (currentView === 'agents' && !currentAgent) renderAgents();
+        else if (currentAgent) { updateTermStatus(); renderSidebarAgents(); }
+        if (currentView === 'portal') updatePortalBadges();
+      }
+    } catch {}
+  };
+  evtSource.onerror = () => {
+    document.getElementById('macDot').className = 'status-dot offline';
+    document.getElementById('macLabel').textContent = 'SSE 断开';
+    setTimeout(() => { if (evtSource.readyState === EventSource.CLOSED) connectSSE(); }, 3000);
+  };
+}
+
+// ─── Render Agents ───
+function renderAgents() {
+  if (!state) return;
+  const dot = document.getElementById('macDot');
+  const label = document.getElementById('macLabel');
+  const banner = document.getElementById('offlineBanner');
+  const age = Date.now() - state.timestamp;
+  if (!state.macOnline) { dot.className = 'status-dot offline'; label.textContent = '重连中...'; banner.classList.add('show'); }
+  else if (age > 30000) { dot.className = 'status-dot stale'; label.textContent = '数据过期'; banner.classList.remove('show'); }
+  else { dot.className = 'status-dot online'; label.textContent = 'Mac 在线'; banner.classList.remove('show'); }
+
+  const rawPending = state.pending;
+  const confirmations = Array.isArray(rawPending) ? rawPending : (rawPending?.confirmations || []);
+  const pendingSection = document.getElementById('pendingSection');
+  document.getElementById('pendingCount').textContent = confirmations.length;
+  document.getElementById('pendingList').innerHTML = confirmations.length > 0 ? confirmations.map(renderPending).join('') : '';
+  pendingSection.style.display = confirmations.length > 0 ? '' : 'none';
+
+  const agents = Array.isArray(state.agents) ? state.agents : [];
+  document.getElementById('agentCount').textContent = agents.length;
+  if (mainDragInProgress) return; // 主列表拖拽中不重绘
+  if (agents.length > 0) {
+    // 按 sidebarOrder 排序（复用同一个排序逻辑）
+    const sorted = [];
+    const remaining = [...agents];
+    for (const tmux of sidebarOrder) {
+      const idx = remaining.findIndex(a => a.tmux_session === tmux);
+      if (idx !== -1) sorted.push(remaining.splice(idx, 1)[0]);
+    }
+    sorted.push(...remaining);
+    sidebarOrder = sorted.map(a => a.tmux_session);
+    localStorage.setItem('sidebarOrder', JSON.stringify(sidebarOrder));
+    document.getElementById('agentList').innerHTML = sorted.map(renderAgent).join('');
+  } else {
+    document.getElementById('agentList').innerHTML = '<div class="empty">没有活跃的 Agent</div>';
+  }
+
+  const ts = new Date(state.timestamp);
+  document.getElementById('lastUpdate').textContent =
+    `最后更新: ${ts.toLocaleTimeString('zh-CN')} (${Math.round(age/1000)}秒前)`;
+}
+
+function renderPending(c) {
+  const risk = c.risk_level || 'unknown';
+  const riskClass = risk === 'high' ? 'high' : risk === 'medium' ? 'medium' : 'low';
+  const agentId = c.agent_id || '';
+  const shortId = agentId.length > 16 ? agentId.substring(0, 16) + '...' : agentId;
+  let actionButtons = '';
+  if (c.confirmation_type?.OptionSelection) {
+    const options = c.confirmation_type.OptionSelection.options || [];
+    actionButtons = options.map((opt, i) =>
+      `<button class="btn btn-option" onclick="reply('${esc(agentId)}','${i + 1}')">${i + 1}. ${esc(opt)}</button>`
+    ).join('');
+  } else {
+    actionButtons = `
+      <button class="btn btn-approve" onclick="reply('${esc(agentId)}','y')">批准</button>
+      <button class="btn btn-reject" onclick="reply('${esc(agentId)}','n')">拒绝</button>`;
+  }
+  return `
+    <div class="card urgent">
+      <div class="card-header"><span class="agent-id">${esc(shortId)}</span><span class="risk-badge ${riskClass}">${risk.toUpperCase()}</span></div>
+      <div class="card-body"><pre>${esc(c.context || '')}</pre></div>
+      <div class="actions">${actionButtons}
+        <button class="btn btn-custom" onclick="toggleCustom('${esc(agentId)}')">...</button></div>
+      <div class="custom-input-row" id="custom-${esc(agentId)}">
+        <input class="custom-input" placeholder="自定义回复..." id="input-${esc(agentId)}"
+               onkeydown="if(event.key==='Enter')sendCustom('${esc(agentId)}')">
+        <button class="btn-send" onclick="sendCustom('${esc(agentId)}')">发送</button></div>
+    </div>`;
+}
+
+function renderAgent(a) {
+  const status = a.status || a.state || 'unknown';
+  const statusMap = {
+    'Processing': { cls: 'processing', label: '处理中', icon: '&#x26A1;' },
+    'Running': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'Run': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'WaitingForInput': { cls: 'waiting', label: '待确认', icon: '&#x23F8;' },
+    'DecisionRequired': { cls: 'decision', label: '待确认', icon: '&#x2757;' },
+    'Sleep': { cls: 'unknown', label: '休眠', icon: '&#x1F4A4;' },
+    'processing': { cls: 'processing', label: '处理中', icon: '&#x26A1;' },
+    'busy': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'idle': { cls: 'unknown', label: '空闲', icon: '&#x1F4A4;' },
+  };
+  const s = statusMap[status] || { cls: 'unknown', label: status, icon: '&#x1F916;' };
+  const project = a.working_dir || a.project_path || a.project || '';
+  const shortProject = project.replace(/^\/Users\/\w+\//, '~/');
+  const agentId = a.agent_id || (a.pid ? `pid:${a.pid}` : '');
+  const startedAt = a.started_at ? new Date(a.started_at) : null;
+  const elapsed = startedAt ? formatDuration(Date.now() - startedAt.getTime()) : '';
+  const tmux = a.tmux_session || '';
+  const canOpen = !!tmux;
+  const onclick = canOpen ? `onclick="openTerminal(${esc2(JSON.stringify(a))})"` : '';
+  return `
+    <div class="agent-card ${canOpen ? 'clickable' : ''}" data-tmux="${esc2(tmux)}" ${onclick}>
+      <div class="agent-card-icon ${s.cls}">${s.icon}</div>
+      <div class="agent-card-body">
+        <div class="agent-card-row1">
+          <span class="agent-card-name" onclick="event.stopPropagation();event.preventDefault();renameAgent('${esc2(agentId)}','${esc2(tmux)}')" title="点击重命名">${esc(agentId)}</span>
+          <span class="agent-card-status ${s.cls}">${s.label}</span>
+        </div>
+        <div class="agent-card-project">${esc(shortProject)}</div>
+        <div class="agent-card-meta">
+          <span>${esc(a.agent_type || 'claude')}</span>
+          ${elapsed ? '<span>&middot;</span><span>' + elapsed + '</span>' : ''}
+        </div>
+      </div>
+      <div class="agent-card-actions">
+        <button class="agent-del" type="button" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc2(agentId)}','${esc2(tmux)}')" title="删除">&#x1F5D1;</button>
+        ${canOpen ? '<div class="agent-card-open">&#x25B6;</div>' : ''}
+        <button class="agent-clone" type="button" onclick="event.stopPropagation();event.preventDefault();cloneAgent('${esc2(tmux || agentId)}')" title="分身">&#x1F464;</button>
+      </div>
+    </div>`;
+}
+
+// ─── Terminal View ───
+function openTerminal(agent) {
+  // 清理旧 session：取消在途请求 + 清定时器
+  if (termAbortCtrl) { termAbortCtrl.abort(); termAbortCtrl = null; }
+  if (termPollTimer) { clearInterval(termPollTimer); termPollTimer = null; }
+  termAbortCtrl = new AbortController();
+  currentAgent = agent;
+  lastTermContent = '';
+  termCurrentLines = 200;
+  termHasMore = false;
+  termLoadingMore = false;
+  termSessionId = agent.tmux_session; // 防竞态标记
+  currentView = 'terminal';
+  location.hash = `terminal/${agent.tmux_session}`;
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('terminalLayout').classList.add('active');
+  document.getElementById('terminalView').classList.add('active');
+  document.getElementById('backBtn').style.display = '';
+  document.getElementById('backBtn').onclick = () => closeTerminal();
+  document.getElementById('termMenuBtn').style.display = '';
+  document.getElementById('headerTitle').textContent = agent.agent_id || agent.tmux_session;
+
+  const termAgent = document.getElementById('termAgent');
+  const pathBtn = document.getElementById('termProjectPath');
+  const projectPath = (agent.project_path || '').trim();
+  const shortProject = projectPath.replace(/^\/Users\/\w+\//, '~/');
+
+  termAgent.textContent = agent.agent_type || 'agent';
+  if (projectPath) {
+    pathBtn.style.display = '';
+    pathBtn.textContent = shortProject;
+    pathBtn.title = `在 VS Code 中打开 ${projectPath}`;
+    pathBtn.disabled = false;
+    pathBtn.onclick = () => openProjectInCode(projectPath);
+  } else {
+    pathBtn.style.display = 'none';
+    pathBtn.textContent = '';
+    pathBtn.title = '';
+    pathBtn.disabled = true;
+    pathBtn.onclick = null;
+  }
+
+  updateTermStatus();
+  renderSidebarAgents();
+  document.getElementById('termOutput').innerHTML = '<div class="loading">加载终端...</div>';
+  fetchTerminal();
+  termPollTimer = setInterval(fetchTerminal, 2000);
+  // 滚动到顶部时自动加载更多历史
+  const termEl = document.getElementById('termOutput');
+  termEl.onscroll = () => {
+    if (termEl.scrollTop < 5 && termHasMore && !termLoadingMore) {
+      loadMoreTerminal();
+    }
+  };
+}
+
+async function openProjectInCode(projectPath) {
+  if (!projectPath) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/open-in-vscode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ path: projectPath }),
+    });
+    const data = await res.json();
+    if (data.ok) showToast(`已在 VS Code 打开: ${data.path}`, 'success');
+    else showToast(`打开失败: ${data.error}`, 'error');
+  } catch (e) {
+    showToast(`网络错误: ${e.message}`, 'error');
+  }
+}
+
+function closeTerminal(silent) {
+  if (termAbortCtrl) { termAbortCtrl.abort(); termAbortCtrl = null; }
+  currentAgent = null;
+  clearInterval(termPollTimer); termPollTimer = null;
+  termSessionId = null;
+  document.getElementById('terminalLayout').classList.remove('active');
+  document.getElementById('terminalView').classList.remove('active');
+  document.getElementById('termMenuBtn').style.display = 'none';
+  closeSidebar();
+  if (!silent) navigateTo('agents');
+}
+
+// ─── Rename Agent ───
+function startRenameAgent() {
+  if (!currentAgent) return;
+  const titleEl = document.getElementById('headerTitle');
+  const oldName = titleEl.textContent;
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = oldName;
+  input.style.cssText = 'font-size:16px;font-weight:700;background:var(--bg);color:var(--text);border:1px solid var(--blue);border-radius:6px;padding:2px 8px;width:180px;outline:none;';
+  titleEl.textContent = '';
+  titleEl.appendChild(input);
+  input.focus();
+  input.select();
+
+  const commit = async () => {
+    const newName = input.value.trim();
+    if (!newName || newName === oldName) {
+      titleEl.textContent = oldName;
+      return;
+    }
+    titleEl.textContent = newName;
+    try {
+      const agentId = currentAgent.agent_id || currentAgent.tmux_session;
+      const r = await fetch('/api/cam/agent/rename', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ agentId, newName }),
+      });
+      const data = await r.json();
+      if (!data.ok) {
+        titleEl.textContent = oldName;
+        alert('重命名失败: ' + (data.error || '未知错误'));
+      } else {
+        currentAgent.agent_id = data.newName;
+      }
+    } catch (e) {
+      titleEl.textContent = oldName;
+      alert('重命名失败: ' + e.message);
+    }
+  };
+  input.addEventListener('blur', commit);
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
+    if (e.key === 'Escape') { input.value = oldName; input.blur(); }
+  });
+}
+
+// ─── Sidebar ───
+let sidebarOrder = JSON.parse(localStorage.getItem('sidebarOrder') || '[]');
+let sbDragInProgress = false; // 拖拽进行中标记
+
+function renderSidebarAgents() {
+  if (sbDragInProgress) return; // 拖拽中不重绘，否则 DOM 替换会中断拖拽
+  if (!state) return;
+  const agents = Array.isArray(state.agents) ? state.agents : [];
+  const list = document.getElementById('sidebarAgentList');
+  if (!agents.length) {
+    list.innerHTML = '<div class="empty">无活跃 Agent</div>';
+    return;
+  }
+  // 按用户排序（sidebarOrder 中有的按顺序排，新 agent 追加到末尾）
+  const sorted = [];
+  const remaining = [...agents];
+  for (const tmux of sidebarOrder) {
+    const idx = remaining.findIndex(a => a.tmux_session === tmux);
+    if (idx !== -1) { sorted.push(remaining.splice(idx, 1)[0]); }
+  }
+  sorted.push(...remaining);
+  // 更新 sidebarOrder 保持同步
+  sidebarOrder = sorted.map(a => a.tmux_session);
+  localStorage.setItem('sidebarOrder', JSON.stringify(sidebarOrder));
+
+  const statusMap = {
+    'Processing': { cls: 'processing', label: '处理中', icon: '&#x26A1;' },
+    'Running': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'Run': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'WaitingForInput': { cls: 'waiting', label: '待确认', icon: '&#x23F8;' },
+    'DecisionRequired': { cls: 'decision', label: '待确认', icon: '&#x2757;' },
+    'Sleep': { cls: 'unknown', label: '休眠', icon: '&#x1F4A4;' },
+    'processing': { cls: 'processing', label: '处理中', icon: '&#x26A1;' },
+    'busy': { cls: 'processing', label: '运行中', icon: '&#x26A1;' },
+    'idle': { cls: 'unknown', label: '空闲', icon: '&#x1F4A4;' },
+  };
+
+  list.innerHTML = sorted.map(a => {
+    const status = a.status || a.state || 'unknown';
+    const s = statusMap[status] || { cls: 'unknown', label: status, icon: '&#x1F916;' };
+    const agentId = a.agent_id || '';
+    const tmux = a.tmux_session || '';
+    const isCurrent = currentAgent && currentAgent.tmux_session === tmux;
+    const project = (a.working_dir || a.project_path || '').replace(/^\/Users\/\w+\//, '~/');
+    const elapsed = a.started_at ? formatDuration(Date.now() - new Date(a.started_at).getTime()) : '';
+    return `<div class="agent-card clickable ${isCurrent ? 'current' : ''}"
+      data-tmux="${esc2(tmux)}" data-agentid="${esc2(agentId)}"
+      onclick="sidebarOpenAgent('${esc2(tmux)}')"
+      oncontextmenu="event.preventDefault();showSidebarCtx(event,'${esc2(agentId)}','${esc2(tmux)}')"
+      ontouchstart="sidebarTouchStart(event,'${esc2(agentId)}','${esc2(tmux)}')"
+      ontouchend="sidebarTouchEnd()" ontouchmove="sidebarTouchEnd()">
+      <div class="agent-card-icon ${s.cls}">${s.icon}</div>
+      <div class="agent-card-body">
+        <div class="agent-card-row1">
+          <span class="agent-card-name">${esc(agentId)}</span>
+          <span class="agent-card-status ${s.cls}">${s.label}</span>
+        </div>
+        <div class="agent-card-project">${esc(project)}</div>
+        <div class="agent-card-meta">
+          <span>${esc(a.agent_type || 'claude')}</span>
+          ${elapsed ? '<span>&middot;</span><span>' + elapsed + '</span>' : ''}
+        </div>
+      </div>
+      <div class="agent-card-actions">
+        <button class="agent-del" type="button" onclick="event.stopPropagation();event.preventDefault();deleteAgent('${esc2(agentId)}','${esc2(tmux)}')" title="删除">&#x1F5D1;</button>
+        <button class="agent-clone" type="button" onclick="event.stopPropagation();event.preventDefault();cloneAgent('${esc2(tmux || agentId)}')" title="分身">&#x1F464;</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+// ─── 通用拖拽排序（鼠标 + 触摸） ───
+let mainDragInProgress = false;
+
+function initDragSort(listEl, opts) {
+  if (!listEl) return;
+  const { onDragStart, onDragEnd, renderFn } = opts;
+  let dragging = false, startY = 0, dragCard = null, indicator = null, ghost = null;
+  let offsetX = 0, offsetY = 0, cardW = 0, dragTmux = null;
+  const THRESHOLD = 5;
+
+  function findCard(el) {
+    while (el && el !== listEl) {
+      if (el.classList && el.classList.contains('agent-card') && el.dataset.tmux) return el;
+      el = el.parentElement;
+    }
+    return null;
+  }
+
+  function removeIndicator() {
+    if (indicator && indicator.parentNode) indicator.parentNode.removeChild(indicator);
+    indicator = null;
+  }
+
+  function getInsertInfo(y) {
+    const cards = Array.from(listEl.querySelectorAll('.agent-card'));
+    for (const c of cards) {
+      if (c === dragCard) continue;
+      const rect = c.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) return { ref: c, pos: 'before' };
+    }
+    const last = cards.filter(c => c !== dragCard).pop();
+    return last ? { ref: last, pos: 'after' } : null;
+  }
+
+  function beginDrag(x, y) {
+    dragging = true;
+    if (onDragStart) onDragStart();
+    dragCard.classList.add('dragging');
+    listEl.classList.add('drag-active');
+    ghost = dragCard.cloneNode(true);
+    ghost.className = 'agent-card drag-ghost';
+    ghost.style.width = cardW + 'px';
+    ghost.style.left = (x - offsetX) + 'px';
+    ghost.style.top = (y - offsetY) + 'px';
+    document.body.appendChild(ghost);
+  }
+
+  function moveAt(x, y) {
+    if (ghost) {
+      ghost.style.left = (x - offsetX) + 'px';
+      ghost.style.top = (y - offsetY) + 'px';
+    }
+    removeIndicator();
+    indicator = document.createElement('div');
+    indicator.className = 'drag-drop-indicator';
+    const info = getInsertInfo(y);
+    if (info) {
+      if (info.pos === 'before') info.ref.parentNode.insertBefore(indicator, info.ref);
+      else info.ref.parentNode.insertBefore(indicator, info.ref.nextSibling);
+    }
+  }
+
+  function endDrag(y) {
+    const info = getInsertInfo(y);
+    if (info && dragTmux) {
+      const targetTmux = info.ref.dataset.tmux;
+      if (targetTmux !== dragTmux) {
+        const fromIdx = sidebarOrder.indexOf(dragTmux);
+        if (fromIdx !== -1) {
+          sidebarOrder.splice(fromIdx, 1);
+          let toIdx = sidebarOrder.indexOf(targetTmux);
+          if (info.pos === 'after') toIdx++;
+          sidebarOrder.splice(toIdx, 0, dragTmux);
+          localStorage.setItem('sidebarOrder', JSON.stringify(sidebarOrder));
+        }
+      }
+    }
+    dragCard.classList.remove('dragging');
+    listEl.classList.remove('drag-active');
+    removeIndicator();
+    if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+    ghost = null; dragging = false; dragTmux = null; dragCard = null;
+    if (onDragEnd) onDragEnd();
+    if (renderFn) renderFn();
+  }
+
+  function cleanup() {
+    dragTmux = null; dragCard = null;
+  }
+
+  // ── 鼠标事件 ──
+  listEl.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button')) return;
+    const card = findCard(e.target);
+    if (!card) return;
+    startY = e.clientY;
+    dragCard = card;
+    dragTmux = card.dataset.tmux;
+    const rect = card.getBoundingClientRect();
+    offsetX = e.clientX - rect.left;
+    offsetY = e.clientY - rect.top;
+    cardW = rect.width;
+
+    function onMove(e2) {
+      if (!dragging && Math.abs(e2.clientY - startY) > THRESHOLD) beginDrag(e2.clientX, e2.clientY);
+      if (!dragging) return;
+      e2.preventDefault();
+      moveAt(e2.clientX, e2.clientY);
+    }
+    function onUp(e2) {
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      if (dragging) endDrag(e2.clientY);
+      else cleanup();
+    }
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // ── 触摸事件（长按 250ms 后进入拖拽就绪，避免与滚动冲突） ──
+  let touchHoldTimer = null, dragReady = false;
+
+  function cancelTouch() {
+    if (touchHoldTimer) { clearTimeout(touchHoldTimer); touchHoldTimer = null; }
+    if (dragReady && dragCard && !dragging) dragCard.classList.remove('drag-ready');
+    dragReady = false;
+  }
+
+  function abortDrag() {
+    if (dragging) {
+      dragCard.classList.remove('dragging');
+      listEl.classList.remove('drag-active');
+      removeIndicator();
+      if (ghost && ghost.parentNode) ghost.parentNode.removeChild(ghost);
+      ghost = null; dragging = false;
+      if (onDragEnd) onDragEnd();
+    }
+    cancelTouch();
+    cleanup();
+  }
+
+  listEl.addEventListener('touchstart', (e) => {
+    if (e.target.closest('button')) return;
+    const card = findCard(e.target);
+    if (!card) return;
+    const touch = e.touches[0];
+    startY = touch.clientY;
+    dragCard = card;
+    dragTmux = card.dataset.tmux;
+    const rect = card.getBoundingClientRect();
+    offsetX = touch.clientX - rect.left;
+    offsetY = touch.clientY - rect.top;
+    cardW = rect.width;
+    dragReady = false;
+    // 250ms 长按后进入拖拽就绪
+    touchHoldTimer = setTimeout(() => {
+      touchHoldTimer = null;
+      dragReady = true;
+      if (dragCard) {
+        dragCard.classList.add('drag-ready');
+        // 触觉反馈
+        if (navigator.vibrate) navigator.vibrate(30);
+      }
+    }, 250);
+  }, { passive: true });
+
+  listEl.addEventListener('touchmove', (e) => {
+    if (!dragCard) return;
+    const touch = e.touches[0];
+    const dy = Math.abs(touch.clientY - startY);
+    // 还没就绪就移动了 → 是滚动，放弃拖拽
+    if (!dragReady && !dragging) {
+      if (dy > THRESHOLD) { cancelTouch(); cleanup(); }
+      return; // 不 preventDefault，让浏览器正常滚动
+    }
+    // 就绪后开始拖拽
+    if (dragReady && !dragging && dy > THRESHOLD) {
+      dragCard.classList.remove('drag-ready');
+      beginDrag(touch.clientX, touch.clientY);
+    }
+    if (!dragging) return;
+    e.preventDefault(); // 拖拽中阻止滚动
+    moveAt(touch.clientX, touch.clientY);
+  }, { passive: false });
+
+  listEl.addEventListener('touchend', (e) => {
+    if (!dragCard) { cancelTouch(); return; }
+    if (dragging) {
+      const touch = e.changedTouches[0];
+      cancelTouch();
+      endDrag(touch.clientY);
+    } else {
+      cancelTouch();
+      cleanup();
+    }
+  });
+
+  listEl.addEventListener('touchcancel', () => { abortDrag(); });
+}
+
+// 初始化侧边栏拖拽
+initDragSort(document.getElementById('sidebarAgentList'), {
+  onDragStart: () => { sbDragInProgress = true; },
+  onDragEnd: () => { sbDragInProgress = false; },
+  renderFn: () => renderSidebarAgents(),
+});
+
+// 初始化主列表拖拽
+initDragSort(document.getElementById('agentList'), {
+  onDragStart: () => { mainDragInProgress = true; },
+  onDragEnd: () => { mainDragInProgress = false; },
+  renderFn: () => renderAgents(),
+});
+
+function sidebarOpenAgent(tmux) {
+  if (!state) return;
+  const agents = Array.isArray(state.agents) ? state.agents : [];
+  const agent = agents.find(a => a.tmux_session === tmux);
+  if (agent) {
+    closeSidebar();
+    openTerminal(agent);
+  }
+}
+
+function toggleSidebar() {
+  const sidebar = document.getElementById('termSidebar');
+  const overlay = document.getElementById('sidebarOverlay');
+  const isOpen = sidebar.classList.contains('open');
+  if (isOpen) {
+    closeSidebar();
+  } else {
+    sidebar.classList.add('open');
+    overlay.classList.add('open');
+  }
+}
+
+function closeSidebar() {
+  document.getElementById('termSidebar').classList.remove('open');
+  document.getElementById('sidebarOverlay').classList.remove('open');
+}
+
+// ─── Sidebar Context Menu ───
+let ctxAgentId = '', ctxTmux = '', ctxAgent = null, sidebarLongPressTimer = null;
+
+function showSidebarCtx(e, agentId, tmux) {
+  ctxAgentId = agentId; ctxTmux = tmux;
+  // 查找完整 agent 对象
+  const agents = (state && Array.isArray(state.agents)) ? state.agents : [];
+  ctxAgent = agents.find(a => a.tmux_session === tmux) || null;
+  const menu = document.getElementById('sidebarCtxMenu');
+  menu.classList.add('open');
+  // 定位：确保不超出视口
+  const x = Math.min(e.clientX || e.pageX, window.innerWidth - 160);
+  const y = Math.min(e.clientY || e.pageY, window.innerHeight - 100);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+}
+
+function hideSidebarCtx() {
+  document.getElementById('sidebarCtxMenu').classList.remove('open');
+  ctxAgentId = ''; ctxTmux = ''; ctxAgent = null;
+}
+
+async function ctxRestart() {
+  const tmux = ctxTmux, id = ctxAgentId;
+  hideSidebarCtx();
+  if (!confirm(`重启会话 "${id}"？\n将终止当前进程并恢复对话。`)) return;
+  try {
+    showToast('正在重启...', 'info');
+    const res = await fetch(`${API_BASE}/api/cam/agent/restart`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: tmux }),
+    });
+    const data = await res.json();
+    if (data.ok) showToast(`已重启: ${id}`, 'success');
+    else showToast(`重启失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+function ctxCopyCmd() {
+  const tmux = ctxTmux;
+  hideSidebarCtx();
+  const session = tmux || ctxAgentId || 'unknown';
+  const cmd = `tmux attach -t ${session}`;
+  copyText(cmd);
+}
+
+function copyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('已复制: ' + text, 'success');
+    }).catch(() => copyFallback(text));
+  } else {
+    copyFallback(text);
+  }
+}
+
+function copyFallback(text) {
+  const ta = document.createElement('textarea');
+  ta.value = text;
+  ta.style.cssText = 'position:fixed;left:-9999px;top:-9999px';
+  document.body.appendChild(ta);
+  ta.select();
+  try {
+    document.execCommand('copy');
+    showToast('已复制: ' + text, 'success');
+  } catch (e) {
+    prompt('复制以下命令:', text);
+  }
+  document.body.removeChild(ta);
+}
+
+function ctxRename() {
+  const id = ctxAgentId, tmux = ctxTmux;
+  hideSidebarCtx();
+  renameAgent(id, tmux);
+}
+
+function ctxDelete() {
+  const id = ctxAgentId, tmux = ctxTmux;
+  hideSidebarCtx();
+  deleteAgent(id, tmux);
+}
+
+// 长按触发（手机端）
+function sidebarTouchStart(e, agentId, tmux) {
+  sidebarLongPressTimer = setTimeout(() => {
+    sidebarLongPressTimer = null;
+    // 用 touch 坐标
+    const touch = e.touches[0];
+    showSidebarCtx({ clientX: touch.clientX, clientY: touch.clientY }, agentId, tmux);
+  }, 500);
+}
+
+function sidebarTouchEnd() {
+  if (sidebarLongPressTimer) { clearTimeout(sidebarLongPressTimer); sidebarLongPressTimer = null; }
+}
+
+// 点击任意位置关闭菜单
+document.addEventListener('click', (e) => {
+  if (!e.target.closest('#sidebarCtxMenu')) hideSidebarCtx();
+});
+document.addEventListener('touchstart', (e) => {
+  if (!e.target.closest('#sidebarCtxMenu')) hideSidebarCtx();
+}, { passive: true });
+
+function updateTermStatus() {
+  if (!currentAgent || !state) return;
+  const agents = Array.isArray(state.agents) ? state.agents : [];
+  const live = agents.find(a => a.tmux_session === currentAgent.tmux_session);
+  if (live) {
+    currentAgent.status = live.status;
+    const statusMap = { 'processing': '处理中', 'Processing': '处理中', 'Run': '运行中', 'Running': '运行中', 'WaitingForInput': '待确认', 'DecisionRequired': '待确认' };
+    const label = statusMap[live.status] || live.status || '';
+    document.getElementById('termStatus').innerHTML =
+      `<span class="agent-status ${live.status === 'processing' || live.status === 'Run' ? 'processing' : 'waiting'}">${label}</span>`;
+  }
+}
+
+async function fetchTerminal() {
+  if (!currentAgent?.tmux_session) return;
+  const sessionAtRequest = termSessionId;
+  const isLoadMore = termLoadingMore;
+  try {
+    const res = await fetch(
+      `${API_BASE}/api/cam/terminal?session=${encodeURIComponent(currentAgent.tmux_session)}&lines=${termCurrentLines}`,
+      { signal: termAbortCtrl?.signal }
+    );
+    const data = await res.json();
+    // 响应到达时 session 已切换 → 丢弃
+    if (sessionAtRequest !== termSessionId) return;
+    if (!data.ok) {
+      const errMsg = data.error || '无法获取终端';
+      const isOffline = errMsg.includes('没有可用') || errMsg.includes('不在线') || errMsg.includes('重连');
+      const style = isOffline ? 'color:var(--yellow, #d29922)' : 'color:var(--red)';
+      const hint = isOffline ? '设备重连中，稍后自动恢复...' : esc(errMsg);
+      document.getElementById('termOutput').innerHTML = `<div class="loading" style="${style}">${hint}</div>`;
+      return;
+    }
+    const content = data.output || '';
+    termHasMore = !!data.truncated;
+    if (content === lastTermContent) { termLoadingMore = false; return; }
+    lastTermContent = content;
+    const el = document.getElementById('termOutput');
+    const prevScrollHeight = el.scrollHeight;
+    const prevScrollTop = el.scrollTop;
+    const wasAtBottom = prevScrollHeight - prevScrollTop - el.clientHeight < 60;
+    // 渲染内容
+    const loadMoreBanner = termHasMore
+      ? '<div class="term-load-more" onclick="loadMoreTerminal()">&#x25B2; 加载更早的内容</div>'
+      : '';
+    el.innerHTML = loadMoreBanner + ansiToHtml(content);
+    if (isLoadMore) {
+      // 加载更多后：保持视觉位置不跳动
+      const newScrollHeight = el.scrollHeight;
+      el.scrollTop = prevScrollTop + (newScrollHeight - prevScrollHeight);
+    } else if (wasAtBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+    termLoadingMore = false;
+  } catch { termLoadingMore = false; }
+}
+
+function loadMoreTerminal() {
+  if (termLoadingMore || !termHasMore) return;
+  termLoadingMore = true;
+  // 递增行数：200 → 500 → 1000 → 2000 → 5000
+  termCurrentLines = Math.min(termCurrentLines < 500 ? 500 : termCurrentLines * 2, 5000);
+  lastTermContent = ''; // 强制重新渲染
+  // 显示加载中状态
+  const banner = document.querySelector('.term-load-more');
+  if (banner) { banner.textContent = '加载中...'; banner.classList.add('loading'); }
+  fetchTerminal();
+}
+
+// ─── 终端命令定义 ───
+const TERM_COMMANDS = [
+  { cmd: '/compact', icon: '&#x1F9F9;', name: '/compact', desc: '压缩上下文' },
+  { cmd: 'Escape', icon: '&#x21A9;', name: 'Escape', desc: '中断当前操作' },
+  { cmd: '/clear', icon: '&#x1F5D1;', name: '/clear', desc: '清屏' },
+  { cmd: '/resume', icon: '&#x25B6;', name: '/resume', desc: '恢复会话' },
+  { cmd: '/cost', icon: '&#x1F4B0;', name: '/cost', desc: '查看费用' },
+  { cmd: '/help', icon: '&#x2753;', name: '/help', desc: '帮助' },
+  { cmd: '/status', icon: '&#x1F4CA;', name: '/status', desc: '查看状态' },
+  { cmd: '/model', icon: '&#x1F916;', name: '/model', desc: '切换模型' },
+  { cmd: '/config', icon: '&#x2699;', name: '/config', desc: '配置' },
+  { cmd: '/bug', icon: '&#x1F41B;', name: '/bug', desc: '报告 Bug' },
+  { cmd: '/init', icon: '&#x1F4E6;', name: '/init', desc: '初始化项目' },
+  { cmd: '/review', icon: '&#x1F50D;', name: '/review', desc: '代码审查' },
+  { cmd: '/pr-comments', icon: '&#x1F4AC;', name: '/pr-comments', desc: '查看 PR 评论' },
+];
+
+function termInputKeydown(event) {
+  const popup = document.getElementById('termCmdPopup');
+  if (popup.classList.contains('open')) {
+    const items = popup.querySelectorAll('.term-cmd-item');
+    const active = popup.querySelector('.term-cmd-item.active');
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      event.preventDefault();
+      let idx = Array.from(items).indexOf(active);
+      if (active) active.classList.remove('active');
+      if (event.key === 'ArrowDown') idx = (idx + 1) % items.length;
+      else idx = (idx - 1 + items.length) % items.length;
+      items[idx]?.classList.add('active');
+      items[idx]?.scrollIntoView({ block: 'nearest' });
+      return;
+    }
+    if (event.key === 'Enter' && active) {
+      event.preventDefault();
+      active.click();
+      return;
+    }
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      closeCmdPopup();
+      return;
+    }
+  }
+  // input 为空时，Up/Down/Esc 直接转发到 tmux（和快捷按钮功能一致）
+  if (event.target.value === '') {
+    if (event.key === 'ArrowUp') { event.preventDefault(); termSendKey('Up'); return; }
+    if (event.key === 'ArrowDown') { event.preventDefault(); termSendKey('Down'); return; }
+    if (event.key === 'Escape') { event.preventDefault(); termSendKey('Escape'); return; }
+  }
+  if (event.key === 'Enter' && !event.shiftKey) {
+    event.preventDefault();
+    termSend();
+  }
+}
+
+function termInputChanged() {
+  const input = document.getElementById('termInput');
+  const val = input.value;
+  if (val.startsWith('/')) {
+    const filter = val.toLowerCase();
+    const matched = TERM_COMMANDS.filter(c => c.cmd.startsWith(filter) || c.name.includes(filter));
+    if (matched.length > 0) {
+      showCmdPopup(matched);
+    } else {
+      closeCmdPopup();
+    }
+  } else {
+    closeCmdPopup();
+  }
+}
+
+function showCmdPopup(cmds) {
+  const popup = document.getElementById('termCmdPopup');
+  popup.innerHTML = cmds.map(c => `
+    <div class="term-cmd-item" onclick="selectCmd('${c.cmd}')">
+      <span class="term-cmd-icon">${c.icon}</span>
+      <div class="term-cmd-body">
+        <div class="term-cmd-name">${c.name}</div>
+        <div class="term-cmd-desc">${c.desc}</div>
+      </div>
+    </div>`).join('');
+  popup.classList.add('open');
+}
+
+function closeCmdPopup() {
+  document.getElementById('termCmdPopup').classList.remove('open');
+}
+
+function selectCmd(cmd) {
+  closeCmdPopup();
+  if (cmd === 'Escape') {
+    termSendKey('Escape');
+    return;
+  }
+  const input = document.getElementById('termInput');
+  input.value = cmd;
+  input.focus();
+}
+
+async function termSend() {
+  if (!currentAgent?.tmux_session) return;
+  const input = document.getElementById('termInput');
+  const text = input.value;
+  if (!text && text !== '') return;
+  closeCmdPopup();
+  const btn = document.getElementById('termSendBtn');
+  btn.disabled = true; input.disabled = true;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/send`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: currentAgent.tmux_session, text }),
+    });
+    const data = await res.json();
+    if (data.ok) { input.value = ''; setTimeout(fetchTerminal, 500); }
+    else showToast(`发送失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+  finally { btn.disabled = false; input.disabled = false; input.focus(); }
+}
+
+// 快捷命令（slash command，直接发送）
+function termQuickCmd(cmd) {
+  if (!currentAgent?.tmux_session) return;
+  const input = document.getElementById('termInput');
+  input.value = cmd;
+  termSend();
+}
+
+// 快捷发送（普通文本如 y/n，直接发送）
+function termQuickSend(text) {
+  if (!currentAgent?.tmux_session) return;
+  const input = document.getElementById('termInput');
+  input.value = text;
+  termSend();
+}
+
+// 发送原始按键（Escape、C-c 等）
+async function termSendKey(key) {
+  if (!currentAgent?.tmux_session) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/send-key`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session: currentAgent.tmux_session, key }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`已发送 ${key}`, 'success'); setTimeout(fetchTerminal, 500); }
+    else showToast(`发送失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+// 上传图片到 Mac，自动将路径插入输入框
+async function termUploadImage(fileInput) {
+  const file = fileInput.files?.[0];
+  if (!file) return;
+  fileInput.value = '';
+  await uploadImageFile(file);
+}
+
+// 通用图片上传：File → 上传到 Mac → 路径插入输入框
+async function uploadImageFile(file) {
+  if (file.size > 10 * 1024 * 1024) {
+    showToast('图片不能超过 10MB', 'error');
+    return;
+  }
+  showToast('上传中...', 'success');
+  try {
+    const base64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(',')[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+    const ext = (file.name || 'paste.png').split('.').pop() || 'png';
+    const fileName = `img-${Date.now()}.${ext}`;
+    const res = await fetch(`${API_BASE}/api/cam/upload-image`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName, data: base64 }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const input = document.getElementById('termInput');
+      const path = data.path;
+      if (input.value) {
+        input.value += ` ${path}`;
+      } else {
+        input.value = path + ' ';
+      }
+      input.focus();
+      showToast(`已上传: ${path}`, 'success');
+    } else {
+      showToast(`上传失败: ${data.error}`, 'error');
+    }
+  } catch (e) {
+    showToast(`网络错误: ${e.message}`, 'error');
+  }
+}
+
+// Cmd+V / Ctrl+V 粘贴图片支持
+document.addEventListener('paste', (e) => {
+  if (currentView !== 'terminal') return;
+  const items = e.clipboardData?.items;
+  if (!items) return;
+  for (const item of items) {
+    if (item.type.startsWith('image/')) {
+      e.preventDefault();
+      const file = item.getAsFile();
+      if (file) uploadImageFile(file);
+      return;
+    }
+  }
+});
+
+// 终端截图 — 把当前终端内容渲染为图片并复制到剪贴板
+async function termScreenshot() {
+  const el = document.getElementById('termOutput');
+  const text = el.textContent || el.innerText;
+  if (!text.trim()) { showToast('终端为空', 'error'); return; }
+  try {
+    // 创建 canvas 绘制终端内容
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const fontSize = 12;
+    const lineHeight = 16;
+    const padding = 16;
+    const lines = text.split('\n');
+    // 截取最后 50 行避免太大
+    const displayLines = lines.slice(-50);
+    ctx.font = `${fontSize}px "SF Mono", Menlo, "Courier New", monospace`;
+    const maxWidth = Math.max(...displayLines.map(l => ctx.measureText(l).width), 300);
+    canvas.width = maxWidth + padding * 2;
+    canvas.height = displayLines.length * lineHeight + padding * 2;
+    // 背景
+    ctx.fillStyle = '#0d1117';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // 文字
+    ctx.font = `${fontSize}px "SF Mono", Menlo, "Courier New", monospace`;
+    ctx.fillStyle = '#e6edf3';
+    ctx.textBaseline = 'top';
+    displayLines.forEach((line, i) => {
+      ctx.fillText(line, padding, padding + i * lineHeight);
+    });
+    // 复制到剪贴板
+    canvas.toBlob(async (blob) => {
+      try {
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        showToast('已复制截图到剪贴板', 'success');
+      } catch {
+        // 降级：下载
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `terminal-${Date.now()}.png`; a.click();
+        URL.revokeObjectURL(url);
+        showToast('已下载截图', 'success');
+      }
+    }, 'image/png');
+  } catch (e) { showToast(`截图失败: ${e.message}`, 'error'); }
+}
+
+// ─── Chat History View ───
+async function loadChatHistory() {
+  const el = document.getElementById('chatList');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/chat-history`);
+    const data = await res.json();
+    if (!data.ok) { el.innerHTML = `<div class="empty" style="color:var(--red)">${esc(data.error)}</div>`; return; }
+    const convs = data.conversations || {};
+    const keys = Object.keys(convs);
+    if (keys.length === 0) { el.innerHTML = '<div class="empty">暂无对话记录</div>'; return; }
+    el.innerHTML = keys.map(senderId => {
+      const messages = convs[senderId];
+      const lastMsg = messages[messages.length - 1];
+      const preview = typeof lastMsg?.content === 'string' ? lastMsg.content.substring(0, 60) : '...';
+      return `
+        <div class="chat-session">
+          <div class="chat-session-header" onclick="this.nextElementSibling.classList.toggle('open')">
+            <span>${esc(senderId.substring(0, 16))}... (${messages.length} 条)</span>
+            <span style="color:var(--text-dim); font-size:12px">${esc(preview)}</span>
+          </div>
+          <div class="chat-session-body">
+            ${messages.map(m => `
+              <div class="chat-msg ${m.role}">
+                <div class="chat-role ${m.role}">${m.role === 'user' ? '用户' : 'AI'}</div>
+                <div class="chat-content">${esc(typeof m.content === 'string' ? m.content : JSON.stringify(m.content))}</div>
+              </div>`).join('')}
+          </div>
+        </div>`;
+    }).join('');
+  } catch (e) { el.innerHTML = `<div class="empty" style="color:var(--red)">加载失败: ${e.message}</div>`; }
+}
+
+async function clearAllChat() {
+  if (!confirm('确认清除所有钉钉对话记录？\nAI 会话上下文也会重置。')) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/chat-history/clear`, { method: 'POST' });
+    const data = await res.json();
+    if (data.ok) { showToast('已清除全部对话', 'success'); loadChatHistory(); }
+    else showToast(`清除失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+// ─── Knowledge View ───
+let kbFiles = []; // cached file list for search filtering
+let kbEditingFile = null; // currently editing file name
+
+async function loadKnowledge() {
+  const el = document.getElementById('kbList');
+  el.innerHTML = '<div class="empty">加载中...</div>';
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge`);
+    const data = await res.json();
+    if (!data.ok) { el.innerHTML = `<div class="empty" style="color:var(--red)">${esc(data.error)}</div>`; return; }
+    kbFiles = data.files || [];
+    document.getElementById('kbSearch').value = '';
+    renderKbFiles(kbFiles);
+  } catch (e) { el.innerHTML = `<div class="empty" style="color:var(--red)">加载失败: ${e.message}</div>`; }
+}
+
+function renderKbFiles(files) {
+  const el = document.getElementById('kbList');
+  if (files.length === 0) { el.innerHTML = '<div class="empty">知识库为空</div>'; return; }
+  el.innerHTML = files.map(f => `
+    <div class="kb-file">
+      <div class="kb-file-info">
+        <div class="kb-file-name">${esc(f.name)}</div>
+        <div class="kb-file-meta">${esc(f.size)} &middot; ${esc(f.date)}</div>
+      </div>
+      <div class="kb-actions">
+        <button class="kb-btn view" onclick="viewKbFile('${esc(f.name)}')">查看</button>
+        <button class="kb-btn exec" onclick="execKbFile('${esc(f.name)}')">执行</button>
+        <button class="kb-btn del" onclick="deleteKbFile('${esc(f.name)}')">删除</button>
+      </div>
+    </div>`).join('');
+}
+
+function filterKbFiles() {
+  const q = document.getElementById('kbSearch').value.toLowerCase().trim();
+  if (!q) { renderKbFiles(kbFiles); return; }
+  renderKbFiles(kbFiles.filter(f => f.name.toLowerCase().includes(q)));
+}
+
+async function viewKbFile(name) {
+  kbEditingFile = name;
+  document.getElementById('kbDetailTitle').textContent = name;
+  document.getElementById('kbDetailContent').textContent = '加载中...';
+  document.getElementById('kbDetailContent').style.display = '';
+  document.getElementById('kbDetailEditor').style.display = 'none';
+  document.getElementById('kbEditBtn').textContent = '编辑';
+  document.getElementById('kbSaveBtn').style.display = 'none';
+  document.getElementById('kbDetail').classList.add('open');
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/action`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'read', file: name }),
+    });
+    const data = await res.json();
+    const content = data.ok ? (data.content || '(空文件)') : `错误: ${data.error}`;
+    document.getElementById('kbDetailContent').textContent = content;
+    document.getElementById('kbDetailTextarea').value = data.ok ? (data.content || '') : '';
+  } catch (e) { document.getElementById('kbDetailContent').textContent = `加载失败: ${e.message}`; }
+}
+
+function toggleKbEdit() {
+  const contentEl = document.getElementById('kbDetailContent');
+  const editorEl = document.getElementById('kbDetailEditor');
+  const editBtn = document.getElementById('kbEditBtn');
+  const saveBtn = document.getElementById('kbSaveBtn');
+  const isEditing = editorEl.style.display !== 'none';
+  if (isEditing) {
+    contentEl.style.display = '';
+    editorEl.style.display = 'none';
+    editBtn.textContent = '编辑';
+    saveBtn.style.display = 'none';
+    contentEl.textContent = document.getElementById('kbDetailTextarea').value;
+  } else {
+    contentEl.style.display = 'none';
+    editorEl.style.display = 'flex';
+    editBtn.textContent = '取消';
+    saveBtn.style.display = '';
+    document.getElementById('kbDetailTextarea').focus();
+  }
+}
+
+async function saveKbFile() {
+  if (!kbEditingFile) return;
+  const content = document.getElementById('kbDetailTextarea').value;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/action`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'save', file: kbEditingFile, content }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      showToast(`已保存: ${kbEditingFile}`, 'success');
+      document.getElementById('kbDetailContent').textContent = content;
+      document.getElementById('kbDetailContent').style.display = '';
+      document.getElementById('kbDetailEditor').style.display = 'none';
+      document.getElementById('kbEditBtn').textContent = '编辑';
+      document.getElementById('kbSaveBtn').style.display = 'none';
+      loadKnowledge();
+    } else showToast(`保存失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+function closeKbDetail() {
+  document.getElementById('kbDetail').classList.remove('open');
+  kbEditingFile = null;
+}
+
+function showUploadDialog() { document.getElementById('kbUploadOverlay').classList.add('open'); }
+function closeUploadDialog() { document.getElementById('kbUploadOverlay').classList.remove('open'); document.getElementById('kbUploadFile').value = ''; }
+
+async function doUploadKbFile() {
+  const fileInput = document.getElementById('kbUploadFile');
+  if (!fileInput.files.length) { showToast('请选择文件', 'error'); return; }
+  const formData = new FormData();
+  formData.append('file', fileInput.files[0]);
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/upload`, { method: 'POST', body: formData });
+    const data = await res.json();
+    if (data.ok) { showToast(`已上传: ${data.file.name}`, 'success'); closeUploadDialog(); loadKnowledge(); }
+    else showToast(`上传失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function createKbFile() {
+  const name = prompt('输入新文件名（如: notes.md）:');
+  if (!name) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/action`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'create', file: name, content: '' }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`已创建: ${name}`, 'success'); loadKnowledge(); viewKbFile(name); }
+    else showToast(`创建失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function execKbFile(name) {
+  if (!confirm(`将知识文件 "${name}" 作为 prompt 启动 Agent？`)) return;
+  showToast('正在启动...', 'success');
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/action`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'execute', file: name }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`Agent 已启动: ${data.session}`, 'success'); navigateTo('agents'); }
+    else showToast(`启动失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function deleteKbFile(name) {
+  if (!confirm(`确认删除 "${name}"？此操作不可恢复。`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/action`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'delete', file: name }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`已删除: ${name}`, 'success'); loadKnowledge(); }
+    else showToast(`删除失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+// ─── KB Chat (知识挖掘) ───
+let kbChatSessionId = null;
+let kbChatSending = false;
+
+async function sendKbChat() {
+  if (kbChatSending) return;
+  const input = document.getElementById('kbChatInput');
+  const message = input.value.trim();
+  if (!message) return;
+
+  const btn = document.getElementById('kbChatSendBtn');
+  kbChatSending = true;
+  btn.disabled = true;
+  input.disabled = true;
+  input.value = '';
+
+  appendKbChatMsg('user', message);
+
+  const filesInput = document.getElementById('kbChatFiles').value.trim();
+  const files = filesInput ? filesInput.split(',').map(s => s.trim()).filter(Boolean) : [];
+
+  const thinkingEl = appendKbChatMsg('assistant', '思考中...');
+
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/knowledge/chat`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, sessionId: kbChatSessionId, files: kbChatSessionId ? [] : files }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      kbChatSessionId = data.sessionId;
+      thinkingEl.innerHTML = renderKbReply(data.reply);
+    } else {
+      thinkingEl.textContent = `错误: ${data.error}`;
+      thinkingEl.style.color = 'var(--red)';
+    }
+  } catch (e) {
+    thinkingEl.textContent = `网络错误: ${e.message}`;
+    thinkingEl.style.color = 'var(--red)';
+  }
+
+  kbChatSending = false;
+  btn.disabled = false;
+  input.disabled = false;
+  input.focus();
+}
+
+function appendKbChatMsg(role, text) {
+  const container = document.getElementById('kbChatMessages');
+  const div = document.createElement('div');
+  div.className = `kb-chat-msg ${role}`;
+  div.textContent = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+  return div;
+}
+
+function renderKbReply(text) {
+  // Detect saved file references and add links
+  let html = esc(text);
+  html = html.replace(/已保存(?:文件)?[:：]\s*(\S+)/g, (m, name) => {
+    return `已保存文件: <a href="javascript:void(0)" onclick="navigateTo('knowledge');setTimeout(()=>viewKbFile('${esc(name)}'),300)">${esc(name)}</a>`;
+  });
+  // Basic markdown-like formatting
+  html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/`([^`]+)`/g, '<code style="background:var(--bg);padding:1px 4px;border-radius:3px">$1</code>');
+  return html;
+}
+
+// ─── Actions ───
+function showNewAgentForm() {
+  document.getElementById('newAgentForm').style.display = '';
+  document.getElementById('newAgentCwd').focus();
+}
+function hideNewAgentForm() {
+  document.getElementById('newAgentForm').style.display = 'none';
+  document.getElementById('newAgentCwd').value = '';
+  document.getElementById('newAgentName').value = '';
+  document.getElementById('newAgentPrompt').value = '';
+}
+
+// 通用启动 Agent 逻辑
+async function doStartAgent(cwdEl, nameEl, promptEl, btn, onSuccess) {
+  const cwd = cwdEl.value.trim();
+  const name = nameEl.value.trim();
+  const promptVal = promptEl.value.trim();
+  if (!cwd) { showToast('请输入工作目录', 'error'); return; }
+  if (!promptVal) { showToast('请输入任务描述', 'error'); return; }
+  btn.disabled = true; btn.textContent = '启动中...';
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/agent/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cwd, prompt: promptVal, name }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const agentId = data.agent?.agent_id || data.agent?.tmux_session;
+      const message = data.message || '已提交到 Mac 执行，稍后会出现在列表中';
+      showToast(agentId ? `${message} (${agentId})` : message, 'success');
+      if (onSuccess) onSuccess();
+    } else {
+      showToast(`启动失败: ${data.error}`, 'error');
+    }
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+  btn.disabled = false; btn.textContent = '启动';
+}
+
+async function startNewAgent() {
+  doStartAgent(
+    document.getElementById('newAgentCwd'),
+    document.getElementById('newAgentName'),
+    document.getElementById('newAgentPrompt'),
+    document.querySelector('#newAgentForm .agent-form-submit'),
+    hideNewAgentForm
+  );
+}
+
+// ─── 侧边栏新建 Agent ───
+function toggleSidebarNewForm() {
+  const form = document.getElementById('sidebarNewForm');
+  const visible = form.style.display !== 'none' && form.style.display !== '';
+  form.style.display = visible ? 'none' : 'block';
+  if (!visible) document.getElementById('sbNewCwd').focus();
+  else {
+    document.getElementById('sbNewCwd').value = '';
+    document.getElementById('sbNewName').value = '';
+    document.getElementById('sbNewPrompt').value = '';
+  }
+}
+
+async function startSidebarAgent() {
+  doStartAgent(
+    document.getElementById('sbNewCwd'),
+    document.getElementById('sbNewName'),
+    document.getElementById('sbNewPrompt'),
+    document.getElementById('sbNewSubmit'),
+    toggleSidebarNewForm
+  );
+}
+
+async function renameAgent(agentId, tmuxSession) {
+  const newName = prompt(`重命名 Agent\n当前: ${agentId}\n\n输入新名称:`, agentId);
+  if (!newName || newName === agentId) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/agent/rename`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: tmuxSession || agentId, newName }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`已重命名: ${data.newName}`, 'success'); renderSidebarAgents(); }
+    else showToast(`重命名失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function cloneAgent(agentId) {
+  if (!confirm(`从 "${agentId}" 分叉新会话？\n新会话将继承完整对话历史。`)) return;
+  try {
+    showToast('正在分叉会话...', 'info');
+    const res = await fetch(`${API_BASE}/api/cam/agent/clone`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId }),
+    });
+    const data = await res.json();
+    if (data.ok) {
+      const name = data.new_agent_id || data.new_tmux_session || 'fork';
+      showToast(`分身已启动: ${name}`, 'success');
+    } else {
+      showToast(`分身失败: ${data.error}`, 'error');
+    }
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function deleteAgent(agentId, tmuxSession) {
+  if (!confirm(`确认删除 "${agentId}"？\n将从监控列表移除并终止 tmux 会话。`)) return;
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/agent/delete`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId: tmuxSession || agentId, killSession: true }),
+    });
+    const data = await res.json();
+    if (data.ok) { showToast(`已删除: ${agentId}`, 'success'); renderAgents(); renderSidebarAgents(); }
+    else showToast(`删除失败: ${data.error}`, 'error');
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); }
+}
+
+async function reply(agentId, input) {
+  const btns = event.target.closest('.actions')?.querySelectorAll('.btn');
+  btns?.forEach(b => b.disabled = true);
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/reply`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ agentId, input }),
+    });
+    const data = await res.json();
+    if (data.ok) showToast(`已发送: ${input}`, 'success');
+    else { showToast(`失败: ${data.error}`, 'error'); btns?.forEach(b => b.disabled = false); }
+  } catch (e) { showToast(`网络错误: ${e.message}`, 'error'); btns?.forEach(b => b.disabled = false); }
+}
+function toggleCustom(agentId) {
+  const row = document.getElementById(`custom-${agentId}`);
+  if (row) { row.classList.toggle('show'); if (row.classList.contains('show')) row.querySelector('input')?.focus(); }
+}
+function sendCustom(agentId) {
+  const input = document.getElementById(`input-${agentId}`)?.value?.trim();
+  if (!input) return;
+  reply(agentId, input);
+}
+
+// ─── Utils ───
+function copyText(text, el) {
+  navigator.clipboard.writeText(text).then(() => {
+    if (el) { el.innerHTML = '&#x2705;'; el.classList.add('copied'); setTimeout(() => { el.innerHTML = '&#x1F4CB;'; el.classList.remove('copied'); }, 1500); }
+    showToast(`已复制: ${text}`, 'success');
+  }).catch(() => {
+    // fallback for older browsers
+    const ta = document.createElement('textarea'); ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select(); document.execCommand('copy'); document.body.removeChild(ta);
+    showToast(`已复制: ${text}`, 'success');
+  });
+}
+function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;') : ''; }
+function esc2(s) { return esc(s).replace(/'/g, '&#39;'); }
+function stripAnsi(s) { return s.replace(/\x1b\[[0-9;]*[a-zA-Z]/g, '').replace(/\x1b\][^\x07]*\x07/g, ''); }
+
+// ANSI → HTML 转换
+function ansiToHtml(raw) {
+  // 先去掉 OSC 序列（标题设置等）
+  let s = raw.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '');
+  // HTML 转义
+  s = s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+  const COLORS = [
+    '#1e1e1e','#f85149','#3fb950','#d29922','#58a6ff','#bc8cff','#39c5cf','#e6edf3',  // 0-7
+    '#484f58','#ff7b72','#56d364','#e3b341','#79c0ff','#d2a8ff','#56d4dd','#ffffff',    // 8-15 (bright)
+  ];
+
+  let out = '', open = false;
+  const parts = s.split(/\x1b\[/);
+  out += parts[0]; // 第一段无 CSI 前缀
+
+  for (let i = 1; i < parts.length; i++) {
+    const m = parts[i].match(/^([0-9;]*)([a-zA-Z])([\s\S]*)$/);
+    if (!m) { out += parts[i]; continue; }
+    const codes = m[1] ? m[1].split(';').map(Number) : [0];
+    const cmd = m[2];
+    const text = m[3];
+
+    if (cmd === 'm') {
+      // SGR — 只处理颜色和基础样式
+      let fg = null, bg = null, bold = false, dim = false, italic = false, underline = false, strike = false, reset = false;
+
+      for (let j = 0; j < codes.length; j++) {
+        const c = codes[j];
+        if (c === 0) { reset = true; bold = false; dim = false; italic = false; underline = false; strike = false; fg = null; bg = null; }
+        else if (c === 1) bold = true;
+        else if (c === 2) dim = true;
+        else if (c === 3) italic = true;
+        else if (c === 4) underline = true;
+        else if (c === 9) strike = true;
+        else if (c >= 30 && c <= 37) fg = COLORS[c - 30];
+        else if (c >= 90 && c <= 97) fg = COLORS[c - 90 + 8];
+        else if (c >= 40 && c <= 47) bg = COLORS[c - 40];
+        else if (c >= 100 && c <= 107) bg = COLORS[c - 100 + 8];
+        else if (c === 39) fg = null;
+        else if (c === 49) bg = null;
+        // 256-color: ESC[38;5;Nm
+        else if (c === 38 && codes[j+1] === 5) { fg = ansi256(codes[j+2]); j += 2; }
+        else if (c === 48 && codes[j+1] === 5) { bg = ansi256(codes[j+2]); j += 2; }
+        // 24-bit: ESC[38;2;R;G;Bm
+        else if (c === 38 && codes[j+1] === 2) { fg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4; }
+        else if (c === 48 && codes[j+1] === 2) { bg = `rgb(${codes[j+2]},${codes[j+3]},${codes[j+4]})`; j += 4; }
+      }
+
+      if (open) { out += '</span>'; open = false; }
+      if (reset && !fg && !bg && !bold && !dim && !italic && !underline && !strike) {
+        out += text;
+        continue;
+      }
+
+      const styles = [];
+      if (fg) styles.push(`color:${fg}`);
+      if (bg) styles.push(`background:${bg}`);
+      if (bold) styles.push('font-weight:700');
+      if (dim) styles.push('opacity:0.6');
+      if (italic) styles.push('font-style:italic');
+      if (underline) styles.push('text-decoration:underline');
+      if (strike) styles.push('text-decoration:line-through');
+
+      if (styles.length) {
+        out += `<span style="${styles.join(';')}">`;
+        open = true;
+      }
+      out += text;
+    } else {
+      // 非 SGR 的 CSI 序列（光标移动等），丢弃控制码，保留后面文本
+      out += text;
+    }
+  }
+  if (open) out += '</span>';
+  return out;
+}
+
+// 256 色查表
+function ansi256(n) {
+  if (n < 16) {
+    const C = [
+      '#1e1e1e','#f85149','#3fb950','#d29922','#58a6ff','#bc8cff','#39c5cf','#e6edf3',
+      '#484f58','#ff7b72','#56d364','#e3b341','#79c0ff','#d2a8ff','#56d4dd','#ffffff',
+    ];
+    return C[n] || '#e6edf3';
+  }
+  if (n < 232) {
+    const i = n - 16;
+    const r = Math.floor(i / 36), g = Math.floor((i % 36) / 6), b = i % 6;
+    const v = c => c ? c * 40 + 55 : 0;
+    return `rgb(${v(r)},${v(g)},${v(b)})`;
+  }
+  const g = 8 + (n - 232) * 10;
+  return `rgb(${g},${g},${g})`;
+}
+function formatDuration(ms) {
+  const s = Math.floor(ms / 1000);
+  if (s < 60) return `${s}秒`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}分钟`;
+  const h = Math.floor(m / 60);
+  return `${h}小时${m % 60}分`;
+}
+function showToast(msg, type) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.className = `toast show ${type}`;
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+// ─── Hash navigation ───
+window.addEventListener('popstate', () => {
+  const hash = location.hash.replace('#', '') || 'portal';
+  if (hash.startsWith('terminal/')) {
+    if (currentAgent) closeTerminal(true);
+    const sessionName = hash.substring('terminal/'.length);
+    waitForStateAndOpenTerminal(sessionName);
+  } else {
+    if (currentAgent) closeTerminal(true);
+    if (['portal', 'agents', 'chat', 'knowledge', 'kb-chat'].includes(hash)) navigateTo(hash, true);
+  }
+});
+
+// ─── Init ───
+(async () => {
+  try {
+    const res = await fetch(`${API_BASE}/api/cam/state`);
+    if (res.ok) { enterApp(); return; }
+  } catch {}
+  document.getElementById('loginView').style.display = 'flex';
+})();
+</script>
+</body>
+</html>

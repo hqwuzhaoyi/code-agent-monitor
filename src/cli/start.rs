@@ -203,8 +203,10 @@ mod tests {
             agent_type: "claude".to_string(),
             project_path: "/tmp".to_string(),
         };
-        let json = serde_json::to_string(&output).unwrap();
-        assert!(json.contains("cam-123"));
-        assert!(json.contains("claude"));
+        let json = serde_json::to_value(&output).unwrap();
+        assert_eq!(json["agent_id"], "cam-123");
+        assert_eq!(json["tmux_session"], "cam-123");
+        assert_eq!(json["agent_type"], "claude");
+        assert_eq!(json["project_path"], "/tmp");
     }
 }

@@ -96,8 +96,6 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
    - 权限确认（"Do you want to proceed?", "Continue?"）
    - 简单的 y/n 确认
    - 文件操作确认（"Create file?", "Overwrite?"）
-8. 检查终端输入行（❯ 提示符后）是否有未提交的文本内容（不包含 "[用户正在输入...]" 这种清理标记）
-9. 如果 agent 在等待输入（has_question=true），且输入行已有实际文本但未提交（未按回车），设置 has_pending_input = true
 </rules>
 
 <output_format>
@@ -111,7 +109,6 @@ pub fn message_extraction_prompt(terminal_content: &str) -> String {
   "context_complete": boolean, // 只要能看到完整的问题和选项就是 true
   "message_type": "choice" | "confirmation" | "open_ended" | "idle",
   "is_decision": boolean,      // 是否是决策类问题（方案选择、架构设计、技术栈选择、实现策略等）
-  "has_pending_input": boolean, // 输入行（❯ 之后）是否有未提交的文本
   "agent_status": "completed" | "idle" | "waiting",
   "last_action": string | null
 }}
@@ -181,7 +178,6 @@ mod tests {
         assert!(prompt.contains("error_message"));
         assert!(prompt.contains("fingerprint"));
         assert!(prompt.contains("context_complete"));
-        assert!(prompt.contains("has_pending_input"));
     }
 
     #[test]
