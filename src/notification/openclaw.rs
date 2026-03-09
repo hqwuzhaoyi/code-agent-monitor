@@ -27,18 +27,6 @@ use std::process::Command;
 use std::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-/// 检查 agent 是否有关联的 tmux 会话
-/// 没有 tmux 会话的 agent 无法远程回复，不发送通知
-/// 未找到 agent 时默认返回 true（宁可多发不可漏发）
-fn has_tmux_session(agent_id: &str) -> bool {
-    use crate::agent::AgentManager;
-    let manager = AgentManager::new();
-    match manager.get_agent(agent_id) {
-        Ok(Some(agent)) => !agent.tmux_session.is_empty(),
-        _ => true, // 未找到或出错时默认允许通知
-    }
-}
-
 /// 记录到 hook.log
 fn log_to_hook_file(message: &str) {
     let log_path = dirs::home_dir()
@@ -94,6 +82,8 @@ pub struct OpenclawNotifier {
     /// Optional defaults for webhook delivery routing
     webhook_default_channel: Option<String>,
     webhook_default_to: Option<String>,
+    /// NAS Bridge URL (统一消息中枢)
+    bridge_url: Option<String>,
     /// Payload 构建器
     payload_builder: PayloadBuilder,
     /// 通知去重器
@@ -110,6 +100,7 @@ impl OpenclawNotifier {
             webhook_client: None,
             webhook_default_channel: None,
             webhook_default_to: None,
+            bridge_url: Self::load_bridge_url(),
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
         }
@@ -127,9 +118,71 @@ impl OpenclawNotifier {
             webhook_client: Some(webhook_client),
             webhook_default_channel,
             webhook_default_to,
+            bridge_url: Self::load_bridge_url(),
             payload_builder: PayloadBuilder::new(),
             deduplicator: Mutex::new(NotificationDeduplicator::new()),
         })
+    }
+
+    /// 从 config.json 加载 NAS bridge URL
+    fn load_bridge_url() -> Option<String> {
+        let config_path = dirs::home_dir()?
+            .join(".config")
+            .join("code-agent-monitor")
+            .join("config.json");
+        let content = std::fs::read_to_string(&config_path).ok()?;
+        let json: serde_json::Value = serde_json::from_str(&content).ok()?;
+        json.get("bridge")
+            .and_then(|b| b.get("url"))
+            .and_then(|v| v.as_str())
+            .map(|s| s.to_string())
+    }
+
+    /// 发送通知到 NAS Bridge（统一消息中枢）
+    fn send_to_bridge(&self, payload: &serde_json::Value) -> anyhow::Result<()> {
+        let bridge_url = self
+            .bridge_url
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("bridge URL not configured"))?;
+
+        let url = format!("{}/cam/notify", bridge_url);
+
+        let client = reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_secs(10))
+            .build()
+            .map_err(|e| anyhow::anyhow!("Failed to create HTTP client: {}", e))?;
+
+        let response = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .json(payload)
+            .send()
+            .map_err(|e| anyhow::anyhow!("Bridge request failed: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().unwrap_or_default();
+            anyhow::bail!("Bridge HTTP {}: {}", status.as_u16(), body.trim());
+        }
+
+        let result: serde_json::Value = response
+            .json()
+            .map_err(|e| anyhow::anyhow!("Bridge response parse failed: {}", e))?;
+
+        if result.get("ok").and_then(|v| v.as_bool()).unwrap_or(false) {
+            let action = result
+                .get("action")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            info!(action = %action, "Bridge handled notification");
+            Ok(())
+        } else {
+            let err = result
+                .get("error")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown error");
+            anyhow::bail!("Bridge error: {}", err)
+        }
     }
 
     /// 设置 dry-run 模式
@@ -207,16 +260,17 @@ impl OpenclawNotifier {
         pattern_or_path: &str,
         context: &str,
     ) -> Result<SendResult> {
-        // 无 tmux 会话的 agent 不发送通知（无法远程回复）
-        if !has_tmux_session(agent_id) {
+        // 外部会话（ext-xxx）不发送通知
+        // 原因：外部会话无法远程回复，通知只会造成打扰
+        if agent_id.starts_with("ext-") {
             if self.dry_run {
                 eprintln!(
-                    "[DRY-RUN] No tmux session (cannot reply remotely), skipping: {} {}",
+                    "[DRY-RUN] External session (cannot reply remotely), skipping: {} {}",
                     agent_id, event_type
                 );
             }
-            debug!(agent_id = %agent_id, event_type = %event_type, "Skipping notification - no tmux session");
-            return Ok(SendResult::Skipped("no tmux session".to_string()));
+            debug!(agent_id = %agent_id, event_type = %event_type, "Skipping external session notification");
+            return Ok(SendResult::Skipped("external session".to_string()));
         }
 
         let urgency = get_urgency(event_type, context);
@@ -278,17 +332,19 @@ impl OpenclawNotifier {
 
         let agent_id = &event.agent_id;
 
-        // 无 tmux 会话的 agent 不发送通知（无法远程回复）
-        if !has_tmux_session(agent_id) {
-            debug!(agent_id = %agent_id, "Skipping notification - no tmux session");
-            return Ok(SendResult::Skipped("no tmux session".to_string()));
+        // 外部会话不发送通知
+        if agent_id.starts_with("ext-") {
+            debug!(agent_id = %agent_id, "Skipping external session notification");
+            return Ok(SendResult::Skipped("external session".to_string()));
         }
 
-        // 检测处理中状态
-        if let Some(ref snapshot) = event.terminal_snapshot {
-            if is_processing(snapshot) {
-                debug!(agent_id = %agent_id, "Skipping notification - agent is processing");
-                return Ok(SendResult::Skipped("agent processing".to_string()));
+        // 检测处理中状态（需要 AI，受 no_ai 控制）
+        if !self.no_ai {
+            if let Some(ref snapshot) = event.terminal_snapshot {
+                if is_processing(snapshot) {
+                    debug!(agent_id = %agent_id, "Skipping notification - agent is processing");
+                    return Ok(SendResult::Skipped("agent processing".to_string()));
+                }
             }
         }
 
@@ -369,7 +425,7 @@ impl OpenclawNotifier {
                         | NotificationEventType::PermissionRequest { .. }
                 ) {
                     match extract_message_from_snapshot(snapshot) {
-                        Some((message, fingerprint, is_decision_required, _has_pending_input)) => {
+                        Some((message, fingerprint, is_decision_required)) => {
                             // 检查是否是错误消息，如果是则升级为 Error 事件
                             if message.starts_with("ERROR: ") {
                                 let error_msg = message.strip_prefix("ERROR: ").unwrap_or(&message).to_string();
@@ -422,9 +478,25 @@ impl OpenclawNotifier {
             return Ok(SendResult::Sent);
         }
 
-        // If a webhook is configured, prefer it (single-channel delivery).
-        // This is especially important for reply-required events so OpenClaw hooks/skills can run.
-        self.send_via_gateway_async(&payload.to_json())?;
+        // 1. 本地直发钉钉（唯一的钉钉发送源，避免多处重复）
+        {
+            let dingtalk_msg = payload.to_telegram_message();
+            crate::notification::dingtalk::try_send_to_user(&dingtalk_msg);
+        }
+
+        // 2. 发送到 NAS Bridge（仅用于 Dashboard 状态更新 + 自动审批 + pending 管理）
+        //    Bridge 不再发钉钉，失败不影响通知送达
+        {
+            let bridge_payload = payload.to_json();
+            match self.send_to_bridge(&bridge_payload) {
+                Ok(()) => {
+                    debug!(agent_id = %agent_id, "Event sent to NAS bridge (dashboard only)");
+                }
+                Err(e) => {
+                    debug!(error = %e, "NAS bridge unavailable (dingtalk already sent directly)");
+                }
+            }
+        }
 
         // 记录详细的发送内容到 hook.log
         log_to_hook_file(&format!(
@@ -531,15 +603,10 @@ impl OpenclawNotifier {
         Ok(SendResult::Sent)
     }
 
-    /// 发送 system event 到 Gateway 并等待 Agent 处理
+    /// 发送 system event 到 Gateway
     ///
-    /// 使用 --expect-final 等待 Agent 完成处理，确保通知被发送到用户
+    /// 优先使用 webhook HTTP，失败时回退到 openclaw CLI
     fn send_via_gateway_async(&self, payload: &serde_json::Value) -> Result<()> {
-        // 如果配置了 webhook client，优先使用 webhook
-        if let Some(ref _client) = self.webhook_client {
-            return self.send_via_webhook(payload);
-        }
-
         if self.dry_run {
             eprintln!("[DRY-RUN] Would send via system event");
             eprintln!(
@@ -549,10 +616,22 @@ impl OpenclawNotifier {
             return Ok(());
         }
 
+        if let Some(ref _client) = self.webhook_client {
+            match self.send_via_webhook(payload) {
+                Ok(()) => return Ok(()),
+                Err(e) => {
+                    warn!(error = %e, "Webhook failed, falling back to openclaw CLI");
+                }
+            }
+        }
+
+        self.send_via_cli(payload)
+    }
+
+    /// 通过 openclaw system event CLI 发送
+    fn send_via_cli(&self, payload: &serde_json::Value) -> Result<()> {
         let payload_text = payload.to_string();
 
-        // 使用阻塞执行，确保获取失败原因
-        // 超时设置为 60 秒，足够 Agent 处理并发送通知
         let output = Command::new(&self.openclaw_cmd)
             .args([
                 "system",
@@ -561,9 +640,6 @@ impl OpenclawNotifier {
                 &payload_text,
                 "--mode",
                 "now",
-                "--expect-final",
-                "--timeout",
-                "60000",
             ])
             .output();
 
@@ -573,12 +649,12 @@ impl OpenclawNotifier {
                     Ok(())
                 } else {
                     let stderr = String::from_utf8_lossy(&out.stderr);
-                    error!(status = ?out.status, stderr = %stderr, "System event command failed");
-                    Err(anyhow::anyhow!("System event command failed: {}", stderr))
+                    error!(status = ?out.status, stderr = %stderr, "System event CLI failed");
+                    Err(anyhow::anyhow!("System event CLI failed: {}", stderr))
                 }
             }
             Err(e) => {
-                error!(error = %e, "Failed to run system event");
+                error!(error = %e, "Failed to run openclaw CLI");
                 Err(e.into())
             }
         }
@@ -697,10 +773,14 @@ mod tests {
     }
 
     #[test]
+    fn test_get_urgency_stop_is_medium() {
+        // stop/session_end 是 MEDIUM（通知用户 agent 完成了任务）
+        assert_eq!(get_urgency("stop", ""), Urgency::Medium);
+        assert_eq!(get_urgency("session_end", ""), Urgency::Medium);
+    }
+
+    #[test]
     fn test_get_urgency_low() {
-        // stop/session_end 是 LOW（用户自己触发的，无需通知）
-        assert_eq!(get_urgency("stop", ""), Urgency::Low);
-        assert_eq!(get_urgency("session_end", ""), Urgency::Low);
         assert_eq!(get_urgency("session_start", ""), Urgency::Low);
         // ToolUse 是 LOW（太频繁，静默处理）
         assert_eq!(get_urgency("ToolUse", ""), Urgency::Low);
@@ -882,18 +962,19 @@ $ cargo build
     }
 
     #[test]
-    fn test_stop_event_without_question_stays_low() {
-        let notifier = OpenclawNotifier::new().with_dry_run(true);
+    fn test_stop_event_without_question_is_medium() {
+        let notifier = OpenclawNotifier::new().with_dry_run(true).with_no_ai(true);
 
         // 创建一个不包含问题的 stop 事件
         let event = NotificationEvent::new("cam-test".to_string(), NotificationEventType::Stop)
             .with_project_path("/workspace/test")
-            .with_terminal_snapshot("Task completed successfully.\n\n❯ ");
+            .with_terminal_snapshot("Task completed successfully.\n\n❯ ")
+            .with_skip_dedup(true);
 
         let result = notifier.send_notification_event(&event);
 
-        // 应该被跳过（LOW urgency）
-        assert!(matches!(result, Ok(SendResult::Skipped(_))));
+        // stop 现在是 MEDIUM urgency，dry_run 模式下应该返回 Sent
+        assert!(matches!(result, Ok(SendResult::Sent)));
     }
 
     // ==================== Empty snapshot dedup key tests ====================

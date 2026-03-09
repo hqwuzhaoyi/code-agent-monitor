@@ -5,9 +5,14 @@
 
 use anyhow::{anyhow, Result};
 use chrono::{DateTime, Utc};
+use fs2::FileExt;
 use serde::{Deserialize, Serialize};
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+
+/// Global counter for generating unique temp file names across threads.
+static TEMP_FILE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 use super::discovery::{TeamConfig, TeamMember};
 
@@ -79,6 +84,17 @@ impl std::fmt::Display for AgentId {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TeamTaskSummary {
+    pub id: String,
+    pub subject: String,
+    pub status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(default)]
+    pub blocked_by: Vec<String>,
+}
+
 /// Team 状态
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TeamStatus {
@@ -147,6 +163,80 @@ impl TeamBridge {
     /// 获取 tasks 目录路径
     fn get_tasks_dir(&self, team: &str) -> PathBuf {
         self.tasks_dir.join(team)
+    }
+
+    pub fn read_team_tasks(&self, team: &str) -> Vec<TeamTaskSummary> {
+        let tasks_dir = self.get_tasks_dir(team);
+        if !tasks_dir.exists() {
+            return Vec::new();
+        }
+
+        let mut tasks = Vec::new();
+        let Ok(entries) = fs::read_dir(&tasks_dir) else {
+            return tasks;
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() || !path.extension().is_some_and(|ext| ext == "json") {
+                continue;
+            }
+
+            let Ok(content) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let Ok(task) = serde_json::from_str::<serde_json::Value>(&content) else {
+                continue;
+            };
+
+            let file_stem = path
+                .file_stem()
+                .and_then(|name| name.to_str())
+                .unwrap_or_default()
+                .to_string();
+            let id = task
+                .get("id")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .unwrap_or(&file_stem)
+                .to_string();
+            let subject = task
+                .get("subject")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .unwrap_or(&id)
+                .to_string();
+            let status = task
+                .get("status")
+                .and_then(|v| v.as_str())
+                .unwrap_or("pending")
+                .to_string();
+            let owner = task
+                .get("owner")
+                .and_then(|v| v.as_str())
+                .filter(|v| !v.is_empty())
+                .map(|v| v.to_string());
+            let blocked_by = task
+                .get("blockedBy")
+                .and_then(|v| v.as_array())
+                .map(|items| {
+                    items
+                        .iter()
+                        .filter_map(|item| item.as_str().map(|s| s.to_string()))
+                        .collect::<Vec<_>>()
+                })
+                .unwrap_or_default();
+
+            tasks.push(TeamTaskSummary {
+                id,
+                subject,
+                status,
+                owner,
+                blocked_by,
+            });
+        }
+
+        tasks
     }
 
     /// 创建新 Team
@@ -284,21 +374,45 @@ impl TeamBridge {
             return Err(anyhow!("Team '{}' does not exist", team));
         }
 
-        // 读取现有消息
-        let mut messages: Vec<InboxMessage> = if inbox_path.exists() {
-            let content = fs::read_to_string(&inbox_path)?;
-            serde_json::from_str(&content).unwrap_or_default()
-        } else {
-            Vec::new()
-        };
+        // Use a dedicated lock file (stable inode) instead of locking the data file,
+        // because fs::rename replaces the data file inode and invalidates locks on it.
+        let lock_path = inbox_path.with_extension("lock");
+        let lock_file = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(false)
+            .open(&lock_path)?;
+        lock_file.lock_exclusive()?;
 
-        // 添加新消息
-        messages.push(message);
+        let result = (|| -> Result<()> {
+            let mut messages: Vec<InboxMessage> = if inbox_path.exists() {
+                let content = fs::read_to_string(&inbox_path)?;
+                serde_json::from_str(&content).unwrap_or_default()
+            } else {
+                Vec::new()
+            };
 
-        // 写回文件
-        fs::write(&inbox_path, serde_json::to_string_pretty(&messages)?)?;
+            messages.push(message);
 
-        Ok(())
+            // Use a unique temp file per write to avoid collisions between threads
+            // waiting on the lock.
+            let seq = TEMP_FILE_COUNTER.fetch_add(1, Ordering::Relaxed);
+            let temp_path = inbox_path.with_extension(format!(
+                "tmp.{}.{}",
+                std::process::id(),
+                seq
+            ));
+            {
+                let mut temp_file = File::create(&temp_path)?;
+                serde_json::to_writer_pretty(&mut temp_file, &messages)?;
+            }
+            fs::rename(&temp_path, &inbox_path)?;
+
+            Ok(())
+        })();
+
+        lock_file.unlock()?;
+        result
     }
 
     /// 读取成员 inbox
@@ -409,34 +523,15 @@ impl TeamBridge {
         }
 
         // 统计任务
-        let tasks_dir = self.get_tasks_dir(team);
-        let (pending_tasks, completed_tasks) = if tasks_dir.exists() {
-            let mut pending = 0;
-            let mut completed = 0;
-
-            if let Ok(entries) = fs::read_dir(&tasks_dir) {
-                for entry in entries.flatten() {
-                    let path = entry.path();
-                    if path.is_file() && path.extension().is_some_and(|e| e == "json") {
-                        if let Ok(content) = fs::read_to_string(&path) {
-                            if let Ok(task) = serde_json::from_str::<serde_json::Value>(&content) {
-                                let status =
-                                    task.get("status").and_then(|s| s.as_str()).unwrap_or("");
-                                match status {
-                                    "pending" | "in_progress" => pending += 1,
-                                    "completed" => completed += 1,
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            (pending, completed)
-        } else {
-            (0, 0)
-        };
+        let tasks = self.read_team_tasks(team);
+        let pending_tasks = tasks
+            .iter()
+            .filter(|task| matches!(task.status.as_str(), "pending" | "in_progress"))
+            .count();
+        let completed_tasks = tasks
+            .iter()
+            .filter(|task| task.status == "completed")
+            .count();
 
         Ok(TeamStatus {
             team_name: team.to_string(),
@@ -859,6 +954,47 @@ mod tests {
                 thread_messages.len()
             );
         }
+    }
+
+    #[test]
+    fn test_send_to_inbox_uses_isolated_temp_files_per_write() {
+        use std::sync::Arc;
+        use std::thread;
+
+        let temp = tempdir().unwrap();
+        let bridge = Arc::new(TeamBridge::new_with_base_dir(temp.path().to_path_buf()));
+
+        bridge
+            .create_team("temp-file-test", "Test", "/path")
+            .unwrap();
+
+        let handles: Vec<_> = (0..8)
+            .map(|thread_id| {
+                let bridge = Arc::clone(&bridge);
+                thread::spawn(move || {
+                    for msg_id in 0..25 {
+                        let message = InboxMessage {
+                            from: format!("thread-{}", thread_id),
+                            text: format!("Message {}", msg_id),
+                            summary: None,
+                            timestamp: Utc::now(),
+                            color: None,
+                            read: false,
+                        };
+                        bridge
+                            .send_to_inbox("temp-file-test", "developer", message)
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+
+        for handle in handles {
+            handle.join().unwrap();
+        }
+
+        let messages = bridge.read_inbox("temp-file-test", "developer").unwrap();
+        assert_eq!(messages.len(), 200);
     }
 
     /// TDD Test: Unified agent ID handling

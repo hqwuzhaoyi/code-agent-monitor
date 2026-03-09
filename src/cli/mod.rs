@@ -2,6 +2,7 @@
 
 pub mod bootstrap;
 pub mod codex_notify;
+pub mod fork;
 pub mod output;
 pub mod setup;
 pub mod start;
@@ -9,6 +10,7 @@ pub mod summary;
 
 pub use bootstrap::*;
 pub use codex_notify::*;
+pub use fork::*;
 pub use output::*;
 pub use setup::*;
 pub use start::*;

@@ -5,7 +5,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use code_agent_monitor::{
-    cli::{BootstrapArgs, CodexNotifyArgs, SetupArgs, StartArgs},
+    cli::{handle_fork, BootstrapArgs, CodexNotifyArgs, ForkArgs, SetupArgs, StartArgs},
     discover_teams, get_team_members, list_tasks, list_team_names, AgentManager, AgentWatcher,
     BatchFilter, ConversationStateManager, InboxMessage, LaunchdService, McpServer,
     NotificationEvent, NotificationEventType, OpenclawNotifier, ProcessScanner, ReplyResult,
@@ -289,6 +289,8 @@ enum Commands {
     },
     /// 卸载 watcher 服务（cam service uninstall 的快捷方式）
     Uninstall,
+    /// 从现有 agent 会话分叉（继承完整对话历史）
+    Fork(ForkArgs),
 }
 
 #[derive(Subcommand)]
@@ -989,9 +991,17 @@ async fn main() -> Result<()> {
                         }
                     }
                     "AgentExited" => NotificationEventType::AgentExited,
-                    "Error" => NotificationEventType::Error {
-                        message: context.clone(),
-                    },
+                    "Error" => {
+                        let error_msg = json
+                            .as_ref()
+                            .and_then(|j| j.get("error"))
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_else(|| context.trim())
+                            .to_string();
+                        NotificationEventType::Error {
+                            message: error_msg,
+                        }
+                    }
                     "stop" => NotificationEventType::Stop,
                     "session_start" => NotificationEventType::SessionStart,
                     "session_end" => NotificationEventType::SessionEnd,
@@ -1080,17 +1090,10 @@ async fn main() -> Result<()> {
                         }
                     }
 
-                    // 如果是 session_end/stop 事件且该会话没有 tmux，会话结束后清理记录
-                    let should_cleanup_no_tmux = if event == "session_end" || event == "stop" {
-                        match agent_manager.get_agent(&resolved_agent_id) {
-                            Ok(Some(agent)) => agent.tmux_session.is_empty(),
-                            _ => false,
-                        }
-                    } else {
-                        false
-                    };
-
-                    if should_cleanup_no_tmux {
+                    // 如果是 session_end/stop 事件且是外部会话（ext-xxx），清理记录
+                    if (event == "session_end" || event == "stop")
+                        && resolved_agent_id.starts_with("ext-")
+                    {
                         let cleanup_timestamp = chrono::Local::now().format("%Y-%m-%d %H:%M:%S");
                         if let Err(e) = agent_manager.remove_agent(&resolved_agent_id) {
                             if let Ok(mut file) =
@@ -1098,7 +1101,7 @@ async fn main() -> Result<()> {
                             {
                                 let _ = writeln!(
                                     file,
-                                    "[{}] ⚠️ Failed to cleanup no-tmux session {}: {}",
+                                    "[{}] ⚠️ Failed to cleanup external session {}: {}",
                                     cleanup_timestamp, resolved_agent_id, e
                                 );
                             }
@@ -1107,7 +1110,7 @@ async fn main() -> Result<()> {
                         {
                             let _ = writeln!(
                                 file,
-                                "[{}] ✅ Cleaned up no-tmux session {}",
+                                "[{}] ✅ Cleaned up external session {}",
                                 cleanup_timestamp, resolved_agent_id
                             );
                         }
@@ -1838,6 +1841,12 @@ async fn main() -> Result<()> {
                     eprintln!("❌ 卸载失败: {}", e);
                     std::process::exit(1);
                 }
+            }
+        }
+        Commands::Fork(args) => {
+            if let Err(e) = handle_fork(args) {
+                eprintln!("❌ Fork 失败: {}", e);
+                std::process::exit(1);
             }
         }
     }

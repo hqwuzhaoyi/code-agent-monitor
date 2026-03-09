@@ -20,6 +20,7 @@
 use chrono::Utc;
 use serde_json;
 
+use super::progress::ProgressSnapshot;
 use super::summarizer::NotificationSummarizer;
 use super::urgency::Urgency;
 
@@ -140,6 +141,10 @@ impl PayloadBuilder {
                 snapshot.to_string()
             };
             payload["terminal_snapshot"] = serde_json::Value::String(truncated);
+        }
+
+        if let Some(progress) = ProgressSnapshot::from_agent(agent_id) {
+            payload["progress"] = serde_json::to_value(progress).unwrap_or_default();
         }
 
         payload

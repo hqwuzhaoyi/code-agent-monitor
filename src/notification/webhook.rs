@@ -2,7 +2,7 @@
 //!
 //! 通过 HTTP Webhook 调用 OpenClaw Gateway API
 
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
@@ -120,11 +120,33 @@ pub struct WebhookClient {
     config: WebhookConfig,
 }
 
+fn is_nonsecure_remote_gateway_url(url: &str) -> bool {
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+
+    if parsed.scheme() != "http" {
+        return false;
+    }
+
+    let Some(host) = parsed.host_str() else {
+        return false;
+    };
+
+    !matches!(host, "localhost" | "127.0.0.1" | "::1")
+}
+
 impl WebhookClient {
     /// 创建新的 Webhook 客户端
     pub fn new(config: WebhookConfig) -> Result<Self, String> {
         if config.hook_token.is_empty() {
             return Err("hook_token is required".to_string());
+        }
+
+        if is_nonsecure_remote_gateway_url(&config.gateway_url) {
+            eprintln!(
+                "warning: webhook.gateway_url uses non-HTTPS remote HTTP. CAM webhook delivery may work, but OpenClaw browser Control UI can require HTTPS or localhost secure context."
+            );
         }
 
         let client = Client::builder()
@@ -173,6 +195,12 @@ impl WebhookClient {
             .json(&payload)
             .send()
             .map_err(|e| format!("HTTP request failed: {}", e))?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().unwrap_or_default();
+            return Err(format!("HTTP {}: {}", status.as_u16(), body.trim()));
+        }
 
         let webhook_response: WebhookResponse = response
             .json()
@@ -283,6 +311,15 @@ mod tests {
         let result = WebhookClient::new(config);
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("hook_token"));
+    }
+
+    #[test]
+    fn test_detects_nonsecure_remote_gateway_url() {
+        assert!(is_nonsecure_remote_gateway_url("http://192.168.1.10:18789"));
+        assert!(is_nonsecure_remote_gateway_url("http://nas.local:18789"));
+        assert!(!is_nonsecure_remote_gateway_url("http://localhost:18789"));
+        assert!(!is_nonsecure_remote_gateway_url("http://127.0.0.1:18789"));
+        assert!(!is_nonsecure_remote_gateway_url("https://openclaw.example.com"));
     }
 
     #[test]

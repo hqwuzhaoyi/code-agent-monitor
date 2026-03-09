@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::notification::event::{NotificationEvent, NotificationEventType};
+use crate::notification::progress::ProgressSnapshot;
 use crate::notification::summarizer::NotificationSummarizer;
 use crate::notification::urgency::Urgency;
 
@@ -35,6 +36,9 @@ pub struct SystemEventPayload {
     pub event_data: EventData,
     /// 上下文信息
     pub context: EventContext,
+    /// 任务进度快照（可选，有 team 任务数据时存在）
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<ProgressSnapshot>,
 }
 
 /// 事件数据
@@ -199,6 +203,7 @@ impl SystemEventPayload {
                 question_fingerprint: None,
                 risk_level,
             },
+            progress: ProgressSnapshot::from_agent(&event.agent_id),
         }
     }
 
@@ -231,17 +236,25 @@ impl SystemEventPayload {
         self.context.question_fingerprint = Some(fingerprint);
     }
 
-    /// 转换为 Telegram 消息格式
+    /// 转换为纯文本通知消息（钉钉/Telegram 共用）
     pub fn to_telegram_message(&self) -> String {
         let emoji = match self.urgency.as_str() {
-            "HIGH" => "⚠️",
-            "MEDIUM" => "💬",
-            _ => "ℹ️",
+            "HIGH" => "🔴",
+            "MEDIUM" => "🟡",
+            _ => "🟢",
+        };
+
+        let event_label = match self.event_type.as_str() {
+            "permission_request" => "权限请求",
+            "waiting_for_input" => "等待输入",
+            "error" => "错误",
+            "agent_exited" => "Agent 退出",
+            "notification" => "通知",
+            _ => &self.event_type,
         };
 
         let event_desc = match self.event_type.as_str() {
             "permission_request" => {
-                // 优先使用 AI 提取的消息
                 if let Some(extracted) = &self.context.extracted_message {
                     extracted.clone()
                 } else if let EventData::PermissionRequest {
@@ -255,7 +268,6 @@ impl SystemEventPayload {
                         .and_then(|v| v.as_str())
                         .unwrap_or("unknown");
 
-                    // Fallback: 截取终端最后 30 行
                     let snapshot_tail = self.context.terminal_snapshot.as_ref().map(|snapshot| {
                         let lines: Vec<&str> = snapshot.lines().collect();
                         let start = lines.len().saturating_sub(30);
@@ -263,70 +275,94 @@ impl SystemEventPayload {
                     });
 
                     if let Some(tail) = snapshot_tail {
-                        format!("执行: {} {}\n\n{}", tool_name, cmd, tail)
+                        format!("{} {}\n\n{}", tool_name, cmd, tail)
                     } else {
-                        format!("执行: {} {}", tool_name, cmd)
+                        format!("{} {}", tool_name, cmd)
                     }
                 } else {
-                    "请求权限".to_string()
+                    String::new()
                 }
             }
             "waiting_for_input" => {
-                // 优先使用 AI 提取的消息
                 if let Some(extracted) = &self.context.extracted_message {
                     extracted.clone()
                 } else if let Some(snapshot) = &self.context.terminal_snapshot {
-                    // Fallback: 截取终端最后 30 行
                     let lines: Vec<&str> = snapshot.lines().collect();
                     let start = lines.len().saturating_sub(30);
-                    let preview = lines[start..].join("\n");
-                    format!("等待输入\n\n{}", preview)
+                    lines[start..].join("\n")
                 } else {
-                    "等待输入".to_string()
+                    String::new()
                 }
             }
             "notification" => {
-                // Show the actual notification message
                 if let EventData::Notification {
                     message,
                     notification_type,
                 } = &self.event_data
                 {
-                    format!("{}: {}", notification_type, message)
+                    if message.is_empty() {
+                        notification_type.clone()
+                    } else {
+                        message.clone()
+                    }
                 } else {
-                    "通知".to_string()
+                    String::new()
                 }
             }
             "error" => {
                 if let EventData::Error { message } = &self.event_data {
-                    format!("错误: {}", message)
+                    message.clone()
                 } else {
-                    "发生错误".to_string()
+                    String::new()
                 }
             }
-            "agent_exited" => "Agent 已退出".to_string(),
-            _ => self.event_type.clone(),
+            _ => String::new(),
         };
 
-        let risk = self.context.risk_level.as_str();
-
-        let risk_emoji = match risk {
-            "HIGH" => "🔴",
-            "MEDIUM" => "🟡",
-            "LOW" => "🟢",
-            _ => "⚪",
-        };
+        let project = self
+            .project_path
+            .as_deref()
+            .unwrap_or("unknown");
 
         let action_hint = match self.event_type.as_str() {
-            "permission_request" => "回复 y 允许 / n 拒绝",
-            "waiting_for_input" => "回复你的选择或输入内容",
-            _ => "无需回复",
+            "permission_request" => "\n\n💡 回复 y 允许 / n 拒绝",
+            "waiting_for_input" => "\n\n💡 回复你的选择或输入",
+            _ => "",
         };
 
-        format!(
-            "{} *CAM* {}\n\n{}\n\n风险: {} {}\n\n{}",
-            emoji, self.agent_id, event_desc, risk_emoji, risk, action_hint
-        )
+        let progress_block = if let Some(ref progress) = self.progress {
+            let mut block = format!(
+                "\n\n📊 进度: {}/{} ({}%)",
+                progress.completed_tasks, progress.total_tasks, progress.completion_rate
+            );
+            if !progress.remaining_top3.is_empty() {
+                block.push_str("\n剩余重点:");
+                for (i, item) in progress.remaining_top3.iter().enumerate() {
+                    block.push_str(&format!("\n  {}. {}", i + 1, item.subject));
+                }
+            }
+            if progress.needs_confirmation {
+                block.push_str(&format!(
+                    "\n⏳ 待确认项: {}",
+                    progress.pending_confirmations_count
+                ));
+            }
+            block
+        } else {
+            String::new()
+        };
+
+        if event_desc.is_empty() {
+            format!(
+                "{} [CAM] {}\n{} | {}\n项目: {}{}{}",
+                emoji, self.agent_id, event_label, self.urgency, project, progress_block, action_hint
+            )
+        } else {
+            format!(
+                "{} [CAM] {}\n{} | {}\n项目: {}\n\n{}{}{}",
+                emoji, self.agent_id, event_label, self.urgency, project, event_desc, progress_block, action_hint
+            )
+        }
     }
 }
 
@@ -523,22 +559,14 @@ mod tests {
         let payload = SystemEventPayload::from_event(&event, Urgency::High);
         let msg = payload.to_telegram_message();
 
-        // HIGH urgency should use warning emoji
+        // HIGH urgency uses red circle emoji
         assert!(
-            msg.contains("⚠️"),
-            "HIGH urgency telegram message should contain ⚠️ emoji, got: {}",
+            msg.contains("🔴"),
+            "HIGH urgency message should contain 🔴, got: {}",
             msg
         );
-        // Risk level should show HIGH with red circle
-        assert!(
-            msg.contains("🔴") && msg.contains("HIGH"),
-            "Decision-required message should show HIGH risk with 🔴, got: {}",
-            msg
-        );
-        // Should contain agent_id
         assert!(msg.contains("cam-tg-1"));
-        // Should contain action hint for waiting_for_input
-        assert!(msg.contains("回复你的选择或输入内容"));
+        assert!(msg.contains("回复你的选择或输入"));
     }
 
     #[test]

@@ -89,7 +89,7 @@ If you prefer to configure each piece manually, follow Steps 2a and 2b below. Ot
 
 ### Step 2a: Configure Webhook (Manual)
 
-CAM sends notifications to OpenClaw Gateway via webhook. Create the config directory and file:
+CAM sends notifications to OpenClaw Gateway via webhook. It does not own or run OpenClaw's browser Control UI. Create the config directory and file:
 
 ```bash
 mkdir -p ~/.config/code-agent-monitor
@@ -109,6 +109,24 @@ Create `~/.config/code-agent-monitor/config.json`:
 ```
 
 Replace `your-token` with your OpenClaw hook token, and `sk-ant-...` with your Anthropic API key (recommended for AI-powered monitoring).
+
+### OpenClaw on NAS / remote servers
+
+CAM can send webhooks to an OpenClaw Gateway running on a NAS or remote host. However, OpenClaw's browser-based Control UI may require a secure browser context for device identity and other privileged APIs.
+
+If you open OpenClaw UI via `http://<nas-ip>:<port>`, the browser may reject those APIs and show errors such as:
+
+`control ui requires device identity (use HTTPS or localhost secure context)`
+
+This is not a CAM webhook failure. It means the OpenClaw UI must be accessed via:
+
+- `https://your-domain-or-lan-hostname`
+- or `http://localhost` for local development only
+
+Recommended NAS deployment:
+- Put OpenClaw UI/Gateway behind Caddy, Nginx, or another HTTPS reverse proxy
+- Use a trusted certificate
+- Point CAM's `webhook.gateway_url` at the correct Gateway endpoint
 
 > **Where do I get these values?**
 > - `gateway_url`: The address of your OpenClaw Gateway (default is `http://localhost:18789`)
@@ -250,10 +268,20 @@ Key bindings:
 |---------|-------------|
 | `cam start [prompt]` | Start a new agent (optionally with an initial prompt) |
 | `cam list` | List all running agents |
+| `cam info <pid>` | Get detailed info about a specific agent process |
 | `cam kill <pid>` | Kill an agent process |
 | `cam resume <session_id>` | Attach to an agent's tmux session |
 | `cam sessions` | List historical sessions |
 | `cam logs <session_id>` | View session logs |
+| `cam fork <agent_id>` | Fork a new session from an existing agent (inherits full conversation history) |
+
+### Setup
+
+| Command | Description |
+|---------|-------------|
+| `cam bootstrap` | Interactive setup wizard (webhook, AI monitoring, hooks) |
+| `cam bootstrap --auto` | Fully automated setup using detected defaults |
+| `cam setup <agent>` | Configure hooks for an agent CLI (claude/codex/opencode) |
 
 ### Monitoring
 
@@ -261,7 +289,7 @@ Key bindings:
 |---------|-------------|
 | `cam tui` | Launch the TUI dashboard |
 | `cam watch-daemon` | Start the background watcher manually |
-| `cam setup <agent>` | Configure hooks for an agent CLI |
+| `cam serve --port <port>` | Start MCP Server mode (default port: 3000) |
 
 ### Notifications
 
@@ -272,7 +300,9 @@ Key bindings:
 | `cam pending-confirmations` | View pending permission requests |
 | `cam reply <response>` | Reply to a pending request |
 | `cam reply y --all` | Approve all pending requests |
+| `cam reply y --agent "cam-*"` | Approve requests matching agent pattern |
 | `cam reply y --risk low` | Approve all low-risk requests |
+| `cam summary` | Send status summary (only if blockers/errors exist) |
 | `cam summary --dry-run` | Preview agent status summary without sending |
 | `cam summary --always` | Send summary even if nothing needs attention |
 
@@ -281,6 +311,7 @@ Key bindings:
 | Command | Description |
 |---------|-------------|
 | `cam install` | Install watcher as a launchd service |
+| `cam install --force` | Force reinstall the service |
 | `cam uninstall` | Remove the launchd service |
 | `cam service status` | Check service status |
 | `cam service restart` | Restart the service |
@@ -291,9 +322,17 @@ Key bindings:
 | Command | Description |
 |---------|-------------|
 | `cam team-create <name>` | Create a new agent team |
+| `cam team-delete <name>` | Delete an agent team |
+| `cam team-status <team>` | Get team status (members, tasks, unread messages) |
 | `cam team-spawn <team> <name>` | Add an agent to a team |
 | `cam team-progress <team>` | View team task progress |
 | `cam team-shutdown <team>` | Shut down all agents in a team |
+| `cam teams` | List all agent teams |
+| `cam team-members <team>` | List members of a team |
+| `cam tasks [team]` | List tasks (optionally filtered by team) |
+| `cam team-watch <team>` | Watch team inbox in real-time |
+| `cam inbox <team>` | Read team member inbox messages |
+| `cam inbox-send <team> <member> <msg>` | Send a message to a member's inbox |
 
 ## Notification System
 

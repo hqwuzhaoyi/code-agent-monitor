@@ -124,8 +124,8 @@ mod constants_tests {
 
     #[test]
     fn test_default_timeout() {
-        // 默认超时应该是 5 秒
-        assert_eq!(DEFAULT_TIMEOUT_MS, 5000);
+        // 默认超时应该是 15 秒
+        assert_eq!(DEFAULT_TIMEOUT_MS, 15000);
     }
 
     #[test]

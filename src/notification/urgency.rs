@@ -82,8 +82,8 @@ pub fn get_urgency(event_type: &str, context: &str) -> Urgency {
         "waitingforinput" => Urgency::High,
         // Agent abnormal exit - need to know (might be crash or killed)
         "agentexited" => Urgency::Medium,
-        // stop/session_end - user triggered stop, no notification needed (user already knows)
-        "stop" | "sessionend" => Urgency::Low,
+        // stop/session_end - agent 完成任务，通知用户（远程场景下用户不在电脑前）
+        "stop" | "sessionend" => Urgency::Medium,
         // Startup notification - optional
         "sessionstart" => Urgency::Low,
         // Tool call - too frequent, silent processing
@@ -127,10 +127,14 @@ mod tests {
     }
 
     #[test]
+    fn test_get_urgency_stop_is_medium() {
+        // stop/session_end is MEDIUM (notify user that agent completed)
+        assert_eq!(get_urgency("stop", ""), Urgency::Medium);
+        assert_eq!(get_urgency("session_end", ""), Urgency::Medium);
+    }
+
+    #[test]
     fn test_get_urgency_low() {
-        // stop/session_end is LOW (user triggered, no notification needed)
-        assert_eq!(get_urgency("stop", ""), Urgency::Low);
-        assert_eq!(get_urgency("session_end", ""), Urgency::Low);
         assert_eq!(get_urgency("session_start", ""), Urgency::Low);
         // ToolUse is LOW (too frequent, silent processing)
         assert_eq!(get_urgency("ToolUse", ""), Urgency::Low);

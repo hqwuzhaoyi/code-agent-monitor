@@ -86,6 +86,38 @@ flowchart TB
     Dashboard --> SystemEvent
 ```
 
+## CAM vs OpenClaw UI boundary
+
+CAM responsibilities:
+- detect agent events
+- build notification payloads
+- send webhook/system events to OpenClaw Gateway or bridge
+
+OpenClaw UI responsibilities:
+- browser Control UI
+- device identity / privileged browser APIs
+- secure-context-dependent runtime behavior
+
+If CAM webhook delivery succeeds but the browser shows `control ui requires device identity`, debug OpenClaw UI deployment rather than CAM notification flow.
+
+## Troubleshooting secure-context errors
+
+1. Verify CAM delivery
+   - inspect `~/.config/code-agent-monitor/hook.log`
+   - inspect CAM service logs
+2. Verify Gateway receipt
+   - inspect OpenClaw gateway logs
+3. Verify browser secure context
+   - open DevTools Console
+   - run `window.isSecureContext`
+   - expected: `true`
+4. Verify UI origin
+   - use `https://...` or `http://localhost...`
+   - avoid `http://<nas-ip>:<port>`
+5. Verify reverse proxy and certificate
+   - trusted cert
+   - correct websocket/API forwarding
+
 ## 通知事件类型
 
 ### NotificationEventType 枚举
